@@ -31,6 +31,13 @@ interface ApiRouteInfo {
   openApiPath: string
 }
 
+function resolveExistingPath(paths: string[]): string | null {
+  for (const candidate of paths) {
+    if (fs.existsSync(candidate)) return candidate
+  }
+  return null
+}
+
 /**
  * Find all API route files and extract their OpenAPI specs.
  */
@@ -177,6 +184,311 @@ function parseOpenApiFromSource(filePath: string): Record<string, any> | null {
 }
 
 /**
+ * Generate a complete OpenAPI document by bundling route files with esbuild
+ * and executing the bundle to call buildOpenApiDocument from @open-mercato/shared.
+ *
+ * esbuild compiles TypeScript with legacy decorator support (reads experimentalDecorators
+ * from tsconfig.json), avoiding the TC39 decorator mismatch that breaks tsx-based imports.
+ * External packages (zod, mikro-orm, etc.) are resolved from node_modules at runtime.
+ */
+async function generateOpenApiViaBundle(
+  routes: ApiRouteInfo[],
+  resolver: PackageResolver,
+  quiet: boolean
+): Promise<Record<string, any> | null> {
+  let esbuild: typeof import('esbuild')
+  try {
+    esbuild = await import('esbuild')
+  } catch {
+    if (!quiet) console.log('[OpenAPI] esbuild not available, skipping bundle approach')
+    return null
+  }
+
+  const { execFileSync } = await import('node:child_process')
+
+  const rootDir = resolver.getRootDir()
+  const appDir = resolver.getAppDir()
+  const sharedPackageRoot = resolver.getPackageRoot('@open-mercato/shared')
+  const corePackageRoot = resolver.getPackageRoot('@open-mercato/core')
+  const tsconfigPath = resolveExistingPath([
+    path.join(appDir, 'tsconfig.json'),
+    path.join(rootDir, 'tsconfig.base.json'),
+    path.join(rootDir, 'tsconfig.json'),
+  ])
+  const generatorPath = path.join(sharedPackageRoot, 'src', 'lib', 'openapi', 'generator.ts')
+  const coreGeneratedRoot = path.join(corePackageRoot, 'generated')
+
+  if (!fs.existsSync(generatorPath)) {
+    if (!quiet) {
+      console.log(`[OpenAPI] Generator source not found at ${generatorPath}, skipping bundle approach`)
+    }
+    return null
+  }
+
+  const cacheDir = path.join(rootDir, 'node_modules', '.cache')
+  if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
+
+  const bundlePath = path.join(cacheDir, '_openapi-bundle.mjs')
+
+  // Build the entry script that imports all routes and calls buildOpenApiDocument
+  const importLines: string[] = [
+    `import { buildOpenApiDocument } from ${JSON.stringify(generatorPath)};`,
+  ]
+  const routeMapLines: string[] = []
+
+  for (let i = 0; i < routes.length; i++) {
+    const route = routes[i]
+    importLines.push(`import * as R${i} from ${JSON.stringify(route.path)};`)
+    // Use [param] format so normalizePath in buildOpenApiDocument extracts path params
+    const bracketPath = route.openApiPath.replace(/\{([^}]+)\}/g, '[$1]')
+    routeMapLines.push(`  [${JSON.stringify(bracketPath)}, R${i}],`)
+  }
+
+  const entryScript = `${importLines.join('\n')}
+
+const routeEntries = [
+${routeMapLines.join('\n')}
+];
+
+const modules = new Map();
+for (const [apiPath, mod] of routeEntries) {
+  const moduleId = apiPath.replace(/^\\/api\\//, '').split('/')[0];
+  if (!modules.has(moduleId)) modules.set(moduleId, { id: moduleId, apis: [] });
+  modules.get(moduleId).apis.push({
+    path: apiPath,
+    handlers: mod,
+    metadata: mod.metadata,
+  });
+}
+
+const doc = buildOpenApiDocument([...modules.values()], {
+  title: 'Open Mercato API',
+  version: '1.0.0',
+  description: 'Auto-generated OpenAPI specification',
+  servers: [{ url: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000' }],
+});
+
+// Deep-clone to break shared object references before serializing.
+// The zodToJsonSchema memo cache returns the same object instance for
+// fields like currencyCode that appear on both parent and child schemas.
+// A naive WeakSet-based circular-ref guard would drop the second occurrence,
+// causing properties to vanish from the generated spec (while the field
+// still appears in the 'required' array, since those are plain strings).
+const deepClone = (v, ancestors = []) => {
+  if (v === null || typeof v !== 'object') return v;
+  if (typeof v === 'bigint') return Number(v);
+  if (typeof v === 'function') return undefined;
+  if (ancestors.includes(v)) return undefined;  // true circular ref
+  const next = [...ancestors, v];
+  if (Array.isArray(v)) return v.map((item) => deepClone(item, next));
+  const out = {};
+  for (const [k, val] of Object.entries(v)) {
+    const cloned = deepClone(val, next);
+    if (cloned !== undefined) out[k] = cloned;
+  }
+  return out;
+};
+process.stdout.write(JSON.stringify(deepClone(doc), (_, v) =>
+  typeof v === 'bigint' ? Number(v) : v
+));
+`
+
+  // Plugin: stub next/* imports (not available outside Next.js app context)
+  const stubNextPlugin = {
+    name: 'stub-next',
+    setup(build: any) {
+      build.onResolve({ filter: /^next($|\/)/ }, () => ({
+        path: 'next-stub',
+        namespace: 'next-stub',
+      }))
+      build.onLoad({ filter: /.*/, namespace: 'next-stub' }, () => ({
+        contents: [
+          'const p = new Proxy(function(){}, {',
+          '  get(_, k) { return k === "__esModule" ? true : k === "default" ? p : p; },',
+          '  apply() { return p; },',
+          '  construct() { return p; },',
+          '});',
+          'export default p;',
+          'export const NextRequest = p, NextResponse = p, headers = p, cookies = p;',
+          'export const redirect = p, notFound = p, useRouter = p, usePathname = p;',
+          'export const useSearchParams = p, permanentRedirect = p, revalidatePath = p;',
+        ].join('\n'),
+        loader: 'js' as const,
+      }))
+    },
+  }
+
+  // Plugin: resolve workspace imports, aliases, and subpath imports
+  const resolveProjectImportsPlugin = {
+    name: 'resolve-project-imports',
+    setup(build: any) {
+      // @open-mercato/<pkg>/<path> → packageRoot/src/<path>.ts
+      build.onResolve({ filter: /^@open-mercato\// }, (args: any) => {
+        const withoutScope = args.path.slice('@open-mercato/'.length)
+        const slashIdx = withoutScope.indexOf('/')
+        const pkg = slashIdx === -1 ? withoutScope : withoutScope.slice(0, slashIdx)
+        const rest = slashIdx === -1 ? '' : withoutScope.slice(slashIdx + 1)
+        const packageName = `@open-mercato/${pkg}`
+        const packageRoot = resolver.getPackageRoot(packageName)
+
+        const base = rest
+          ? path.join(packageRoot, 'src', rest)
+          : path.join(packageRoot, 'src', 'index')
+
+        for (const ext of ['.ts', '.tsx', '/index.ts', '/index.tsx']) {
+          if (fs.existsSync(base + ext)) return { path: base + ext }
+        }
+        return undefined
+      })
+
+      // @/.mercato/* → app/.mercato/* (tsconfig paths)
+      build.onResolve({ filter: /^@\/\.mercato\// }, (args: any) => {
+        const rest = args.path.slice('@/'.length) // '.mercato/generated/...'
+        const base = path.join(appDir, rest)
+        for (const ext of ['.ts', '.tsx', '/index.ts', '/index.tsx', '']) {
+          if (fs.existsSync(base + ext)) return { path: base + ext }
+        }
+        return undefined
+      })
+
+      // @/* → app/src/* (tsconfig paths)
+      build.onResolve({ filter: /^@\// }, (args: any) => {
+        const rest = args.path.slice('@/'.length)
+        const base = path.join(appDir, 'src', rest)
+        for (const ext of ['.ts', '.tsx', '/index.ts', '/index.tsx']) {
+          if (fs.existsSync(base + ext)) return { path: base + ext }
+        }
+        return undefined
+      })
+
+      // #generated/* → core package generated/* (Node subpath imports)
+      build.onResolve({ filter: /^#generated\// }, (args: any) => {
+        const rest = args.path.slice('#generated/'.length)
+        const base = path.join(coreGeneratedRoot, rest)
+        for (const ext of ['.ts', '/index.ts']) {
+          if (fs.existsSync(base + ext)) return { path: base + ext }
+        }
+        return undefined
+      })
+    },
+  }
+
+  // Plugin: externalize installed packages, stub missing ones
+  const nodeBuiltins = new Set([
+    'assert', 'buffer', 'child_process', 'cluster', 'console', 'constants',
+    'crypto', 'dgram', 'dns', 'domain', 'events', 'fs', 'http', 'http2',
+    'https', 'module', 'net', 'os', 'path', 'perf_hooks', 'process',
+    'punycode', 'querystring', 'readline', 'repl', 'stream', 'string_decoder',
+    'sys', 'timers', 'tls', 'tty', 'url', 'util', 'v8', 'vm', 'wasi',
+    'worker_threads', 'zlib', 'async_hooks', 'diagnostics_channel', 'inspector',
+    'trace_events',
+  ])
+  const externalNonWorkspacePlugin = {
+    name: 'external-non-workspace',
+    setup(build: any) {
+      build.onResolve({ filter: /^[^./]/ }, (args: any) => {
+        if (args.path.startsWith('@open-mercato/')) return undefined
+        if (args.path.startsWith('@/')) return undefined
+        if (args.path.startsWith('#generated/')) return undefined
+        if (args.path.startsWith('next')) return undefined
+        // Let esbuild handle Node builtins (with or without node: prefix)
+        if (args.path.startsWith('node:')) return undefined
+        const topLevel = args.path.split('/')[0]
+        if (nodeBuiltins.has(topLevel)) return undefined
+
+        // Extract package name (handle scoped packages like @mikro-orm/core)
+        const pkgName = args.path.startsWith('@')
+          ? args.path.split('/').slice(0, 2).join('/')
+          : topLevel
+        const pkgDir = path.join(rootDir, 'node_modules', pkgName)
+        if (fs.existsSync(pkgDir)) return { external: true }
+
+        // Package not installed — provide CJS stub (allows any named import)
+        return { path: args.path, namespace: 'missing-pkg' }
+      })
+      build.onLoad({ filter: /.*/, namespace: 'missing-pkg' }, () => ({
+        contents: 'var h={get:(_,k)=>k==="__esModule"?true:p};var p=new Proxy(function(){return p},{get:h.get,apply:()=>p,construct:()=>p});module.exports=p;',
+        loader: 'js' as const,
+      }))
+    },
+  }
+
+  try {
+    await esbuild.build({
+      stdin: {
+        contents: entryScript,
+        resolveDir: appDir,
+        sourcefile: 'openapi-entry.ts',
+        loader: 'ts',
+      },
+      bundle: true,
+      format: 'esm',
+      platform: 'node',
+      target: 'node18',
+      outfile: bundlePath,
+      write: true,
+      ...(tsconfigPath ? { tsconfig: tsconfigPath } : {}),
+      logLevel: 'silent',
+      jsx: 'automatic',
+      plugins: [stubNextPlugin, resolveProjectImportsPlugin, externalNonWorkspacePlugin],
+    })
+
+    const stdout = execFileSync(process.execPath, [bundlePath], {
+      timeout: 60_000,
+      maxBuffer: 20 * 1024 * 1024,
+      encoding: 'utf-8',
+      env: { ...process.env, NODE_NO_WARNINGS: '1' },
+      cwd: rootDir,
+    })
+
+    const lastLine = stdout.trim().split('\n').pop()!
+    const doc = JSON.parse(lastLine) as Record<string, any>
+
+    if (!quiet) {
+      const pathCount = Object.keys(doc.paths || {}).length
+      const withBody = Object.values(doc.paths || {}).reduce((n: number, methods: any) => {
+        for (const m of Object.values(methods)) {
+          if ((m as any)?.requestBody) n++
+        }
+        return n
+      }, 0)
+      console.log(`[OpenAPI] Bundle approach: ${pathCount} paths, ${withBody} with requestBody schemas`)
+    }
+
+    return doc
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err)
+    const stderr = (err as any)?.stderr
+    const esbuildErrors = (err as any)?.errors as Array<{ text: string; location?: { file: string } }> | undefined
+    if (!quiet) {
+      console.log(`[OpenAPI] Bundle approach failed, will use static fallback: ${errMsg.split('\n')[0]}`)
+      if (esbuildErrors?.length) {
+        const unique = new Map<string, string>()
+        for (const e of esbuildErrors) {
+          const key = e.text
+          if (!unique.has(key)) unique.set(key, e.location?.file ?? '')
+        }
+        for (const [text, file] of [...unique.entries()].slice(0, 10)) {
+          console.log(`[OpenAPI]   ${text}${file ? ` (${path.basename(file)})` : ''}`)
+        }
+        if (unique.size > 10) console.log(`[OpenAPI]   ... and ${unique.size - 10} more`)
+      }
+      if (stderr) {
+        for (const line of String(stderr).trim().split('\n').slice(0, 3)) {
+          console.log(`[OpenAPI]   ${line}`)
+        }
+      }
+    }
+    return null
+  } finally {
+    // Clean up old files from previous tsx-based approach
+    for (const file of ['_openapi-register.mjs', '_openapi-loader.mjs', '_next-stub.cjs']) {
+      try { fs.unlinkSync(path.join(cacheDir, file)) } catch {}
+    }
+  }
+}
+
+/**
  * Build OpenAPI paths from discovered routes.
  * Extracts basic operation info from route files statically.
  */
@@ -246,32 +558,38 @@ export async function generateOpenApi(options: GenerateOpenApiOptions): Promise<
     console.log(`[OpenAPI] Found ${routes.length} API route files`)
   }
 
-  // Build OpenAPI paths from routes
-  const paths = buildOpenApiPaths(routes)
-  const pathCount = Object.keys(paths).length
+  // Determine project root (cli package is at packages/cli/src/lib/generators/)
+  // Try esbuild bundle approach first — produces full requestBody/response schemas
+  let doc: Record<string, any> | null = await generateOpenApiViaBundle(routes, resolver, quiet)
 
-  // Build OpenAPI document
-  const doc = {
-    openapi: '3.1.0',
-    info: {
-      title: 'Open Mercato API',
-      version: '1.0.0',
-      description: 'Auto-generated OpenAPI specification',
-    },
-    servers: [
-      { url: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000' },
-    ],
-    paths,
-    components: {
-      securitySchemes: {
-        bearerAuth: {
-          type: 'http',
-          scheme: 'bearer',
-          bearerFormat: 'JWT',
-          description: 'Send an `Authorization: Bearer <token>` header with a valid API token.',
+  // Fallback to static regex approach (extracts operationId/summary/tags but no schemas)
+  if (!doc) {
+    if (!quiet) {
+      console.log('[OpenAPI] Falling back to static regex approach')
+    }
+    const paths = buildOpenApiPaths(routes)
+    doc = {
+      openapi: '3.1.0',
+      info: {
+        title: 'Open Mercato API',
+        version: '1.0.0',
+        description: 'Auto-generated OpenAPI specification',
+      },
+      servers: [
+        { url: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000' },
+      ],
+      paths,
+      components: {
+        securitySchemes: {
+          bearerAuth: {
+            type: 'http',
+            scheme: 'bearer',
+            bearerFormat: 'JWT',
+            description: 'Send an `Authorization: Bearer <token>` header with a valid API token.',
+          },
         },
       },
-    },
+    }
   }
 
   const output = JSON.stringify(doc, null, 2)
@@ -295,6 +613,7 @@ export async function generateOpenApi(options: GenerateOpenApiOptions): Promise<
 
   if (!quiet) {
     logGenerationResult(outFile, true)
+    const pathCount = Object.keys(doc.paths || {}).length
     console.log(`[OpenAPI] Generated ${pathCount} API paths`)
   }
 

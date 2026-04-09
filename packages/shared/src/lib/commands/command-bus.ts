@@ -162,6 +162,23 @@ function deriveChangesFromSnapshots(
   return Object.keys(changes).length ? changes : null
 }
 
+function invertRecordedChanges(
+  changes: unknown,
+): Record<string, { from: unknown; to: unknown }> | null {
+  const source = asRecord(changes)
+  if (!source) return null
+  const inverted: Record<string, { from: unknown; to: unknown }> = {}
+  for (const [key, value] of Object.entries(source)) {
+    const entry = asRecord(value)
+    if (!entry || (!('from' in entry) && !('to' in entry))) continue
+    inverted[key] = {
+      from: entry.to,
+      to: entry.from,
+    }
+  }
+  return Object.keys(inverted).length ? inverted : null
+}
+
 function extractAliasList(source: unknown): string[] {
   if (!source || typeof source !== 'object' || Array.isArray(source)) return []
   const record = source as Record<string, unknown>
@@ -269,7 +286,9 @@ export class CommandBus {
       }
     }
 
-    await this.invalidateCacheAfterExecute(commandId, effectiveOptions, finalResult, mergedMeta)
+    if (!effectiveOptions.skipCacheInvalidation) {
+      await this.invalidateCacheAfterExecute(commandId, effectiveOptions, finalResult, mergedMeta)
+    }
     await this.flushCrudSideEffects(effectiveOptions.ctx.container)
     return { result: finalResult, logEntry }
   }
@@ -311,7 +330,7 @@ export class CommandBus {
       ctx,
       logEntry: log,
     })
-    await service.markUndone(log.id)
+    await service.markUndone(log.id, this.buildUndoTraceLog(log, ctx))
 
     // Run afterUndo command interceptors
     if (allInterceptors.length) {
@@ -330,6 +349,39 @@ export class CommandBus {
 
     await this.invalidateCacheAfterUndo(log, ctx)
     await this.flushCrudSideEffects(ctx.container)
+  }
+
+  private buildUndoTraceLog(log: ActionLog, ctx: CommandRuntimeContext): ActionLogCreateInput | undefined {
+    const snapshotBefore = log.snapshotAfter ?? null
+    const snapshotAfter = log.snapshotBefore ?? null
+    const changes =
+      deriveChangesFromSnapshots(snapshotBefore, snapshotAfter)
+      ?? invertRecordedChanges(log.changesJson)
+      ?? undefined
+
+    const baseContext = asRecord(log.contextJson) ?? {}
+    const context = {
+      ...baseContext,
+      historyAction: 'undo',
+      sourceLogId: log.id,
+      sourceCommandId: log.commandId,
+    }
+
+    return {
+      tenantId: log.tenantId ?? ctx.auth?.tenantId ?? null,
+      organizationId: log.organizationId ?? ctx.selectedOrganizationId ?? ctx.auth?.orgId ?? null,
+      actorUserId: ctx.auth?.sub ?? log.actorUserId ?? null,
+      commandId: log.commandId,
+      actionLabel: log.actionLabel ?? undefined,
+      resourceKind: log.resourceKind ?? undefined,
+      resourceId: log.resourceId ?? undefined,
+      parentResourceKind: log.parentResourceKind ?? null,
+      parentResourceId: log.parentResourceId ?? null,
+      snapshotBefore,
+      snapshotAfter,
+      changes,
+      context,
+    }
   }
 
   private async resolveUserFeaturesForInterceptors(ctx: CommandRuntimeContext): Promise<string[]> {
@@ -352,7 +404,15 @@ export class CommandBus {
 
   private resolveHandler<TInput, TResult>(commandId: string): CommandHandler<TInput, TResult> {
     const handler = commandRegistry.get<TInput, TResult>(commandId)
-    if (!handler) throw new Error(`Command handler not registered for id ${commandId}`)
+    if (!handler) {
+      const moduleName = commandId.split('.')[0]
+      const registered = commandRegistry.list()
+      const sameModule = registered.filter((id) => id.split('.')[0] === moduleName)
+      const hint = sameModule.length > 0
+        ? ` Registered commands for module "${moduleName}": [${sameModule.join(', ')}].`
+        : ` No commands registered for module "${moduleName}". Ensure the command file is imported (side-effect) in the module's index.ts.`
+      throw new Error(`Command handler not registered for id ${commandId}.${hint}`)
+    }
     return handler
   }
 
@@ -396,6 +456,7 @@ export class CommandBus {
   private mergeMetadata(primary?: CommandLogMetadata | null, secondary?: CommandLogMetadata | null): CommandLogMetadata | null {
     if (!primary && !secondary) return null
     return {
+      skipLog: secondary?.skipLog ?? primary?.skipLog ?? false,
       tenantId: secondary?.tenantId ?? primary?.tenantId ?? null,
       organizationId: secondary?.organizationId ?? primary?.organizationId ?? null,
       actorUserId: secondary?.actorUserId ?? primary?.actorUserId ?? null,
@@ -419,6 +480,7 @@ export class CommandBus {
     metadata: CommandLogMetadata | null
   ): Promise<ActionLog | null> {
     if (!metadata) return null
+    if (metadata.skipLog) return null
     const resourceKind =
       typeof metadata.resourceKind === 'string' ? metadata.resourceKind : null
     if (resourceKind && SKIPPED_ACTION_LOG_RESOURCE_KINDS.has(resourceKind)) {

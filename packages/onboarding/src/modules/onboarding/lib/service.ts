@@ -34,6 +34,7 @@ export class OnboardingService {
       existing.organizationName = input.organizationName
       existing.locale = input.locale ?? existing.locale ?? 'en'
       existing.termsAccepted = true
+      existing.marketingConsent = input.marketingConsent ?? false
       existing.passwordHash = passwordHash
       existing.expiresAt = expiresAt
       existing.completedAt = null
@@ -42,6 +43,8 @@ export class OnboardingService {
       existing.organizationId = null
       existing.userId = null
       existing.lastEmailSentAt = now
+      existing.preparationCompletedAt = null
+      existing.readyEmailSentAt = null
       await this.em.flush()
       return { request: existing, token }
     }
@@ -55,6 +58,7 @@ export class OnboardingService {
       organizationName: input.organizationName,
       locale: input.locale ?? 'en',
       termsAccepted: true,
+      marketingConsent: input.marketingConsent ?? false,
       passwordHash,
       expiresAt,
       processingStartedAt: null,
@@ -79,6 +83,18 @@ export class OnboardingService {
   async findByToken(token: string) {
     const tokenHash = hashToken(token)
     return this.em.findOne(OnboardingRequest, { tokenHash })
+  }
+
+  async findById(id: string) {
+    return this.em.findOne(OnboardingRequest, { id })
+  }
+
+  async findLatestByTenantId(tenantId: string) {
+    return this.em.findOne(
+      OnboardingRequest,
+      { tenantId, deletedAt: null },
+      { orderBy: { updatedAt: 'DESC', createdAt: 'DESC' } },
+    )
   }
 
   async startProcessing(request: OnboardingRequest, startedAt: Date) {
@@ -108,6 +124,16 @@ export class OnboardingService {
     request.userId = data.userId
     request.processingStartedAt = null
     request.passwordHash = null
+    await this.em.flush()
+  }
+
+  async markReadyEmailSent(request: OnboardingRequest, sentAt: Date) {
+    request.readyEmailSentAt = sentAt
+    await this.em.flush()
+  }
+
+  async markPreparationCompleted(request: OnboardingRequest, completedAt: Date) {
+    request.preparationCompletedAt = completedAt
     await this.em.flush()
   }
 }

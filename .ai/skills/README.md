@@ -13,6 +13,8 @@ Skills extend AI agents with task-specific capabilities. Each skill is a folder 
 │   ├── SKILL.md
 │   └── references/
 │       └── ui-components.md
+├── check-and-commit/
+│   └── SKILL.md
 ├── code-review/
 │   ├── SKILL.md
 │   └── references/
@@ -154,9 +156,10 @@ Skills also trigger automatically when a task matches the skill's `description`.
 | Skill | When to use |
 |-------|-------------|
 | `backend-ui-design` | Building admin pages, CRUD interfaces, data tables, forms, or detail pages with @open-mercato/ui |
+| `check-and-commit` | Running CI-style verification, fixing i18n drift, and only then committing and pushing the current branch |
 | `code-review` | Reviewing PRs, code changes, or auditing code quality against project conventions |
 | `create-agents-md` | Creating or rewriting AGENTS.md files for packages and modules |
-| `fix-specs` | Detecting duplicate SPEC/SPEC-ENT numbers and renumbering only the newest conflicting spec while updating references/links |
+| `fix-specs` | Normalizing legacy spec filenames to `{YYYY-MM-DD}-{slug}.md`, resolving post-normalization collisions, and updating references/links |
 | `implement-spec` | Implementing a spec (or specific phases) using coordinated subagents with unit tests, integration tests, docs, progress tracking, and code-review compliance gates. Asks whether to build as an external extension (UMES) or core modification |
 | `integration-tests` | Running existing integration tests and generating new QA tests (Playwright TypeScript, with optional markdown scenarios) from specs or feature descriptions |
 | `pre-implement-spec` | Analyzing a spec before implementation: backward compatibility audit, risk assessment, gap analysis, and readiness report |

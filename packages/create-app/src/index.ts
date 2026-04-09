@@ -91,6 +91,39 @@ function validateAppName(name: string): { valid: boolean; error?: string } {
   return { valid: true }
 }
 
+function buildRegistryConfig(registryUrl: string): string {
+  let parsedRegistryUrl: URL
+
+  try {
+    parsedRegistryUrl = new URL(registryUrl)
+  } catch {
+    console.error(pc.red(`Error: Invalid registry URL "${registryUrl}"`))
+    process.exit(1)
+  }
+
+  const configLines: string[] = []
+
+  if (parsedRegistryUrl.protocol === 'http:') {
+    const unsafeHttpHosts = new Set([parsedRegistryUrl.hostname])
+
+    if (parsedRegistryUrl.hostname === 'localhost' || parsedRegistryUrl.hostname === '127.0.0.1') {
+      unsafeHttpHosts.add('host.docker.internal')
+    }
+
+    configLines.push('unsafeHttpWhitelist:')
+
+    for (const host of unsafeHttpHosts) {
+      configLines.push(`  - "${host}"`)
+    }
+  }
+
+  configLines.push('npmScopes:')
+  configLines.push('  open-mercato:')
+  configLines.push(`    npmRegistryServer: "${registryUrl}"`)
+
+  return configLines.join('\n')
+}
+
 // Files that need to be renamed (npm ignores .gitignore during pack)
 const FILE_RENAMES: Record<string, string> = {
   gitignore: '.gitignore',
@@ -176,13 +209,9 @@ async function main(): Promise<void> {
   // Determine registry config
   let registryConfig = ''
   if (options.verdaccio) {
-    registryConfig = `npmScopes:
-  open-mercato:
-    npmRegistryServer: "http://localhost:4873"`
+    registryConfig = buildRegistryConfig('http://localhost:4873')
   } else if (options.registry) {
-    registryConfig = `npmScopes:
-  open-mercato:
-    npmRegistryServer: "${options.registry}"`
+    registryConfig = buildRegistryConfig(options.registry)
   }
 
   console.log('')
@@ -199,6 +228,11 @@ async function main(): Promise<void> {
   try {
     copyDirRecursive(TEMPLATE_DIR, targetDir, placeholders)
 
+    // Create an empty placeholder so globals.css @import resolves before generators run
+    const generatedDir = join(targetDir, '.mercato', 'generated')
+    mkdirSync(generatedDir, { recursive: true })
+    writeFileSync(join(generatedDir, 'module-package-sources.css'), '')
+
     console.log(pc.green('Success!') + ` Created ${pc.bold(appName)}`)
     console.log('')
 
@@ -211,6 +245,14 @@ async function main(): Promise<void> {
     console.log('Next steps:')
     console.log('')
     console.log(pc.cyan(`  cd ${appName}`))
+    console.log('')
+    console.log(pc.green('Suggested quick start:'))
+    console.log(pc.cyan('  yarn setup'))
+    console.log(pc.dim('  # Copies .env.example to .env if needed, installs deps, migrates, initializes, and starts dev'))
+    console.log(pc.dim('  # If you need a clean reset first: yarn setup --reinstall'))
+    console.log(pc.dim('  # Alias: yarn setup:reinstall'))
+    console.log('')
+    console.log('Manual alternative:')
     console.log(pc.cyan('  cp .env.example .env'))
     console.log(pc.dim('  # Edit .env with your database credentials'))
     console.log(pc.cyan('  yarn install'))
@@ -220,6 +262,8 @@ async function main(): Promise<void> {
     console.log(pc.cyan('  yarn dev'))
     console.log('')
     console.log('Docker alternatives:')
+    console.log(pc.dim('  # Before Docker: cp .env.example .env && yarn install'))
+    console.log(pc.dim('  # Docker expects your local app env and dependencies to be prepared first'))
     console.log(pc.cyan('  # Dev (recommended on Windows): docker compose -f docker-compose.fullapp.dev.yml up --build'))
     console.log(pc.cyan('  # Production-style: docker compose -f docker-compose.fullapp.yml up --build'))
     console.log('')

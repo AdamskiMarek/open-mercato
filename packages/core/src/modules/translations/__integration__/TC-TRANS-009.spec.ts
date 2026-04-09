@@ -6,14 +6,58 @@ import { deleteTranslationIfExists, getLocales, setLocales } from './helpers/tra
 
 const ENTITY_TYPE = 'catalog:catalog_product'
 
-async function fillCombobox(page: import('@playwright/test').Page, placeholder: string, value: string) {
+function escapeForRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+async function fillCombobox(
+  page: import('@playwright/test').Page,
+  placeholder: string,
+  value: string,
+  options?: { waitForEnabledPlaceholder?: string },
+) {
   const input = page.getByPlaceholder(placeholder)
   await expect(input).toBeEnabled({ timeout: 10_000 })
   await input.click()
   await input.fill(value)
-  await input.press('Enter')
+  const suggestion = page.getByRole('button', {
+    name: new RegExp(escapeForRegex(value), 'i'),
+  }).first()
+  const suggestionVisible = await suggestion.waitFor({ state: 'visible', timeout: 2_000 }).then(
+    () => true,
+    () => false,
+  )
+  if (suggestionVisible) {
+    await suggestion.click()
+  } else {
+    await input.press('Enter')
+  }
   await input.press('Tab')
   await page.waitForTimeout(300)
+  if (options?.waitForEnabledPlaceholder) {
+    await expect(page.getByPlaceholder(options.waitForEnabledPlaceholder)).toBeEnabled({ timeout: 10_000 })
+  }
+}
+
+async function selectEntityForRecordPicker(
+  page: import('@playwright/test').Page,
+  entityType: string,
+) {
+  const recordInput = page.getByPlaceholder('Search records...')
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await fillCombobox(page, 'Select an entity', entityType)
+    const enabled = await expect
+      .poll(async () => !(await recordInput.isDisabled()), { timeout: 4_000 })
+      .toBe(true)
+      .then(() => true)
+      .catch(() => false)
+    if (enabled) {
+      return
+    }
+  }
+
+  await expect(recordInput).toBeEnabled({ timeout: 10_000 })
 }
 
 /**
@@ -36,7 +80,7 @@ test.describe('TC-TRANS-009: Translation Command Undo', () => {
       await login(page, 'superadmin')
       await page.goto('/backend/config/translations')
 
-      await fillCombobox(page, 'Select an entity', ENTITY_TYPE)
+      await selectEntityForRecordPicker(page, ENTITY_TYPE)
       await fillCombobox(page, 'Search records...', productId!)
 
       const managerCard = page.locator('.bg-card').filter({
@@ -92,7 +136,7 @@ test.describe('TC-TRANS-009: Translation Command Undo', () => {
       await login(page, 'superadmin')
       await page.goto('/backend/config/translations')
 
-      await fillCombobox(page, 'Select an entity', ENTITY_TYPE)
+      await selectEntityForRecordPicker(page, ENTITY_TYPE)
       await fillCombobox(page, 'Search records...', productId!)
 
       const managerCard = page.locator('.bg-card').filter({

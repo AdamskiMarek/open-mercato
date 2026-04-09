@@ -10,6 +10,7 @@ Use `packages/create-app` to scaffold standalone Open Mercato applications via `
 4. **MUST build before publishing** — generators scan `node_modules/@open-mercato/*/dist/modules/` for `.js` files
 5. **MUST NOT break the standalone app template** — it's the user's first experience with Open Mercato
 6. **MUST sync template equivalents when app shell/layout files change** — when touching `apps/mercato/src/app/**` bootstrap/layout/provider wiring, update matching files in `packages/create-app/template/src/app/**` (and required template components) in the same task
+7. **MUST keep template module registrations and package dependencies aligned** — if `packages/create-app/template/src/modules.ts` enables a package-backed module (for example `@open-mercato/webhooks`), `packages/create-app/template/package.json.template` must install that package in the same change, and the template lockfile must be reviewed when dependency shape changes
 
 ## Standalone App vs Monorepo
 
@@ -46,29 +47,36 @@ my-app/
 ### Initial Setup
 
 ```bash
-# 1. Start Verdaccio
-docker compose up -d verdaccio
-
-# 2. Create registry user
+# Optional: create a registry user once if you want npm auth stored for Verdaccio
 yarn registry:setup-user
+```
 
-# 3. Build and publish all packages
+### Fast Path via Root Scripts
+
+```bash
+# Smoke-test the standalone scaffold against Verdaccio
+yarn test:create-app
+
+# Run the standalone integration parity flow against Verdaccio
+yarn test:create-app:integration
+```
+
+### Manual Verdaccio Workflow
+
+```bash
+docker compose up -d verdaccio
 yarn registry:publish
-
-# 4. Create and test standalone app
-npx --registry http://localhost:4873 create-mercato-app@latest my-test-app
-cd my-test-app
-docker compose up -d
+node packages/create-app/dist/index.js /tmp/my-test-app --verdaccio
+cd /tmp/my-test-app
 yarn install
-yarn initialize
-yarn dev
+yarn setup
 ```
 
 ### When Publishing Changes
 
 1. Make changes in monorepo packages
-2. Run `yarn registry:publish` to republish to Verdaccio
-3. In standalone app: `rm -rf node_modules .mercato/next && yarn install && yarn dev`
+2. Use `yarn test:create-app` for the fast shell workflow, `yarn test:create-app:integration` for parity coverage, or the manual Verdaccio workflow when you want to keep a standalone app around
+3. If you already have a standalone app checked out, rerun `yarn registry:publish`, then in that app run `rm -rf node_modules .mercato/next && yarn install && yarn dev`
 4. Verify the app starts and affected features work
 5. Test `yarn generate` produces correct output from compiled files
 
@@ -76,8 +84,8 @@ yarn dev
 
 ```bash
 ./scripts/release-snapshot.sh canary
-# Creates version like: 0.4.2-canary-abc1234567
-npx create-mercato-app@0.4.2-canary-abc1234567 my-test-app
+# Creates version like: 0.4.9-canary.1523.abc1234567
+npx create-mercato-app@0.4.9-canary.1523.abc1234567 my-test-app
 ```
 
 ### Cleanup

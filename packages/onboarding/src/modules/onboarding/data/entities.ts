@@ -33,6 +33,9 @@ export class OnboardingRequest {
   @Property({ name: 'terms_accepted', type: 'boolean', default: false })
   termsAccepted: boolean = false
 
+  @Property({ name: 'marketing_consent', type: 'boolean', default: false, nullable: true })
+  marketingConsent?: boolean | null = false
+
   @Property({ name: 'password_hash', type: 'text', nullable: true })
   passwordHash?: string | null
 
@@ -56,6 +59,12 @@ export class OnboardingRequest {
 
   @Property({ name: 'last_email_sent_at', type: Date, nullable: true })
   lastEmailSentAt?: Date | null
+
+  @Property({ name: 'preparation_completed_at', type: Date, nullable: true })
+  preparationCompletedAt?: Date | null
+
+  @Property({ name: 'ready_email_sent_at', type: Date, nullable: true })
+  readyEmailSentAt?: Date | null
 
   @Property({ name: 'created_at', type: Date, onCreate: () => new Date() })
   createdAt: Date = new Date()

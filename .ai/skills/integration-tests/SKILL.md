@@ -16,6 +16,7 @@ This skill generates executable Playwright tests in module-local `__integration_
 | Run in ephemeral containers | `yarn test:integration:ephemeral` |
 | Run interactive ephemeral mode | `yarn test:integration:ephemeral:interactive` |
 | Start ephemeral app only (for MCP exploration, tests development, and debugging) | `yarn test:integration:ephemeral:start` |
+| Run standalone create-app integration parity from monorepo | `yarn test:create-app:integration` |
 | View report | `yarn test:integration:report` |
 | Test files location | `<module>/__integration__/TC-XXX.spec.ts` (legacy `.ai/qa/tests` still supported) |
 | Scenario sources (optional) | `.ai/qa/scenarios/TC-XXX-*.md` |
@@ -40,7 +41,7 @@ Debug/development policy (fail fast while authoring/fixing tests):
 
 Determine the feature scope from one of these sources (in priority order):
 
-1. **Spec file**: If a spec is referenced or was just implemented, read it from `.ai/specs/SPEC-*.md`. Extract testable scenarios from the API Contracts, UI/UX, and Data Models sections.
+1. **Spec file**: If a spec is referenced or was just implemented, read it from `.ai/specs/*.md` or `.ai/specs/enterprise/*.md`. Prefer the new `{YYYY-MM-DD}-{slug}.md` filenames, but tolerate legacy numbered names while the repo is being normalized. Extract testable scenarios from the API Contracts, UI/UX, and Data Models sections.
 2. **User description**: If the user describes a feature ("test the company creation flow"), map it to the relevant module and pages.
 3. **Recent changes**: If triggered after implementation, use `git diff` or recent commits to identify changed endpoints, pages, and components.
 
@@ -108,8 +109,9 @@ Do not hardcode entity IDs in routes, payloads, or assertions. Resolve entities 
 Metadata for conditional test enablement:
 
 - Helpers:
-  - Put shared helpers in a central reusable location (recommended: `packages/core/src/modules/core/__integration__/helpers/`).
+  - Put shared helpers in `packages/core/src/helpers/integration/` (importable as `@open-mercato/core/helpers/integration/*`).
   - Module-local `__integration__/helpers/` files should re-export central helpers where possible.
+  - Standalone app developers: import helpers from `@open-mercato/core/helpers/integration/*` (included in the npm package).
 
 - Folder-level metadata:
   - Add `meta.ts` or `index.ts` anywhere under `__integration__/`.
@@ -196,6 +198,22 @@ npx playwright test --config .ai/qa/tests/playwright.config.ts <path-to-test-fil
 
 If it fails, fix it. Do not leave broken tests.
 
+### Create-App / Standalone Parity
+
+When the change affects `packages/create-app`, standalone scaffolding, or CLI behavior consumed by scaffolded apps, prefer the monorepo parity command:
+
+```bash
+yarn test:create-app:integration
+```
+
+What it does:
+- builds the local monorepo package artifacts
+- scaffolds a fresh temporary standalone app with the local `create-mercato-app`
+- installs local packed `@open-mercato/*` tarballs into that app
+- runs the standalone app's own ephemeral integration command via the local CLI
+
+Use this instead of plain `yarn test:integration` when the risk is specifically "works in monorepo, breaks in scaffolded standalone app".
+
 ### Shared — Failure Analysis and User Reporting (Mandatory on Failures)
 
 After any failed test run (single test or suite), analyze failure artifacts before responding. This shared section applies both when:
@@ -247,7 +265,7 @@ If the run fails, apply the shared failure-analysis section above.
 - MUST report failures in a per-test table that includes reason, evidence, and suggested owner
 - MUST apply the same failure-analysis and table-reporting rules when only running existing tests after implementation work
 - MUST place new tests in module-local `__integration__` directories; use legacy `.ai/qa/tests/` only when there is no module context
-- MUST keep helper utilities next to tests under `<module>/__integration__/helpers/` (avoid cross-module helper imports)
+- MUST keep module-specific helper utilities next to tests under `<module>/__integration__/helpers/`; for shared/cross-module helpers, import from `@open-mercato/core/helpers/integration/*`
 - MUST treat `packages/enterprise/modules/<module>/__integration__/` as an optional overlay and keep base code independent from enterprise
 - MUST use `meta.ts` or `index.ts` dependency metadata for module-gated folders and per-test `.meta.ts` (or in-file metadata) for individual gating
 - When deriving from a spec, focus on the happy path first, then add edge cases as separate test cases if they warrant it

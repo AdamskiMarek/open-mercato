@@ -74,11 +74,61 @@ export function resolveEntityTableName(em: EntityManager | undefined, entity: En
         }
       } catch {}
     }
+
+    // Secondary lookup: search ORM metadata by candidate table names
+    const modulePrefix = parts[0] ?? ''
+    const candidateTables = [
+      `${modulePrefix}_${rawName}`,
+      pluralizeBaseName(rawName),
+      `${modulePrefix}_${pluralizeBaseName(rawName)}`,
+    ]
+    try {
+      const allMeta: any[] = metadata.getAll?.() ?? []
+      for (const meta of allMeta) {
+        if (meta?.tableName && candidateTables.includes(String(meta.tableName))) {
+          const tableName = String(meta.tableName)
+          entityTableCache.set(entity, tableName)
+          return tableName
+        }
+      }
+    } catch {}
   }
 
   const fallback = pluralizeBaseName(rawName || '')
+  console.warn(
+    `[QueryEngine] Could not resolve entity "${entity}" via ORM metadata. ` +
+    `Falling back to table name "${fallback}". ` +
+    `Ensure the entity ID segment matches the class name convention.`
+  )
   entityTableCache.set(entity, fallback)
   return fallback
+}
+
+function buildFilterableCustomFieldJoins(
+  sources: QueryCustomFieldSource[] | undefined,
+): Array<{
+  alias: string
+  table?: string
+  entityId: EntityId
+  from: { field: string }
+  to: { field: string }
+  type: 'left' | 'inner'
+}> {
+  if (!sources || sources.length === 0) return []
+  return sources.flatMap((source, index) => {
+    if (!source.join) return []
+    const alias = typeof source.alias === 'string' && source.alias.trim().length > 0
+      ? source.alias.trim()
+      : `cfs_${index}`
+    return [{
+      alias,
+      table: source.table,
+      entityId: source.entityId,
+      from: { field: source.join.fromField },
+      to: { field: source.join.toField },
+      type: source.join.type === 'inner' ? 'inner' : 'left',
+    }]
+  })
 }
 
 
@@ -164,7 +214,11 @@ export class BasicQueryEngine implements QueryEngine {
     }
 
     const normalizedFilters = normalizeFilters(opts.filters)
-    const resolvedJoins = resolveJoins(table, opts.joins, (entityId) => resolveEntityTableName(this.em, entityId as any))
+    const resolvedJoins = resolveJoins(
+      table,
+      [...(opts.joins ?? []), ...buildFilterableCustomFieldJoins(opts.customFieldSources)],
+      (entityId) => resolveEntityTableName(this.em, entityId as any),
+    )
     const joinMap = new Map<string, ResolvedJoin>()
     const aliasTables = new Map<string, string>()
     aliasTables.set(table, table)

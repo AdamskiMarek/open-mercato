@@ -516,6 +516,7 @@ const FieldDefinitionCard = React.memo(function FieldDefinitionCard({
   translate,
 }: FieldDefinitionCardProps) {
   const [local, setLocal] = React.useState<FieldDefinition>(definition)
+  const localRef = React.useRef<FieldDefinition>(definition)
   const [optionValueDraft, setOptionValueDraft] = React.useState('')
   const [optionLabelDraft, setOptionLabelDraft] = React.useState('')
   const [optionDialogOpen, setOptionDialogOpen] = React.useState(false)
@@ -528,7 +529,11 @@ const FieldDefinitionCard = React.memo(function FieldDefinitionCard({
     () => (typeof local.configJson?.fieldset === 'string' ? local.configJson.fieldset : ''),
     [local.configJson?.fieldset],
   )
-  React.useEffect(() => { setLocal(definition) }, [definition.key])
+  const t = React.useCallback((key: string, fallback: string) => (translate ? translate(key, fallback) : fallback), [translate])
+  React.useEffect(() => {
+    localRef.current = definition
+    setLocal(definition)
+  }, [definition.key])
   React.useEffect(() => {
     setOptionValueDraft('')
     setOptionLabelDraft('')
@@ -570,35 +575,37 @@ const FieldDefinitionCard = React.memo(function FieldDefinitionCard({
     }
   }
 
+  const replaceLocal = React.useCallback((next: FieldDefinition) => {
+    localRef.current = next
+    setLocal(next)
+    return next
+  }, [])
+
   const apply = (patch: Partial<FieldDefinition> | ((current: FieldDefinition) => Partial<FieldDefinition>), propagateNow = false) => {
-    setLocal((prev) => {
-      const resolvedPatch = typeof patch === 'function' ? patch(prev) : patch
-      const next = { ...prev, ...resolvedPatch }
-      if (!propagateNow) return next
-      const sanitized = sanitize(next)
-      onChange(sanitized)
-      return sanitized
-    })
+    const current = localRef.current
+    const resolvedPatch = typeof patch === 'function' ? patch(current) : patch
+    const next = { ...current, ...resolvedPatch }
+    const resolvedNext = propagateNow ? sanitize(next) : next
+    replaceLocal(resolvedNext)
+    if (propagateNow) {
+      onChange(resolvedNext)
+    }
   }
 
   const commit = () => {
-    setLocal((prev) => {
-      const sanitized = sanitize(prev)
-      onChange(sanitized)
-      return sanitized
-    })
+    const sanitized = sanitize(localRef.current)
+    replaceLocal(sanitized)
+    onChange(sanitized)
   }
 
   const handleFieldsetSelect = (value: string) => {
-    setLocal((prev) => {
-      const nextConfig = { ...(prev.configJson || {}) }
-      if (value) nextConfig.fieldset = value
-      else delete nextConfig.fieldset
-      delete nextConfig.group
-      const next = { ...prev, configJson: nextConfig }
-      onChange(next)
-      return next
-    })
+    const nextConfig = { ...(localRef.current.configJson || {}) }
+    if (value) nextConfig.fieldset = value
+    else delete nextConfig.fieldset
+    delete nextConfig.group
+    const next = { ...localRef.current, configJson: nextConfig }
+    replaceLocal(next)
+    onChange(next)
   }
 
   const handleGroupSelect = (value: string) => {
@@ -1114,14 +1121,14 @@ const FieldDefinitionCard = React.memo(function FieldDefinitionCard({
       </div>
 
       <div className="mt-3 pt-2 border-t flex flex-wrap items-center gap-4">
-        <span className="text-xs text-muted-foreground">Visibility:</span>
+        <span className="text-xs text-muted-foreground">{t('entities.customFields.fields.visibility', 'Visibility:')}</span>
         <label className="inline-flex items-center gap-2 text-xs">
           <input
             type="checkbox"
             checked={local.configJson?.listVisible !== false}
             onChange={(event) => { apply({ configJson: { ...(local.configJson || {}), listVisible: event.target.checked } }, true) }}
           />
-          List
+          {t('entities.customFields.fields.listVisible', 'List')}
         </label>
         <label className="inline-flex items-center gap-2 text-xs">
           <input
@@ -1129,7 +1136,7 @@ const FieldDefinitionCard = React.memo(function FieldDefinitionCard({
             checked={!!local.configJson?.filterable}
             onChange={(event) => { apply({ configJson: { ...(local.configJson || {}), filterable: event.target.checked } }, true) }}
           />
-          Filter
+          {t('entities.customFields.fields.filterable', 'Filter')}
         </label>
         <label className="inline-flex items-center gap-2 text-xs">
           <input
@@ -1137,7 +1144,7 @@ const FieldDefinitionCard = React.memo(function FieldDefinitionCard({
             checked={local.configJson?.formEditable !== false}
             onChange={(event) => { apply({ configJson: { ...(local.configJson || {}), formEditable: event.target.checked } }, true) }}
           />
-          Form
+          {t('entities.customFields.fields.formEditable', 'Form')}
         </label>
         <label className="inline-flex items-center gap-2 text-xs">
           <input
@@ -1145,7 +1152,7 @@ const FieldDefinitionCard = React.memo(function FieldDefinitionCard({
             checked={!!local.configJson?.encrypted}
             onChange={(event) => { apply({ configJson: { ...(local.configJson || {}), encrypted: event.target.checked } }, true) }}
           />
-          {translate?.('entities.customFields.fields.encrypted', 'Encrypted') ?? 'Encrypted'}
+          {t('entities.customFields.fields.encrypted', 'Encrypted')}
         </label>
       </div>
     </div>

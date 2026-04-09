@@ -35,6 +35,17 @@ const DialogContent = React.forwardRef<
 >(({ className, children, ...props }, ref) => {
   const t = useT()
 
+  React.useEffect(() => {
+    return () => {
+      if (typeof window === 'undefined') return
+      window.setTimeout(() => {
+        if (document.querySelector('[data-dialog-content][data-state="open"]')) return
+        document.body.style.removeProperty('overflow')
+        document.body.style.removeProperty('pointer-events')
+      }, 0)
+    }
+  }, [])
+
   return (
     <DialogPortal>
       <DialogOverlay />
@@ -50,6 +61,7 @@ const DialogContent = React.forwardRef<
         {...props}
       >
         <DialogClose
+          data-dialog-close=""
           className="absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
           aria-label={t('ui.dialog.close.ariaLabel', 'Close')}
         >

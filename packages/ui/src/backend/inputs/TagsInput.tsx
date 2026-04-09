@@ -65,6 +65,12 @@ export function TagsInput({
   const [asyncOptions, setAsyncOptions] = React.useState<TagsInputOption[]>([])
   const [loading, setLoading] = React.useState(false)
   const [touched, setTouched] = React.useState(false)
+  const suppressBlurCommitRef = React.useRef(false)
+  const valueRef = React.useRef(value)
+
+  React.useEffect(() => {
+    valueRef.current = value
+  }, [value])
 
   const staticOptions = React.useMemo(() => normalizeOptions(suggestions), [suggestions])
   const selectedOptionList = React.useMemo(
@@ -133,10 +139,13 @@ export function TagsInput({
       if (disabled) return
       const trimmed = nextValue.trim()
       if (!trimmed) return
-      if (value.includes(trimmed)) return
-      onChange([...value, trimmed])
+      const currentValue = valueRef.current
+      if (currentValue.includes(trimmed)) return
+      const next = [...currentValue, trimmed]
+      valueRef.current = next
+      onChange(next)
     },
-    [disabled, onChange, value]
+    [disabled, onChange]
   )
 
   const findOptionForInput = React.useCallback(
@@ -169,9 +178,11 @@ export function TagsInput({
   const removeTag = React.useCallback(
     (tag: string) => {
       if (disabled) return
-      onChange(value.filter((candidate) => candidate !== tag))
+      const next = valueRef.current.filter((candidate) => candidate !== tag)
+      valueRef.current = next
+      onChange(next)
     },
-    [disabled, onChange, value]
+    [disabled, onChange]
   )
 
   return (
@@ -241,6 +252,11 @@ export function TagsInput({
           }}
           onBlur={() => {
             if (disabled) return
+            if (suppressBlurCommitRef.current) {
+              suppressBlurCommitRef.current = false
+              setInput('')
+              return
+            }
             addTag(input)
             setInput('')
           }}
@@ -257,8 +273,15 @@ export function TagsInput({
                 variant="ghost"
                 size="sm"
                 className="w-full justify-start font-normal flex flex-col items-start text-xs px-1.5 py-1"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => addValue(option.value)}
+                onMouseDown={(event) => {
+                  suppressBlurCommitRef.current = true
+                  event.preventDefault()
+                }}
+                onClick={() => {
+                  suppressBlurCommitRef.current = false
+                  addValue(option.value)
+                  setInput('')
+                }}
               >
                 <span>{option.label}</span>
                 {option.description ? (

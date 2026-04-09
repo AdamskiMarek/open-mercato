@@ -35,6 +35,8 @@ All module paths use `src/modules/<module>/` as shorthand.
 
 - Frontend pages: `frontend/<path>.tsx` → `/<path>`
 - Backend pages: `backend/<path>.tsx` → `/backend/<path>` (special: `backend/page.tsx` → `/backend/<module>`)
+- Frontend page middleware: `frontend/middleware.ts` — export `middleware` (or default) as `PageRouteMiddleware[]`
+- Backend page middleware: `backend/middleware.ts` — export `middleware` (or default) as `PageRouteMiddleware[]`
 - API routes: `api/<method>/<path>.ts` → `/api/<path>` dispatched by method
 - Subscribers: `subscribers/*.ts` — export default handler + `metadata` with `{ event: string, persistent?: boolean, id?: string }`
 - Workers: `workers/*.ts` — export default handler + `metadata` with `{ queue: string, id?: string, concurrency?: number }`
@@ -288,6 +290,9 @@ Define route interceptors in `api/interceptors.ts` and export `interceptors`.
 - `before`/`after` hooks must be fail-closed and timeout-safe.
 - If `before` rewrites body/query, return a schema-compatible payload (route handler re-validates it).
 - For CRUD list narrowing, prefer writing `query.ids` (comma-separated UUIDs). The CRUD factory merges/intersects `ids` with existing `id` filters.
+- Custom (non-CRUD) API routes are opt-in: call `runCustomRouteAfterInterceptors(...)` from `@open-mercato/shared/lib/crud/custom-route-interceptor`.
+- For unauthenticated custom routes (e.g. login), pass route-local context with empty identity values (`userId`, `tenantId`, `organizationId`) unless the route has a trusted authenticated principal.
+- Phase-1 custom-route contract supports `after` hooks only and JSON body mutation (`merge`/`replace`) without header/cookie mutation.
 
 ## Component Replacement
 
@@ -346,6 +351,8 @@ When extending another module's data, add a separate extension entity — never 
 - Features declared per module in `acl.ts`, naming: `<module>.<action>`
 - Server-side check: `rbacService.userHasAllFeatures(userId, features, { tenantId, organizationId })`
 - Special flags: `isSuperAdmin` (all features), organization visibility list
+- Treat wildcard grants as part of the ACL contract: `module.*` and `*` satisfy matching concrete features.
+- When a runtime helper evaluates raw granted feature arrays directly (for example nav builders, notification handlers, mutation guards, command interceptors, or AI tools), MUST use the shared wildcard-aware matcher instead of exact string comparisons.
 
 ```typescript
 // acl.ts

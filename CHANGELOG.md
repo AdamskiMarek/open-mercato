@@ -1,3 +1,163 @@
+# 0.4.10 (2026-04-01)
+
+## Highlights
+This release delivers **Customers v2** 👥 (SPEC-046a & SPEC-046b) — a complete redesign of the customers module with updated people/companies data model and enhanced CRUD operations. It also ships **Integration Marketplace specs** 🔌 for commands, events, and projects, a comprehensive **ACL wildcard hardening** 🔐 effort across navigation and runtime gates, and significant **Standalone & Docker** 🐳 infrastructure improvements.
+
+## ✨ Features
+
+### 👥 Customers v2 — SPEC-046a & SPEC-046b
+- Complete redesign of the customers module with updated data models for people and companies, improved relationships, and enhanced CRUD operations. (#1050) *(@maciej-dudziak)*
+
+### 🔌 Integration Commands, Events & Projects Specs
+- New specifications for integration marketplace commands, events, and project-scoped integration management. (#1092) *(@pkarw)*
+
+## 🐛 Fixes
+
+### 🔐 Security & ACL
+- 🛡️ Harden wildcard ACL handling — aligned wildcard feature matching across navigation sections, runtime gates (menu items, notification handlers, mutation guards, command interceptors), and audit permission checks. (#1079, #1086) *(@pkarw)*
+- 🔒 Hide upload button for users without `attachments.manage` permission. (#1093) *(@BarWyDev)*
+- 🏢 Hide "All Organizations" in directory when user lacks cross-org access. (#1102) *(@mat-gren)*
+- 📦 Bump transitive deps to patch security vulnerabilities. (#1091) *(@pkarw)*
+
+### 💰 Sales & Catalog
+- 🔢 Generate new order number when converting quote to order instead of reusing quote number. (#1097) *(@muhammadusman586)*
+- 🔄 Restore variant list after clearing selection in quote/order line items. (#1073) *(@pkarw)*
+
+### 🖥️ UI & UX
+- 🔔 Notification panel layout and behavior improvements. (#1081) *(@pkarw, @maciej-dudziak)*
+- 🧹 Remove unused webhook settings component from the sidebar. *(@pkarw)*
+- 🔄 Re-fetch LookupSelect items when options transitions from array to undefined. *(@amtmich)*
+
+### 🐳 Standalone & Docker
+- 🔧 Multiple standalone app packaging and runtime fixes. (#1105, #1109) *(@pkarw)*
+- 🐳 Docker permissions, pre-built image support, and healthcheck endpoint fixes. *(@pkarw)*
+- 📁 Update Dockerfile to use `.mercato` directory and adjust build steps. (#1094) *(@MStaniaszek1998)*
+- ✅ Improve standalone `create-app` validation and query alias handling. (#1098) *(@pkarw)*
+
+### ⚙️ Core & Infrastructure
+- 🛑 CLI: wait for child processes on shutdown to prevent stale Next.js lock files. (#1096) *(@mat-gren)*
+- 🔍 Fix onboarding vector reindex hanging. (#1117) *(@pkarw)*
+- 📎 Fix todos attachments handling. (#1121) *(@maciej-dudziak)*
+- ✅ Fix validation logic. (#1122) *(@maciej-dudziak)*
+- 🔧 CR fixes — various code review follow-ups. (#1116, #1128) *(@pkarw)*
+
+## 👥 Contributors
+
+- @pkarw
+- @maciej-dudziak
+- @mat-gren
+- @muhammadusman586
+- @MStaniaszek1998
+- @BarWyDev
+- @amtmich
+
+---
+
+# 0.4.9 (2026-03-25)
+
+## Highlights
+This release delivers **Webhooks** 🔔 (SPEC-057) — full outbound & inbound webhook infrastructure with Standard Webhooks signing and delivery queues. It also ships **Pay Links & Checkout** 💳 with shareable payment links, the **Security Enterprise** module 🔐 with advanced access controls, and the **InPost Shipping Carrier** integration 🚚 with ShipX API conformance and shipment wizard (later extracted to official-modules). Additionally: **Official Modules CLI**, **Marketing Consents**, **AI Assistant Code Mode**, and a large batch of bug fixes, i18n additions, and integration test coverage.
+
+## ✨ Features
+
+### 🔔 Webhooks (SPEC-057)
+- Full outbound and inbound webhooks implementation with Standard Webhooks signing, delivery queues, admin UI, and marketplace webhook settings. (#1010) *(@pkarw)*
+- Webhook updates — bug fixes and refinements to the webhooks system. (#1059) *(@pkarw)*
+
+### 💳 Pay Links & Checkout
+- New `checkout` package and Pay Links feature per the `2026-03-19-checkout-pay-links.md` spec — shareable payment links for orders with checkout flow. (#1025, #1027) *(@pkarw)*
+
+### ✅ Marketing Consents & Updated Terms/Privacy
+- Marketing consent management with updated terms of service and privacy policy static pages. (#1058) *(@pkarw)*
+
+### 📦 Official Modules CLI
+- CLI commands to provision, add, and enable modules from the official-modules repository. (#1003) *(@dominikpalatynski)*
+- `--eject` support for `module add` and `module enable` commands with aligned docs/tests. *(@dominikpalatynski)*
+- `CliEnvironment` value-object for improved standalone app path resolution and integration test discovery. *(@dominikpalatynski)*
+- Enhanced module management with module-specific options and improved documentation. *(@dominikpalatynski)*
+
+### 🚚 InPost Shipping Carrier Integration
+- Complete InPost carrier integration package with ShipX API conformance, drop-off point picker with Points API search, shipment creation wizard, parcel template selection, and full i18n (en/es/de). (#964) *(@gracjan-gorecki)*
+- Shipment creation wizard with `ts-pattern` matching and unit tests. *(@gracjan-gorecki)*
+- Official docs conformance, live test hardening, and demo page fixes. *(@gracjan-gorecki)*
+- Later extracted to official-modules repository. *(@gracjan-gorecki)*
+
+### 🔐 Security Enterprise Module
+- Enterprise security module implementation with advanced access controls. (#938) *(@dominikpalatynski)*
+
+### 🤖 AI Assistant Code Mode
+- Code mode tools for the MCP AI assistant with type injection, sandbox evaluation, and improved error formatting. *(@wojciech-baklazec)*
+- Optional session token with API key fallback and MCP code mode tests. *(@wojciech-baklazec)*
+- Auto-wrap bare expressions in MCP sandbox. *(@wojciech-baklazec)*
+
+### 🗃️ Other Features
+- 🚀 Release channels documentation and develop snapshot release workflow. (#1041) *(@dominikpalatynski)*
+- 🧪 SPEC-050 catalog unit tests phase 2 — expanded test coverage for catalog module. (#1024) *(@migsilva89)*
+- 🧰 Integration test helpers exported at npm-published paths for standalone apps. (#1037, #1046) *(@mat-gren)*
+- ⚙️ Settings page reorganization for improved usability. (#1055) *(@maciej-dudziak)*
+- 🔄 Redundant flow improvement after creating product variant. (#950) *(@rotynski)*
+- 🧪 SPEC-050 catalog integration tests phase 3 — 10 new test files (TC-CAT-016 through TC-CAT-025) covering category edit/delete, offer CRUD, price management, option schemas, advanced filtering, duplicate SKU validation, soft-delete, media, multi-variant products, and pricing edge cases. (#1053) *(@migsilva89)*
+- 🔧 SPEC for Dev/build coexistence — safe side-by-side `yarn dev` and `yarn build` with onboarding lock and i18n fixes for checkout, security, and onboarding modules. *(@pkarw)*
+
+## 🐛 Fixes
+- 🧭 Move Security and Developers modules to Settings sidebar for better discoverability. (#1060) *(@muhammadusman586)*
+- 💱 Derive order default currency from catalog price kind instead of hardcoded default (fixes #982). (#1056) *(@mwardon)*
+- 🔄 Redirect to workflow definitions list after create (fixes #971). (#983) *(@rafal-makara)*
+- 🔑 Seed custom role ACLs after `seedDefaults` — correct initialization order. (#1049) *(@mat-gren)*
+- 🔑 Support custom roles in `defaultRoleFeatures` alongside built-in roles. (#1040) *(@mat-gren)*
+- 🔍 Keep session on global search 403 and show permission message instead of logout. (#1008, #1026) *(@muhammadusman586, @pkarw)*
+- 📦 Fix product SKU & category hidden in UI (fixes #970). (#995) *(@maciej-dudziak)*
+- 👥 Fix filtering users + missing translations (fixes #997). (#1011) *(@maciej-dudziak)*
+- 👤 Fix role assignment issues. (#1013) *(@maciej-dudziak)*
+- 📋 Populate select options for inline grouped fields in CrudForm. (#993) *(@muhammadusman586)*
+- 🔢 Remove 8-item cap from combobox suggestions for currency dropdown. (#998) *(@muhammadusman586)*
+- 🔙 Add back-to-login navigation on reset password page (fixes #969). (#984) *(@jszarras)*
+- 🌍 Add missing translations for double name label (fixes #893). (#1009) *(@karol-kozer)*
+- 🌍 Add missing validation translations (fixes #900). (#1002) *(@karol-kozer)*
+- 🌍 Add missing translations (fixes #896). (#1001) *(@karol-kozer)*
+- 🪟 Handle OpenAPI generator paths correctly on Windows. (#1043) *(@dominikpalatynski)*
+- 🛡️ Guard `catalog_product_offers` references in translation migration. (#1048) *(@mat-gren)*
+- 🔧 Wire integration test infrastructure for standalone `create-app` projects. (#1046) *(@mat-gren)*
+- 📄 Preserve regex patterns, fix ZodRecord/passthrough schemas in OpenAPI generation. *(@wojciech-baklazec)*
+- 🔑 Restrict employee role from accessing module settings pages — added proper `defaultRoleFeatures` for catalog, customers, and sales. (#1065) *(@amtmich)*
+- 💬 Keep messages autosuggest working for multi-character recipient queries with unit tests. (#1062) *(@dominikpalatynski)*
+
+## 🛠️ Improvements
+- 🏗️ Type `buildAdminNav` params and optimize parent-finding algorithm. (#1045) *(@maciej-cielecki)*
+- 📝 Spec naming strategy fixed to avoid filename conflicts. (#1022) *(@pkarw)*
+- 🔧 Add `chance` and `@types/chance` as explicit devDependencies. *(@gracjan-gorecki)*
+
+## 📝 Specs & Documentation
+- 📋 SPEC-052: Use-Case Starters Framework. (#825) *(@mat-gren)*
+- 📋 SPEC-053c: Partner Portal & Module Slimming. (#1012) *(@mat-gren)*
+- 📖 Updated examples repo to ready-apps, removed superseded SPEC-062. (#1036) *(@mat-gren)*
+- 📖 Aligned SPEC-053 family bootstrap flow with SPEC-062. (#1006) *(@mat-gren)*
+- 📖 Updated enterprise README with all delivered modules and fixed license year. (#1007) *(@mat-gren)*
+- 📋 SPEC-041: Core timesheets functionality specification (SPEC-069). (#678) *(@mpiatkowski)*
+- 📁 Move implemented specs to `implemented/` folder for better organization (fixes #1039). (#1064) *(@karol-kozer)*
+- 🔗 Specs reorganization and links fixes. *(@pkarw)*
+
+## 👥 Contributors
+
+- @pkarw
+- @gracjan-gorecki
+- @mat-gren
+- @wojciech-baklazec
+- @dominikpalatynski
+- @muhammadusman586
+- @maciej-dudziak
+- @karol-kozer
+- @marcinwadon
+- @rafal-makara
+- @maciej-cielecki
+- @migsilva89
+- @jszarras
+- @rotynski
+- @amtmich
+- @mpiatkowski
+
+---
+
 # 0.4.8 (2026-03-17)
 
 ## Highlights

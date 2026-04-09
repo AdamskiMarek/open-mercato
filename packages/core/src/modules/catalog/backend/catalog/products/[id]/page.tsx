@@ -5,6 +5,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { Page, PageBody } from "@open-mercato/ui/backend/Page";
+import { ErrorMessage } from "@open-mercato/ui/backend/detail";
 import {
   CrudForm,
   type CrudFormGroup,
@@ -67,8 +68,13 @@ import {
   sanitizeProductWeight,
   updateDimensionValue,
   updateWeightValue,
+  isConfigurableProductType,
 } from "@open-mercato/core/modules/catalog/components/products/productForm";
-import type { CatalogProductOptionSchema } from "@open-mercato/core/modules/catalog/data/types";
+import {
+  CATALOG_PRODUCT_TYPES,
+  type CatalogProductOptionSchema,
+  type CatalogProductType,
+} from "@open-mercato/core/modules/catalog/data/types";
 import { MetadataEditor } from "@open-mercato/core/modules/catalog/components/products/MetadataEditor";
 import {
   buildAttachmentImageUrl,
@@ -571,6 +577,14 @@ export default function EditCatalogProductPage({
           title: typeof record.title === "string" ? record.title : "",
           subtitle: typeof record.subtitle === "string" ? record.subtitle : "",
           handle: typeof record.handle === "string" ? record.handle : "",
+          sku: typeof record.sku === "string" ? record.sku : "",
+          productType: (
+            typeof record.product_type === "string"
+              ? record.product_type
+              : typeof record.productType === "string"
+                ? record.productType
+                : "simple"
+          ) as CatalogProductType,
           description:
             typeof record.description === "string" ? record.description : "",
           useMarkdown: Boolean(metadata.__useMarkdown),
@@ -672,6 +686,21 @@ export default function EditCatalogProductPage({
     };
   }, []);
 
+  // Next.js client-side navigation does not scroll to hash targets.
+  // Runs without a dependency array intentionally: the target element is rendered
+  // asynchronously by CrudForm, so we need to retry until it exists in the DOM.
+  // The ref guard ensures scrollIntoView fires at most once.
+  const hasScrolledToHash = React.useRef(false)
+  React.useEffect(() => {
+    if (hasScrolledToHash.current) return
+    const hash = window.location.hash.replace('#', '')
+    if (!hash) return
+    const el = document.getElementById(hash)
+    if (!el) return
+    hasScrolledToHash.current = true
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
+
   const handleVariantDeleted = React.useCallback((variantId: string) => {
     setVariants((prev) => prev.filter((variant) => variant.id !== variantId));
   }, []);
@@ -765,6 +794,7 @@ export default function EditCatalogProductPage({
             setValue={setValue}
             errors={errors}
             taxRates={taxRates}
+            isLoadingProduct={loading}
           />
         ),
       },
@@ -855,6 +885,7 @@ export default function EditCatalogProductPage({
           : [],
         defaultMediaId: parsed.data.defaultMediaId ?? null,
         defaultMediaUrl: parsed.data.defaultMediaUrl ?? "",
+        productType: (parsed.data.productType ?? "simple") as CatalogProductType,
         hasVariants: parsed.data.hasVariants ?? false,
         options: Array.isArray(parsed.data.options) ? parsed.data.options : [],
         variants: Array.isArray(parsed.data.variants)
@@ -1025,9 +1056,13 @@ export default function EditCatalogProductPage({
         subtitle: values.subtitle?.trim() || undefined,
         description,
         handle,
+        sku: values.sku?.trim() || null,
+        productType: values.productType || "simple",
         taxRateId: values.taxRateId ?? null,
         taxRate: productTaxRateValue ?? null,
-        isConfigurable: Boolean(values.hasVariants),
+        isConfigurable: isConfigurableProductType(
+          values.productType || "simple",
+        ),
         metadata,
         dimensions,
         weightValue: weight?.value ?? null,
@@ -1187,12 +1222,22 @@ export default function EditCatalogProductPage({
     return (
       <Page>
         <PageBody>
-          <div className="rounded border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            {t(
+          <ErrorMessage
+            label={t(
               "catalog.products.edit.errors.idMissing",
               "Product identifier is missing.",
             )}
-          </div>
+          />
+        </PageBody>
+      </Page>
+    );
+  }
+
+  if (error && !loading) {
+    return (
+      <Page>
+        <PageBody>
+          <ErrorMessage label={error} />
         </PageBody>
       </Page>
     );
@@ -1201,11 +1246,6 @@ export default function EditCatalogProductPage({
   return (
     <Page>
       <PageBody>
-        {error ? (
-          <div className="mb-4 rounded border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            {error}
-          </div>
-        ) : null}
         <CrudForm<ProductFormValues>
           title={t("catalog.products.edit.title", "Edit product")}
           backHref="/backend/catalog/products"
@@ -1253,6 +1293,7 @@ type ProductDetailsSectionProps = ProductFormGroupProps & { productId: string };
 
 type ProductMetaSectionProps = ProductFormGroupProps & {
   taxRates: TaxRateSummary[];
+  isLoadingProduct?: boolean;
 };
 
 type ProductVariantsSectionProps = Omit<
@@ -2201,13 +2242,25 @@ function ProductMetaSection({
   setValue,
   errors,
   taxRates,
+  isLoadingProduct = false,
 }: ProductMetaSectionProps) {
   const t = useT();
   const handleValue = typeof values.handle === "string" ? values.handle : "";
   const titleSource = typeof values.title === "string" ? values.title : "";
   const autoHandleEnabledRef = React.useRef(handleValue.trim().length === 0);
+  const autoHandleInitializedRef = React.useRef(false);
+  const previousTitleRef = React.useRef(titleSource);
 
   React.useEffect(() => {
+    if (isLoadingProduct) return;
+    if (!autoHandleInitializedRef.current) {
+      autoHandleInitializedRef.current = true;
+      previousTitleRef.current = titleSource;
+      return;
+    }
+    const titleChanged = titleSource !== previousTitleRef.current;
+    previousTitleRef.current = titleSource;
+    if (!titleChanged) return;
     if (!autoHandleEnabledRef.current) return;
     const normalizedTitle = titleSource.trim();
     if (!normalizedTitle) {
@@ -2220,7 +2273,7 @@ function ProductMetaSection({
     if (nextHandle !== handleValue) {
       setValue("handle", nextHandle);
     }
-  }, [titleSource, handleValue, setValue]);
+  }, [handleValue, isLoadingProduct, setValue, titleSource]);
 
   const handleHandleInputChange = React.useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -2284,6 +2337,77 @@ function ProductMetaSection({
         </p>
         {errors.handle ? (
           <p className="text-xs text-red-600">{errors.handle}</p>
+        ) : null}
+      </div>
+
+      <div className="space-y-2">
+        <Label>{t("catalog.products.form.sku", "SKU")}</Label>
+        <Input
+          value={values.sku}
+          onChange={(event) => setValue("sku", event.target.value)}
+          placeholder={t(
+            "catalog.products.create.placeholders.sku",
+            "e.g., PROD-001",
+          )}
+          className="font-mono"
+        />
+        <p className="text-xs text-muted-foreground">
+          {t(
+            "catalog.products.create.skuHelp",
+            "Unique product identifier. Letters, numbers, hyphens, underscores, periods.",
+          )}
+        </p>
+        {errors.sku ? (
+          <p className="text-xs text-red-600">{errors.sku}</p>
+        ) : null}
+      </div>
+
+      <div className="space-y-2">
+        <Label>
+          {t("catalog.products.form.productType", "Product type")}
+        </Label>
+        <select
+          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          value={values.productType || "simple"}
+          onChange={(event) => {
+            const nextType = event.target.value;
+            setValue("productType", nextType);
+            const nextIsConfigurable =
+              isConfigurableProductType(nextType);
+            if (nextIsConfigurable && !values.hasVariants) {
+              setValue("hasVariants", true);
+            } else if (
+              !nextIsConfigurable &&
+              values.hasVariants
+            ) {
+              setValue("hasVariants", false);
+            }
+          }}
+        >
+          {CATALOG_PRODUCT_TYPES.map((type) => {
+            const isDisabled =
+              type === "bundle" || type === "grouped";
+            return (
+              <option
+                key={type}
+                value={type}
+                disabled={isDisabled}
+              >
+                {t(
+                  `catalog.products.types.${type}`,
+                  type,
+                )}
+                {isDisabled
+                  ? ` (${t("common.comingSoon", "Coming soon")})`
+                  : ""}
+              </option>
+            );
+          })}
+        </select>
+        {errors.productType ? (
+          <p className="text-xs text-red-600">
+            {errors.productType}
+          </p>
         ) : null}
       </div>
 

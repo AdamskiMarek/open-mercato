@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 // Note: Generated files and DI container are imported statically to avoid ESM/CJS interop issues.
 // Commands that need to run before generation (e.g., `init`) handle missing modules gracefully.
 
@@ -11,6 +10,7 @@ import { parseBooleanToken } from '@open-mercato/shared/lib/boolean'
 import { getSslConfig } from '@open-mercato/shared/lib/db/ssl'
 import { getRedisUrl } from '@open-mercato/shared/lib/redis/connection'
 import { resolveInitDerivedSecrets } from './lib/init-secrets'
+import { parseModuleInstallArgs } from './lib/module-install-args'
 // Lazy-imported to avoid pulling in `testcontainers` (devDependency) at startup
 const lazyIntegration = () => import('./lib/testing/integration')
 import type { ChildProcess } from 'node:child_process'
@@ -23,6 +23,74 @@ export function padByCodePointWidth(value: string, targetWidth: number): string 
   const valueWidth = [...value].length
   if (valueWidth >= targetWidth) return value
   return `${value}${' '.repeat(targetWidth - valueWidth)}`
+}
+
+type ErrorWithCause = {
+  message?: string
+  code?: string
+  cause?: unknown
+  errors?: unknown[]
+}
+
+function collectNestedErrors(error: unknown, seen = new Set<unknown>()): ErrorWithCause[] {
+  if (!error || seen.has(error)) {
+    return []
+  }
+
+  seen.add(error)
+
+  if (typeof error !== 'object') {
+    return [{ message: String(error) }]
+  }
+
+  const current = error as ErrorWithCause
+  const nested: ErrorWithCause[] = [current]
+
+  if (Array.isArray(current.errors)) {
+    for (const item of current.errors) {
+      nested.push(...collectNestedErrors(item, seen))
+    }
+  }
+
+  if (current.cause) {
+    nested.push(...collectNestedErrors(current.cause, seen))
+  }
+
+  return nested
+}
+
+function getDatabaseTargetLabel(): string {
+  const rawUrl = process.env.DATABASE_URL?.trim()
+  if (!rawUrl) {
+    return 'the database configured by DATABASE_URL'
+  }
+
+  try {
+    const parsed = new URL(rawUrl)
+    const host = parsed.hostname || 'localhost'
+    const port = parsed.port || '5432'
+    const database = parsed.pathname.replace(/^\/+/, '') || '(default database)'
+    return `PostgreSQL at ${host}:${port}/${database}`
+  } catch {
+    return 'the database configured by DATABASE_URL'
+  }
+}
+
+function formatCliFailureMessage(modName: string, cmdName: string, error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  const nestedErrors = collectNestedErrors(error)
+
+  const isDatabaseCommand = modName === 'db' && ['migrate', 'generate', 'greenfield'].includes(cmdName)
+  const hasConnectionRefused = nestedErrors.some((item) => item.code === 'ECONNREFUSED' || /ECONNREFUSED|Connection refused|connect ECONNREFUSED/i.test(item.message || ''))
+  const hasDnsFailure = nestedErrors.some((item) => item.code === 'ENOTFOUND' || item.code === 'EAI_AGAIN' || /ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(item.message || ''))
+
+  if (isDatabaseCommand && (hasConnectionRefused || hasDnsFailure)) {
+    const target = getDatabaseTargetLabel()
+    const reason = hasConnectionRefused ? 'refused the connection' : 'could not be resolved'
+    return `${target} is not reachable: it ${reason}. Start the database service or fix DATABASE_URL in .env, then retry \`yarn db:${cmdName}\`.`
+  }
+
+  return message
 }
 
 async function ensureEnvLoaded() {
@@ -51,6 +119,51 @@ async function ensureEnvLoaded() {
   try {
     await import('dotenv/config')
   } catch {}
+}
+
+function resolveInstalledBinary(baseDirs: string[], relativeBinPath: string): string {
+  const checked = new Set<string>()
+  for (const baseDir of baseDirs) {
+    const candidate = path.join(baseDir, 'node_modules', relativeBinPath)
+    checked.add(candidate)
+    if (fs.existsSync(candidate)) return candidate
+  }
+  throw new Error(
+    `Could not find installed binary "${relativeBinPath}". Checked: ${Array.from(checked).join(', ')}`,
+  )
+}
+
+async function handleDirectEjectCommand(args: string[]): Promise<number> {
+  const { createResolver } = await import('./lib/resolver')
+  const { listEjectableModules, ejectModule } = await import('./lib/eject')
+  const resolver = createResolver()
+  const commandArgs = args.filter(Boolean)
+  const isList = commandArgs.includes('--list') || commandArgs.includes('-l')
+  const moduleId = isList ? undefined : commandArgs.find((arg) => !arg.startsWith('-'))
+
+  if (isList || !moduleId) {
+    const ejectable = listEjectableModules(resolver)
+    if (ejectable.length === 0) {
+      console.log('No ejectable modules found.')
+    } else {
+      console.log('Ejectable modules:\n')
+      for (const mod of ejectable) {
+        const desc = mod.description ? ` — ${mod.description}` : ''
+        console.log(`  ${mod.id} (from: ${mod.from})${desc}`)
+      }
+      console.log('\nUsage: yarn mercato eject <moduleId>')
+    }
+    return 0
+  }
+
+  console.log(`Ejecting module "${moduleId}"...`)
+  ejectModule(resolver, moduleId)
+  console.log(`\n✅ Module "${moduleId}" ejected successfully!\n`)
+  console.log('Next steps:')
+  console.log('  1. Run generators:  yarn mercato generate all')
+  console.log(`  2. Customize:       edit src/modules/${moduleId}/`)
+  console.log('  3. Start dev:       yarn dev')
+  return 0
 }
 
 // Helper to run a CLI command directly (without spawning a process)
@@ -260,6 +373,7 @@ export async function run(argv = process.argv) {
               console.error(
                 '   To reset and initialize from scratch, run: yarn mercato init --reinstall',
               )
+              console.error('   Standalone shortcut: yarn setup --reinstall')
               console.error('   Shortcut script: yarn reinstall')
               return 1
             }
@@ -274,13 +388,14 @@ export async function run(argv = process.argv) {
       // Step 1: Run generators directly (no process spawn)
       console.log('🔧 Preparing modules (registry, entities, DI)...')
       const { createResolver } = await import('./lib/resolver')
-      const { generateEntityIds, generateModuleRegistry, generateModuleRegistryCli, generateModuleEntities, generateModuleDi, generateOpenApi } = await import('./lib/generators')
+      const { generateEntityIds, generateModuleRegistry, generateModuleRegistryCli, generateModuleEntities, generateModuleDi, generateModulePackageSources, generateOpenApi } = await import('./lib/generators')
       const resolver = createResolver()
       await generateEntityIds({ resolver, quiet: true })
       await generateModuleRegistry({ resolver, quiet: true })
       await generateModuleRegistryCli({ resolver, quiet: true })
       await generateModuleEntities({ resolver, quiet: true })
       await generateModuleDi({ resolver, quiet: true })
+      await generateModulePackageSources({ resolver, quiet: true })
       await generateOpenApi({ resolver, quiet: true })
       console.log('✅ Modules prepared\n')
 
@@ -420,6 +535,12 @@ export async function run(argv = process.argv) {
         }
         console.log('✅ Module defaults seeded\n')
 
+        // Seed ACLs for custom roles created by app modules in seedDefaults.
+        // ensureDefaultRoleAcls runs before seedDefaults (in setupTenantAndPrimaryUser),
+        // so custom roles don't exist yet at that point. This second pass picks them up.
+        const { ensureCustomRoleAcls } = await import('@open-mercato/core/modules/auth/lib/setup-app')
+        await ensureCustomRoleAcls(seedEm, tenantId, allModules)
+
         if (skipExamples) {
           console.log('🚫 Example data seeding skipped (--no-examples)\n')
         } else {
@@ -524,39 +645,72 @@ export async function run(argv = process.argv) {
     return exitCode
   }
 
-  // Handle eject command directly (bootstrap-free)
-  if (first === 'eject') {
+  if (first === 'module') {
     try {
-      const { createResolver } = await import('./lib/resolver')
-      const { listEjectableModules, ejectModule } = await import('./lib/eject')
-      const resolver = createResolver()
+      const subcommand = second
+      const commandArgs = remaining.filter(Boolean)
 
-      const isList = second === '--list' || second === '-l'
-      const moduleId = !isList ? second : undefined
-
-      if (isList || !moduleId) {
-        const ejectable = listEjectableModules(resolver)
-        if (ejectable.length === 0) {
-          console.log('No ejectable modules found.')
-        } else {
-          console.log('Ejectable modules:\n')
-          for (const mod of ejectable) {
-            const desc = mod.description ? ` — ${mod.description}` : ''
-            console.log(`  ${mod.id} (from: ${mod.from})${desc}`)
-          }
-          console.log('\nUsage: yarn mercato eject <moduleId>')
-        }
+      if (!subcommand || subcommand === 'help' || subcommand === '--help' || subcommand === '-h') {
+        console.log('Usage: yarn mercato module <add|enable|eject> ...')
+        console.log('  yarn mercato module add <packageSpec> [--module <moduleId>] [--eject]')
+        console.log('  yarn mercato module enable <packageName> [--module <moduleId>] [--eject]')
+        console.log('  yarn mercato module eject <moduleId>')
         return 0
       }
 
-      console.log(`Ejecting module "${moduleId}"...`)
-      ejectModule(resolver, moduleId)
-      console.log(`\n✅ Module "${moduleId}" ejected successfully!\n`)
-      console.log('Next steps:')
-      console.log('  1. Run generators:  yarn mercato generate all')
-      console.log(`  2. Customize:       edit src/modules/${moduleId}/`)
-      console.log('  3. Start dev:       yarn dev')
-      return 0
+      if (subcommand === 'add') {
+        const { createResolver } = await import('./lib/resolver')
+        const { addOfficialModule } = await import('./lib/module-install')
+        const { packageSpec, eject, moduleId } = parseModuleInstallArgs(commandArgs)
+
+        if (!packageSpec) {
+          console.error('Usage: yarn mercato module add <packageSpec> [--module <moduleId>] [--eject]')
+          return 1
+        }
+
+        const result = await addOfficialModule(createResolver(), packageSpec, eject, moduleId ?? undefined)
+        console.log(`\n✅ Module "${result.moduleId}" enabled from ${result.from}.\n`)
+        console.log('Next steps:')
+        console.log('  1. Review generated files if needed: .mercato/generated/')
+        console.log('  2. Start dev:                         yarn dev')
+        return 0
+      }
+
+      if (subcommand === 'enable') {
+        const packageName = commandArgs.find((arg) => !arg.startsWith('-'))
+        if (!packageName) {
+          console.error('Usage: yarn mercato module enable <packageName> [--module <moduleId>] [--eject]')
+          return 1
+        }
+
+        const { createResolver } = await import('./lib/resolver')
+        const { enableOfficialModule } = await import('./lib/module-install')
+        const { moduleId, eject } = parseModuleInstallArgs(commandArgs)
+        const result = await enableOfficialModule(createResolver(), packageName, moduleId ?? undefined, eject)
+        console.log(`\n✅ Module "${result.moduleId}" enabled from ${result.from}.\n`)
+        console.log('Next steps:')
+        console.log('  1. Review generated files if needed: .mercato/generated/')
+        console.log('  2. Start dev:                         yarn dev')
+        return 0
+      }
+
+      if (subcommand === 'eject') {
+        return handleDirectEjectCommand(commandArgs)
+      }
+
+      console.error(`Unknown module subcommand "${subcommand}".`)
+      return 1
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error(`❌ Module command failed: ${message}`)
+      return 1
+    }
+  }
+
+  // Handle eject command directly (bootstrap-free)
+  if (first === 'eject') {
+    try {
+      return handleDirectEjectCommand(parts.slice(1))
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error)
       console.error(`❌ Eject failed: ${message}`)
@@ -880,7 +1034,7 @@ export async function run(argv = process.argv) {
         command: 'all',
         run: async (args: string[]) => {
           const { createResolver } = await import('./lib/resolver')
-          const { generateEntityIds, generateModuleRegistry, generateModuleRegistryCli, generateModuleEntities, generateModuleDi, generateOpenApi } = await import('./lib/generators')
+          const { generateEntityIds, generateModuleRegistry, generateModuleRegistryCli, generateModuleEntities, generateModuleDi, generateModulePackageSources, generateOpenApi } = await import('./lib/generators')
           const resolver = createResolver()
           const quiet = args.includes('--quiet') || args.includes('-q')
 
@@ -890,6 +1044,7 @@ export async function run(argv = process.argv) {
           await generateModuleRegistryCli({ resolver, quiet })
           await generateModuleEntities({ resolver, quiet })
           await generateModuleDi({ resolver, quiet })
+          await generateModulePackageSources({ resolver, quiet })
           await generateOpenApi({ resolver, quiet })
           console.log('All generators completed.')
         },
@@ -907,9 +1062,10 @@ export async function run(argv = process.argv) {
         command: 'registry',
         run: async (args: string[]) => {
           const { createResolver } = await import('./lib/resolver')
-          const { generateModuleRegistry } = await import('./lib/generators')
+          const { generateModulePackageSources, generateModuleRegistry } = await import('./lib/generators')
           const resolver = createResolver()
           await generateModuleRegistry({ resolver, quiet: args.includes('--quiet') })
+          await generateModulePackageSources({ resolver, quiet: args.includes('--quiet') })
         },
       },
       {
@@ -976,13 +1132,10 @@ export async function run(argv = process.argv) {
         command: 'dev',
         run: async () => {
           const { spawn } = await import('child_process')
-          const path = await import('path')
-          const { createResolver } = await import('./lib/resolver')
-          const resolver = createResolver()
-          const appDir = resolver.getAppDir()
-
-          // In monorepo, packages are hoisted to root; in standalone, they're in app's node_modules
-          const nodeModulesBase = resolver.isMonorepo() ? resolver.getRootDir() : appDir
+          const { resolveEnvironment } = await import('./lib/resolver')
+          const env = resolveEnvironment()
+          const appDir = env.appDir
+          const nodeModulesBases = Array.from(new Set([env.rootDir, appDir]))
 
           const processes: ChildProcess[] = []
           const autoSpawnWorkers = process.env.AUTO_SPAWN_WORKERS !== 'false'
@@ -998,14 +1151,39 @@ export async function run(argv = process.argv) {
             }
           }
 
+          async function cleanupAndWait() {
+            cleanup()
+            // Wait for all child processes to fully exit so they can release lock files
+            await Promise.all(
+              processes.map(
+                (proc) =>
+                  new Promise<void>((resolve) => {
+                    if (proc.exitCode !== null) return resolve()
+                    proc.on('exit', () => resolve())
+                  })
+              )
+            )
+            // Safety net: remove Next.js dev lock file in case the child didn't clean up
+            const lockFile = path.join(appDir, '.mercato', 'next', 'dev', 'lock')
+            try {
+              fs.unlinkSync(lockFile)
+            } catch {
+              // Lock file may already be removed by Next.js — ignore
+            }
+          }
+
           process.on('SIGTERM', cleanup)
           process.on('SIGINT', cleanup)
 
           console.log('[server] Starting Open Mercato in dev mode...')
 
-          // Resolve paths relative to where node_modules are located
-          const nextBin = path.join(nodeModulesBase, 'node_modules/next/dist/bin/next')
-          const mercatoBin = path.join(nodeModulesBase, 'node_modules/@open-mercato/cli/bin/mercato')
+          // Ensure module-package-sources.css exists before Next.js starts
+          const { createResolver: createResolverForSources } = await import('./lib/resolver')
+          const { generateModulePackageSources } = await import('./lib/generators')
+          await generateModulePackageSources({ resolver: createResolverForSources(), quiet: true })
+
+          const nextBin = resolveInstalledBinary(nodeModulesBases, 'next/dist/bin/next')
+          const mercatoBin = resolveInstalledBinary(nodeModulesBases, '@open-mercato/cli/bin/mercato')
 
           // Start Next.js dev
           const nextProcess = spawn('node', [nextBin, 'dev', '--turbopack'], {
@@ -1046,20 +1224,17 @@ export async function run(argv = process.argv) {
             )
           )
 
-          cleanup()
+          await cleanupAndWait()
         },
       },
       {
         command: 'start',
         run: async () => {
           const { spawn } = await import('child_process')
-          const path = await import('path')
-          const { createResolver } = await import('./lib/resolver')
-          const resolver = createResolver()
-          const appDir = resolver.getAppDir()
-
-          // In monorepo, packages are hoisted to root; in standalone, they're in app's node_modules
-          const nodeModulesBase = resolver.isMonorepo() ? resolver.getRootDir() : appDir
+          const { resolveEnvironment } = await import('./lib/resolver')
+          const env = resolveEnvironment()
+          const appDir = env.appDir
+          const nodeModulesBases = Array.from(new Set([env.rootDir, appDir]))
 
           const processes: ChildProcess[] = []
           const autoSpawnWorkers = process.env.AUTO_SPAWN_WORKERS !== 'false'
@@ -1075,14 +1250,26 @@ export async function run(argv = process.argv) {
             }
           }
 
+          async function cleanupAndWait() {
+            cleanup()
+            await Promise.all(
+              processes.map(
+                (proc) =>
+                  new Promise<void>((resolve) => {
+                    if (proc.exitCode !== null) return resolve()
+                    proc.on('exit', () => resolve())
+                  })
+              )
+            )
+          }
+
           process.on('SIGTERM', cleanup)
           process.on('SIGINT', cleanup)
 
           console.log('[server] Starting Open Mercato in production mode...')
 
-          // Resolve paths relative to where node_modules are located
-          const nextBin = path.join(nodeModulesBase, 'node_modules/next/dist/bin/next')
-          const mercatoBin = path.join(nodeModulesBase, 'node_modules/@open-mercato/cli/bin/mercato')
+          const nextBin = resolveInstalledBinary(nodeModulesBases, 'next/dist/bin/next')
+          const mercatoBin = resolveInstalledBinary(nodeModulesBases, '@open-mercato/cli/bin/mercato')
 
           // Start Next.js production server
           const nextProcess = spawn('node', [nextBin, 'start'], {
@@ -1123,7 +1310,7 @@ export async function run(argv = process.argv) {
             )
           )
 
-          cleanup()
+          await cleanupAndWait()
         },
       },
     ],
@@ -1221,7 +1408,7 @@ export async function run(argv = process.argv) {
     console.log(`⏱️ Done in ${ms}ms`)
     return 0
   } catch (e: any) {
-    console.error(`💥 Failed: ${e?.message || e}`)
+    console.error(`💥 Failed: ${formatCliFailureMessage(modName, cmdName, e)}`)
     return 1
   }
 }
