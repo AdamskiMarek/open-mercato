@@ -10,6 +10,7 @@ export type CommandRuntimeContext = {
   selectedOrganizationId: string | null
   organizationIds: string[] | null
   request?: Request
+  syncOrigin?: string | null
 }
 
 export type CommandLogMetadata = {
@@ -26,6 +27,8 @@ export type CommandLogMetadata = {
   payload?: unknown
   snapshotBefore?: unknown
   snapshotAfter?: unknown
+  relatedResourceKind?: string | null
+  relatedResourceId?: string | null
   changes?: Record<string, unknown> | null
   context?: Record<string, unknown> | null
 }

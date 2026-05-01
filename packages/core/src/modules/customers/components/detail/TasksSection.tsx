@@ -431,14 +431,7 @@ export function TasksSection({
         ) : null}
 
         {!isInitialLoading && !hasTasks ? (
-          <TabEmptyState
-            title={emptyState.title}
-            action={{
-              label: emptyState.actionLabel,
-              onClick: openCreateDialog,
-              disabled: isMutating || !entityId,
-            }}
-          />
+          <TabEmptyState title={emptyState.title} />
         ) : null}
 
         {!isInitialLoading && hasTasks ? (
@@ -449,7 +442,7 @@ export function TasksSection({
               </div>
             ) : null}
             {sortedTasks.map((task) => {
-              const todoHref = resolveTodoHref(task.todoSource, task.todoId)
+              const todoHref = task.externalHref ?? resolveTodoHref(task.todoSource, task.todoId)
               const createdLabel = formatDateTime(task.createdAt) ?? emptyLabel
               const meta = renderTaskMeta(task)
               const title = task.title ?? t('customers.people.detail.tasks.untitled', 'Untitled task')
@@ -458,7 +451,7 @@ export function TasksSection({
               const checkboxId = `person-task-${task.id}`
               const isPendingToggle = pendingTaskId === task.todoId
               return (
-                <article key={task.id} className="group space-y-3 rounded-lg border bg-card p-4 transition hover:border-border/80">
+                <article key={task.id} className="group space-y-3 rounded-lg border bg-card p-4 transition hover:border-border/70">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <TimelineItemHeader
                       title={
@@ -570,15 +563,15 @@ export function TasksSection({
                 {t('customers.people.detail.tasks.loadingMore', 'Loading…')}
               </div>
             ) : null}
-            <div className="flex justify-center">
-              <Button asChild variant="outline" size="sm">
-                <Link href="/backend/customer-tasks">
-                  {t('customers.people.detail.tasks.viewAll', 'View all tasks')}
-                </Link>
-              </Button>
-            </div>
           </div>
         ) : null}
+        <div className="flex justify-center">
+          <Button asChild variant="outline" size="sm">
+            <Link href="/backend/customer-tasks">
+              {t('customers.people.detail.tasks.viewAll', 'View all tasks')}
+            </Link>
+          </Button>
+        </div>
       </div>
 
       <TaskDialog
