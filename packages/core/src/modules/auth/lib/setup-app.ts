@@ -459,6 +459,16 @@ async function ensureDefaultRoleAcls(
   }
 }
 
+export async function syncBuiltInRoleAcls(
+  em: EntityManager,
+  tenantId: string,
+  modules?: Module[],
+  options: { includeSuperadminRole?: boolean } = {},
+): Promise<void> {
+  const resolvedModules = modules ?? tryGetModules()
+  await ensureDefaultRoleAcls(em, tenantId, resolvedModules, options)
+}
+
 /**
  * Seed ACLs for custom roles defined in module defaultRoleFeatures.
  * Call this AFTER seedDefaults to pick up roles created by app modules.

@@ -1,10 +1,11 @@
 /** @jest-environment node */
 import { randomUUID } from 'crypto'
 import { registerApiInterceptors } from '@open-mercato/shared/lib/crud/interceptor-registry'
-import { POST } from '@open-mercato/core/modules/auth/api/login'
 
 const tenantId = randomUUID()
 const orgId = randomUUID()
+
+const syncBuiltInRoleAclsMock = jest.fn(async () => undefined)
 
 const authServiceMock = {
   findUsersByEmail: jest.fn(async (email: string) => ([{ id: 1, email, passwordHash: 'hash', tenantId, organizationId: orgId }])),
@@ -36,6 +37,10 @@ jest.mock('@open-mercato/shared/lib/di/container', () => ({
 
 jest.mock('@open-mercato/shared/lib/auth/jwt', () => ({ signJwt: () => 'jwt-token' }))
 
+jest.mock('@open-mercato/core/modules/auth/lib/setup-app', () => ({
+  syncBuiltInRoleAcls: (...args: unknown[]) => syncBuiltInRoleAclsMock(...args),
+}))
+
 jest.mock('@open-mercato/core/modules/auth/lib/rateLimitCheck', () => ({
   checkAuthRateLimit: jest.fn(async () => ({ error: null, compoundKey: null })),
   resetAuthRateLimit: jest.fn(async () => undefined),
@@ -51,10 +56,20 @@ function makeFormData(data: Record<string, string>) {
   return formData
 }
 
+let POST: typeof import('@open-mercato/core/modules/auth/api/login').POST
+
 describe('POST /api/auth/login with custom route interceptors', () => {
   beforeEach(() => {
+    if (!POST) {
+      throw new Error('POST handler not loaded')
+    }
     registerApiInterceptors([])
     jest.clearAllMocks()
+    delete process.env.DEMO_MODE
+  })
+
+  beforeAll(async () => {
+    ;({ POST } = await import('@open-mercato/core/modules/auth/api/login'))
   })
 
   test('accepts application/x-www-form-urlencoded login payloads', async () => {
@@ -177,6 +192,19 @@ describe('POST /api/auth/login with custom route interceptors', () => {
     expect(setCookie).toContain('auth_token=jwt-token')
     expect(setCookie).toContain('session_token=session-token')
     expect(authServiceMock.createSession).toHaveBeenCalledTimes(1)
+  })
+
+  test('repairs built-in role ACLs for demo tenants before issuing the session', async () => {
+    process.env.DEMO_MODE = 'true'
+
+    const req = new Request('http://localhost/api/auth/login', {
+      method: 'POST',
+      body: makeFormData({ email: 'admin@acme.com', password: 'secret' }),
+    })
+
+    const res = await POST(req)
+    expect(res.status).toBe(200)
+    expect(syncBuiltInRoleAclsMock).toHaveBeenCalledWith({}, tenantId)
   })
 
   test('applies body merge from matched after interceptor', async () => {

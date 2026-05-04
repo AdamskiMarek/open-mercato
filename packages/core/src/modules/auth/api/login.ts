@@ -15,6 +15,7 @@ import { checkAuthRateLimit, resetAuthRateLimit } from '@open-mercato/core/modul
 import { runCustomRouteAfterInterceptors } from '@open-mercato/shared/lib/crud/custom-route-interceptor'
 import { sanitizeRedirectPath } from '@open-mercato/core/modules/auth/lib/safeRedirect'
 import { getAppBaseUrl } from '@open-mercato/shared/lib/url'
+import { syncBuiltInRoleAcls } from '@open-mercato/core/modules/auth/lib/setup-app'
 
 const loginRateLimitConfig = readEndpointRateLimitConfig('LOGIN', {
   points: 5, duration: 60, blockDuration: 60, keyPrefix: 'login',
@@ -24,6 +25,10 @@ const loginIpRateLimitConfig = readEndpointRateLimitConfig('LOGIN_IP', {
 })
 
 export const metadata = { requireAuth: false }
+
+function isDemoModeEnabled(): boolean {
+  return parseBooleanToken(process.env.DEMO_MODE ?? '') !== false
+}
 
 // validation comes from userLoginSchema
 
@@ -139,6 +144,11 @@ export async function POST(req: Request) {
     await resetAuthRateLimit(rateLimitCompoundKey, loginRateLimitConfig)
   }
   const resolvedTenantId = tenantId ?? (user.tenantId ? String(user.tenantId) : null)
+  if (resolvedTenantId && isDemoModeEnabled()) {
+    await syncBuiltInRoleAcls(container.resolve('em'), resolvedTenantId)
+    const rbac = container.resolve('rbacService') as { invalidateTenantCache?: (tenantId: string) => Promise<void> } | null
+    await rbac?.invalidateTenantCache?.(resolvedTenantId)
+  }
   const userRoleNames = await auth.getUserRoles(user, resolvedTenantId)
   try {
     const eventBus = (container.resolve('eventBus') as EventBus)
