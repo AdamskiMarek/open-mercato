@@ -1541,7 +1541,10 @@ printRuntimePackagesSummary()
 const watch = startFilteredChild(['generate', 'watch', '--skip-initial'], 'Generator watch', classifyWatchLine)
 const server = startFilteredChild(['server', 'dev'], 'App runtime', classifyServerLine)
 
-const result = await Promise.race([waitForExit(watch), waitForExit(server)])
+const result = await Promise.race([
+  waitForExit(watch).then((exit) => ({ source: 'watch', ...exit })),
+  waitForExit(server).then((exit) => ({ source: 'server', ...exit })),
+])
 if (!isGracefulShutdownResult(result)) {
   shutdown(resolveChildExitCode(result, 0))
 }

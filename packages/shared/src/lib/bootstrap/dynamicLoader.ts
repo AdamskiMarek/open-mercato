@@ -9,6 +9,24 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
+// Detects compiled .mjs files built by the old aliasPlugin that incorrectly
+// remapped @mikro-orm/decorators/legacy → @mikro-orm/core. Those files fail at
+// runtime because @mikro-orm/core v7 no longer exports decorator symbols.
+const staleDecoratorCoreImport = /import\s*\{[^}]*\b(?:Entity|PrimaryKey|Property|ManyToOne|OneToMany|OneToOne|ManyToMany|Enum|Index|Unique|Embeddable|Embedded|Formula)\b[^}]*\}\s*from\s*['"]@mikro-orm\/core['"]/
+
+function compiledModuleNeedsRefresh(jsPath: string): boolean {
+  if (!fs.existsSync(jsPath)) {
+    return true
+  }
+
+  try {
+    const compiled = fs.readFileSync(jsPath, 'utf8')
+    return staleDecoratorCoreImport.test(compiled)
+  } catch {
+    return true
+  }
+}
+
 /**
  * Compile a TypeScript file to JavaScript using esbuild bundler.
  * This bundles the file and all its dependencies, handling JSON imports properly.
@@ -27,7 +45,8 @@ async function compileAndImport(tsPath: string, allowRecovery: boolean = true): 
   }
 
   const needsCompile = !jsExists ||
-    fs.statSync(tsPath).mtimeMs > fs.statSync(jsPath).mtimeMs
+    fs.statSync(tsPath).mtimeMs > fs.statSync(jsPath).mtimeMs ||
+    compiledModuleNeedsRefresh(jsPath)
 
   if (needsCompile) {
     // Dynamically import esbuild only when needed
@@ -50,6 +69,11 @@ async function compileAndImport(tsPath: string, allowRecovery: boolean = true): 
           }
           return { path: resolved }
         })
+
+        build.onResolve({ filter: /^@mikro-orm\/decorators(?:\/legacy)?$/ }, (args) => ({
+          path: args.path,
+          external: true,
+        }))
       },
     }
 
