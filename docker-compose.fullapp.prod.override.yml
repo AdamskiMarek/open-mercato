@@ -1,0 +1,196 @@
+services:
+  app:
+    build:
+      context: .
+      args:
+        - CONTAINER_PORT=${CONTAINER_PORT:-3000}
+    image: open-mercato/app:${DEPLOY_ENV:-prod}
+    user: "0"
+    restart: unless-stopped
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        if [ ! -f /app/docker/scripts/init-or-migrate.sh ]; then
+          echo "ERROR: init-or-migrate.sh not found. Please rebuild the container: docker compose build --no-cache app"
+          exit 1
+        fi
+        INIT_COMMAND='yarn mercato init --no-examples' sh /app/docker/scripts/init-or-migrate.sh
+        yarn start
+    volumes:
+      - init_marker:/tmp/init-marker
+      - attachments_storage:/app/apps/mercato/storage
+    working_dir: /app/apps/mercato
+    ports:
+      - "${APP_PORT:-3000}:${CONTAINER_PORT:-3000}"
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DEPLOY_ENV: ${DEPLOY_ENV:-prod}
+      PORT: ${CONTAINER_PORT:-3000}
+      APP_URL: ${APP_URL}
+      APP_ALLOWED_ORIGINS: ${APP_ALLOWED_ORIGINS}
+      AUTH_SECRET: ${AUTH_SECRET}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-}
+      JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-mercato}:${POSTGRES_PASSWORD}@mercato-postgres-${DEPLOY_ENV:-prod}:5432/${POSTGRES_DB:-open_mercato_prod}}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      EMAIL_FROM: ${EMAIL_FROM}
+      NOTIFICATIONS_EMAIL_FROM: ${NOTIFICATIONS_EMAIL_FROM:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      DEMO_MODE: ${DEMO_MODE:-false}
+      SELF_SERVICE_ONBOARDING_ENABLED: ${SELF_SERVICE_ONBOARDING_ENABLED:-false}
+      NEXT_PUBLIC_UMES_DEVTOOLS: ${NEXT_PUBLIC_UMES_DEVTOOLS:-false}
+      NEXT_PUBLIC_UPGRADE_ACTIONS_ENABLED: ${NEXT_PUBLIC_UPGRADE_ACTIONS_ENABLED:-false}
+      UPGRADE_ACTIONS_ENABLED: ${UPGRADE_ACTIONS_ENABLED:-false}
+      TENANT_DATA_ENCRYPTION: ${TENANT_DATA_ENCRYPTION:-true}
+      TENANT_DATA_ENCRYPTION_DEBUG: ${TENANT_DATA_ENCRYPTION_DEBUG:-false}
+      TENANT_DATA_ENCRYPTION_FALLBACK_KEY: ${TENANT_DATA_ENCRYPTION_FALLBACK_KEY}
+      TENANT_DATA_ENCRYPTION_KEY: ${TENANT_DATA_ENCRYPTION_KEY:-}
+      REDIS_URL: ${REDIS_URL}
+      QUEUE_REDIS_URL: ${QUEUE_REDIS_URL}
+      EVENTS_REDIS_URL: ${EVENTS_REDIS_URL:-}
+      CACHE_REDIS_URL: ${CACHE_REDIS_URL}
+      CACHE_STRATEGY: ${CACHE_STRATEGY:-redis}
+      QUEUE_STRATEGY: ${QUEUE_STRATEGY:-async}
+      AUTO_SPAWN_WORKERS: ${AUTO_SPAWN_WORKERS:-false}
+      AUTO_SPAWN_SCHEDULER: ${AUTO_SPAWN_SCHEDULER:-false}
+      MEILISEARCH_HOST: ${MEILISEARCH_HOST:-http://mercato-meilisearch-${DEPLOY_ENV:-prod}:7700}
+      MEILISEARCH_API_KEY: ${MEILISEARCH_MASTER_KEY}
+      MEILISEARCH_INDEX_PREFIX: ${MEILISEARCH_INDEX_PREFIX:-om}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENCODE_PROVIDER: ${OPENCODE_PROVIDER:-anthropic}
+      NEW_RELIC_APP_NAME: ${NEW_RELIC_APP_NAME:-}
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY:-}
+      OM_ENABLE_ENTERPRISE_MODULES: ${OM_ENABLE_ENTERPRISE_MODULES:-false}
+      OM_ENABLE_ENTERPRISE_MODULES_SSO: ${OM_ENABLE_ENTERPRISE_MODULES_SSO:-false}
+      OM_ENABLE_ENTERPRISE_MODULES_SECURITY: ${OM_ENABLE_ENTERPRISE_MODULES_SECURITY:-false}
+      OM_INIT_SUPERADMIN_EMAIL: ${OM_INIT_SUPERADMIN_EMAIL}
+      OM_INIT_SUPERADMIN_PASSWORD: ${OM_INIT_SUPERADMIN_PASSWORD}
+      SSO_FORCE_ROLE_ON_LOGIN: ${SSO_FORCE_ROLE_ON_LOGIN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      meilisearch:
+        condition: service_healthy
+    networks:
+      - mercato-network-fullapp
+
+  worker:
+    image: open-mercato/app:${DEPLOY_ENV:-prod}
+    restart: unless-stopped
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        yarn mercato queue worker --all
+    working_dir: /app/apps/mercato
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      APP_URL: ${APP_URL}
+      APP_ALLOWED_ORIGINS: ${APP_ALLOWED_ORIGINS}
+      AUTH_SECRET: ${AUTH_SECRET}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-}
+      JWT_SECRET: ${JWT_SECRET}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      EMAIL_FROM: ${EMAIL_FROM}
+      NOTIFICATIONS_EMAIL_FROM: ${NOTIFICATIONS_EMAIL_FROM:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      TENANT_DATA_ENCRYPTION: ${TENANT_DATA_ENCRYPTION:-true}
+      TENANT_DATA_ENCRYPTION_DEBUG: ${TENANT_DATA_ENCRYPTION_DEBUG:-false}
+      TENANT_DATA_ENCRYPTION_FALLBACK_KEY: ${TENANT_DATA_ENCRYPTION_FALLBACK_KEY}
+      TENANT_DATA_ENCRYPTION_KEY: ${TENANT_DATA_ENCRYPTION_KEY:-}
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-mercato}:${POSTGRES_PASSWORD}@mercato-postgres-${DEPLOY_ENV:-prod}:5432/${POSTGRES_DB:-open_mercato_prod}}
+      REDIS_URL: ${REDIS_URL}
+      QUEUE_REDIS_URL: ${QUEUE_REDIS_URL}
+      EVENTS_REDIS_URL: ${EVENTS_REDIS_URL:-}
+      CACHE_REDIS_URL: ${CACHE_REDIS_URL}
+      CACHE_STRATEGY: ${CACHE_STRATEGY:-redis}
+      QUEUE_STRATEGY: ${QUEUE_STRATEGY:-async}
+      MEILISEARCH_HOST: ${MEILISEARCH_HOST:-http://mercato-meilisearch-${DEPLOY_ENV:-prod}:7700}
+      MEILISEARCH_API_KEY: ${MEILISEARCH_MASTER_KEY}
+      MEILISEARCH_INDEX_PREFIX: ${MEILISEARCH_INDEX_PREFIX:-om}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENCODE_PROVIDER: ${OPENCODE_PROVIDER:-anthropic}
+      OM_ENABLE_ENTERPRISE_MODULES: ${OM_ENABLE_ENTERPRISE_MODULES:-false}
+      OM_ENABLE_ENTERPRISE_MODULES_SSO: ${OM_ENABLE_ENTERPRISE_MODULES_SSO:-false}
+      OM_ENABLE_ENTERPRISE_MODULES_SECURITY: ${OM_ENABLE_ENTERPRISE_MODULES_SECURITY:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      meilisearch:
+        condition: service_healthy
+    networks:
+      - mercato-network-fullapp
+
+  postgres:
+    image: pgvector/pgvector:pg17-trixie
+    container_name: mercato-postgres-${DEPLOY_ENV:-prod}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mercato}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mercato}
+      POSTGRES_DB: ${POSTGRES_DB:-open_mercato_prod}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mercato}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mercato-network-fullapp
+
+  redis:
+    image: redis:7-alpine
+    container_name: mercato-redis-${DEPLOY_ENV:-prod}
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mercato-network-fullapp
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.11
+    container_name: mercato-meilisearch-${DEPLOY_ENV:-prod}
+    restart: unless-stopped
+    environment:
+      MEILI_ENV: production
+      MEILI_MASTER_KEY: ${MEILISEARCH_MASTER_KEY}
+      MEILI_NO_ANALYTICS: "true"
+    volumes:
+      - meilisearch_data:/meili_data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mercato-network-fullapp
+
+volumes:
+  postgres_data:
+    name: mercato-postgres-data-${DEPLOY_ENV:-prod}
+  redis_data:
+    name: mercato-redis-data-${DEPLOY_ENV:-prod}
+  meilisearch_data:
+    name: mercato-meilisearch-data-${DEPLOY_ENV:-prod}
+  init_marker:
+    name: mercato-init-marker-${DEPLOY_ENV:-prod}
+  attachments_storage:
+    name: mercato-attachments-storage-${DEPLOY_ENV:-prod}
+
+networks:
+  mercato-network-fullapp:
+    name: mercato-network-${DEPLOY_ENV:-prod}
+    driver: bridge
