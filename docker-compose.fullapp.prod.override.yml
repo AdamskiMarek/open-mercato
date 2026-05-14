@@ -18,6 +18,7 @@ services:
           exit 1
         fi
         INIT_COMMAND='yarn mercato init --no-examples' sh /app/docker/scripts/init-or-migrate.sh
+        yarn mercato configs cache structural --all-tenants
         yarn start
     volumes:
       - init_marker:/tmp/init-marker
