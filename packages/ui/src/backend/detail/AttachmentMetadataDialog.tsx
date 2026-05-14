@@ -15,7 +15,8 @@ import { cn } from '@open-mercato/shared/lib/utils'
 import { Copy, Download, Trash2 } from 'lucide-react'
 import { AttachmentContentPreview } from '@open-mercato/core/modules/attachments/components/AttachmentContentPreview'
 import { buildAttachmentFileUrl, buildAttachmentImageUrl, slugifyAttachmentFileName } from '@open-mercato/core/modules/attachments/lib/imageUrls'
-import { E } from '@open-mercato/core/generated-shims/entities.ids.generated'
+
+const ATTACHMENT_ENTITY_ID = 'attachments.attachment'
 
 export type AttachmentAssignment = {
   type: string
@@ -648,7 +649,7 @@ export function AttachmentMetadataDialog({ open, onOpenChange, item, availableTa
             <CrudForm<AttachmentMetadataFormValues>
               embedded
               schema={metadataSchema}
-              entityId={E.attachments.attachment}
+              entityId={ATTACHMENT_ENTITY_ID}
               fields={metadataFields}
               groups={metadataGroups}
               initialValues={initialValues ?? undefined}
