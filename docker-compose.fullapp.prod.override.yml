@@ -2,6 +2,8 @@ services:
   app:
     build:
       context: .
+      no_cache: true
+      pull: true
       args:
         - CONTAINER_PORT=${CONTAINER_PORT:-3000}
     image: open-mercato/app:${DEPLOY_ENV:-prod}
