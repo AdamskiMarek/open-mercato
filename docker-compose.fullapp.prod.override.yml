@@ -18,7 +18,12 @@ services:
           exit 1
         fi
         INIT_COMMAND='yarn mercato init --no-examples' sh /app/docker/scripts/init-or-migrate.sh
-        yarn mercato configs cache structural --all-tenants
+        if [ "${OM_RESET_NAV_CACHE_ON_BOOT:-true}" = "true" ]; then
+          yarn mercato configs cache structural --all-tenants || true
+        fi
+        if [ "${OM_RESET_SIDEBAR_PREFERENCES_ON_BOOT:-false}" = "true" ]; then
+          node -e "const { Client } = require('pg'); (async () => { const c = new Client({ connectionString: process.env.DATABASE_URL }); await c.connect(); await c.query('UPDATE user_sidebar_preferences SET deleted_at = now() WHERE deleted_at IS NULL'); await c.query('UPDATE role_sidebar_preferences SET deleted_at = now() WHERE deleted_at IS NULL'); await c.end(); console.log('Sidebar preferences reset completed.'); })().catch((err) => { console.error('Sidebar preferences reset failed:', err); process.exit(1); });"
+        fi
         yarn start
     volumes:
       - init_marker:/tmp/init-marker
@@ -65,6 +70,8 @@ services:
       OPENCODE_PROVIDER: ${OPENCODE_PROVIDER:-anthropic}
       NEW_RELIC_APP_NAME: ${NEW_RELIC_APP_NAME:-}
       NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY:-}
+      OM_RESET_NAV_CACHE_ON_BOOT: ${OM_RESET_NAV_CACHE_ON_BOOT:-true}
+      OM_RESET_SIDEBAR_PREFERENCES_ON_BOOT: ${OM_RESET_SIDEBAR_PREFERENCES_ON_BOOT:-false}
       OM_ENABLE_ENTERPRISE_MODULES: ${OM_ENABLE_ENTERPRISE_MODULES:-false}
       OM_ENABLE_ENTERPRISE_MODULES_SSO: ${OM_ENABLE_ENTERPRISE_MODULES_SSO:-false}
       OM_ENABLE_ENTERPRISE_MODULES_SECURITY: ${OM_ENABLE_ENTERPRISE_MODULES_SECURITY:-false}
