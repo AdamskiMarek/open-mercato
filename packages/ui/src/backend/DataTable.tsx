@@ -34,6 +34,7 @@ import { apiCall } from './utils/apiCall'
 import { raiseCrudError } from './utils/serverErrors'
 import { PerspectiveSidebar } from './PerspectiveSidebar'
 import { Popover, PopoverTrigger, PopoverContent } from '../primitives/popover'
+import { formatWithPublicDateFormat, normalizeDateFormatPattern } from '../primitives/date-format'
 import { cn } from '@open-mercato/shared/lib/utils'
 import { useT } from '@open-mercato/shared/lib/i18n/context'
 import { flash } from './FlashMessages'
@@ -215,6 +216,7 @@ export type DataTableProps<T> = {
   actions?: React.ReactNode
   refreshButton?: DataTableRefreshButton
   sortable?: boolean
+  manualSorting?: boolean
   sorting?: SortingState
   onSortingChange?: (s: SortingState) => void
   pagination?: PaginationProps
@@ -940,6 +942,7 @@ export function DataTable<T>({
   actions,
   refreshButton,
   sortable,
+  manualSorting,
   sorting: sortingProp,
   onSortingChange,
   pagination,
@@ -1327,26 +1330,15 @@ export function DataTable<T>({
     return <RowActions items={injectedItems} />
   }, [injectedRowActions, rowActions, router, t])
 
-  // Date formatting setup
-  const DATE_FORMAT = (process.env.NEXT_PUBLIC_DATE_FORMAT || 'YYYY-MM-DD HH:mm') as string
-
-  const pad2 = (n: number) => (n < 10 ? `0${n}` : String(n))
-  const simpleFormat = (d: Date, fmt: string) => {
-    // Supports tokens: YYYY, MM, DD, HH, mm, ss
-    const YYYY = String(d.getFullYear())
-    const MM = pad2(d.getMonth() + 1)
-    const DD = pad2(d.getDate())
-    const HH = pad2(d.getHours())
-    const mm = pad2(d.getMinutes())
-    const ss = pad2(d.getSeconds())
-    return fmt
-      .replace(/YYYY/g, YYYY)
-      .replace(/MM/g, MM)
-      .replace(/DD/g, DD)
-      .replace(/HH/g, HH)
-      .replace(/mm/g, mm)
-      .replace(/ss/g, ss)
-  }
+  // Date formatting setup. The OM-prefixed env vars are the new public contract;
+  // NEXT_PUBLIC_DATE_FORMAT remains supported for existing apps.
+  const DATE_FORMAT = (
+    normalizeDateFormatPattern(process.env.NEXT_PUBLIC_OM_DATE_TIME_FORMAT)
+    ?? normalizeDateFormatPattern(process.env.NEXT_PUBLIC_DATE_TIME_FORMAT)
+    ?? normalizeDateFormatPattern(process.env.NEXT_PUBLIC_OM_DATE_FORMAT)
+    ?? normalizeDateFormatPattern(process.env.NEXT_PUBLIC_DATE_FORMAT)
+    ?? 'yyyy-MM-dd HH:mm'
+  )
 
   const tryParseDate = (v: unknown): Date | null => {
     if (v == null) return null
@@ -1434,11 +1426,13 @@ export function DataTable<T>({
   const hasInjectedBulkActions = injectedBulkActions.length > 0 || hasPropBulkActions
   const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({})
   const selectionScopeKeyRef = React.useRef<string | undefined>(selectionScopeKey)
+  const enableClientSorting = sortable && !manualSorting
   const table = useReactTable<T>({
     data: clientFilteredData,
     columns: mergedColumns,
     getCoreRowModel: getCoreRowModel(),
-    ...(sortable ? { getSortedRowModel: getSortedRowModel() } : {}),
+    ...(enableClientSorting ? { getSortedRowModel: getSortedRowModel() } : {}),
+    manualSorting: manualSorting === true,
     getRowId: resolveDataTableRowId,
     state: { sorting, columnVisibility, columnOrder, rowSelection },
     enableRowSelection: hasInjectedBulkActions,
@@ -1481,7 +1475,7 @@ export function DataTable<T>({
       if (!hasInjectedBulkActions) return baseInjectionContext
       const selectedIds = Object.keys(rowSelection).filter((key) => rowSelection[key])
       if (selectedIds.length === 0) return baseInjectionContext
-      return { ...baseInjectionContext, _selectedRowIds: selectedIds, _selectedCount: selectedIds.length }
+      return { ...baseInjectionContext, selectedRowIds: selectedIds, selectedCount: selectedIds.length }
     },
     [baseInjectionContext, hasInjectedBulkActions, rowSelection],
   )
@@ -2787,7 +2781,7 @@ export function DataTable<T>({
                       if (isDateCol) {
                         const raw = cell.getValue() as any
                         const d = tryParseDate(raw)
-                        content = d ? simpleFormat(d, DATE_FORMAT) : (raw as any)
+                        content = d ? (formatWithPublicDateFormat(d, DATE_FORMAT) ?? raw) : (raw as any)
                       } else {
                         content = flexRender(cell.column.columnDef.cell, cell.getContext())
                       }
@@ -2810,7 +2804,7 @@ export function DataTable<T>({
                         tooltipText = metaTooltipContent(row.original)
                       } else if (isDateCol && cellValue != null) {
                         const parsedDate = tryParseDate(cellValue)
-                        tooltipText = parsedDate ? simpleFormat(parsedDate, DATE_FORMAT) : String(cellValue)
+                        tooltipText = parsedDate ? (formatWithPublicDateFormat(parsedDate, DATE_FORMAT) ?? String(cellValue)) : String(cellValue)
                       } else {
                         tooltipText = cellValue != null ? String(cellValue) : undefined
                       }

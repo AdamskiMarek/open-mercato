@@ -14,7 +14,7 @@ async function setGermanLocale(page: Page) {
   ])
 }
 
-test.describe('TC-APP-001: Template metadata', () => {
+test.describe('TC-APP-001: App metadata', () => {
   test('home page exposes localized app metadata', async ({ page }) => {
     await setGermanLocale(page)
     await page.goto('/', { waitUntil: 'domcontentloaded' })
