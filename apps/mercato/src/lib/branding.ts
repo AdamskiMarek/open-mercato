@@ -1,5 +1,5 @@
 export const APP_BRANDING = {
   name: 'GreenCode',
-  logoSrc: '/open-mercato.svg',
+  logoSrc: '/greencode.svg',
   logoAlt: 'GreenCode',
 } as const

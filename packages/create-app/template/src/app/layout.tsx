@@ -44,7 +44,14 @@ export default async function RootLayout({
           }}
         />
       </head>
-      <body className="antialiased" suppressHydrationWarning data-gramm="false">
+      <body
+        className="antialiased"
+        suppressHydrationWarning
+        data-gramm="false"
+        data-app-name="Open Mercato"
+        data-app-logo-src="/open-mercato.svg"
+        data-app-logo-alt="Open Mercato"
+      >
         <AppProviders locale={locale} dict={dict} demoModeEnabled={demoModeEnabled} noticeBarsEnabled={noticeBarsEnabled}>
           {children}
         </AppProviders>

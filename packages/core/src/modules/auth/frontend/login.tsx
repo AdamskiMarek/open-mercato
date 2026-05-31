@@ -12,6 +12,7 @@ import { Label } from '@open-mercato/ui/primitives/label'
 import { Button } from '@open-mercato/ui/primitives/button'
 import { useT } from '@open-mercato/shared/lib/i18n/context'
 import { translateWithFallback } from '@open-mercato/shared/lib/i18n/translate'
+import { useAppBranding } from '@open-mercato/shared/lib/branding/context'
 import { clearAllOperations } from '@open-mercato/ui/backend/operations/store'
 import { notifyAuthIdentityChange } from '@open-mercato/ui/backend/AuthSessionGuard'
 import { apiCall } from '@open-mercato/ui/backend/utils/apiCall'
@@ -92,6 +93,7 @@ function emitLoginResponseEvent(detail: LoginResponseEventDetail) {
 }
 
 export default function LoginPage() {
+  const branding = useAppBranding()
   const t = useT()
   const translate = useCallback(
     (key: string, fallback: string, params?: Record<string, string | number>) =>
@@ -341,8 +343,8 @@ export default function LoginPage() {
     <div className="min-h-svh flex items-center justify-center p-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="flex flex-col items-center gap-4 text-center p-10">
-          <Image alt={translate('auth.login.logoAlt', 'Open Mercato logo')} src="/open-mercato.svg" width={150} height={150} priority />
-          <h1 className="text-2xl font-semibold">{translate('auth.login.brandName', 'Open Mercato')}</h1>
+          <Image alt={branding.logoAlt} src={branding.logoSrc} width={150} height={150} priority />
+          <h1 className="text-2xl font-semibold">{branding.name}</h1>
           <CardDescription>{translate('auth.login.subtitle', 'Access your workspace')}</CardDescription>
         </CardHeader>
         <CardContent>

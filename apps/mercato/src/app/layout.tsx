@@ -45,7 +45,14 @@ export default async function RootLayout({
           }}
         />
       </head>
-      <body className="antialiased" suppressHydrationWarning data-gramm="false">
+      <body
+        className="antialiased"
+        suppressHydrationWarning
+        data-gramm="false"
+        data-app-name={APP_BRANDING.name}
+        data-app-logo-src={APP_BRANDING.logoSrc}
+        data-app-logo-alt={APP_BRANDING.logoAlt}
+      >
         <AppProviders locale={locale} dict={dict} demoModeEnabled={demoModeEnabled} noticeBarsEnabled={noticeBarsEnabled}>
           {children}
         </AppProviders>
