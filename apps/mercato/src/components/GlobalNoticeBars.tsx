@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useT } from '@open-mercato/shared/lib/i18n/context'
+import { APP_BRANDING } from '@/lib/branding'
 
 const DEMO_NOTICE_COOKIE = 'om_demo_notice_ack'
 const COOKIE_NOTICE_COOKIE = 'om_cookie_notice_ack'
@@ -71,7 +72,7 @@ export function GlobalNoticeBars({ demoModeEnabled }: { demoModeEnabled: boolean
                   rel="noreferrer"
                   className="underline font-medium hover:text-amber-800 dark:hover:text-amber-200"
                 >
-                  {t('notices.demo.installLink', 'Install Open Mercato locally')}
+                  {t('notices.demo.installLink', `Install ${APP_BRANDING.name} locally`, { appName: APP_BRANDING.name })}
                 </a>
                 . {t('notices.demo.reviewLinks', 'Review our')}{' '}
                 <Link className="underline font-medium hover:text-amber-800 dark:hover:text-amber-200" href="/terms">

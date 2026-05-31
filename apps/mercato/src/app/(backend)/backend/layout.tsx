@@ -12,6 +12,7 @@ import { parseBooleanWithDefault } from '@open-mercato/shared/lib/boolean'
 import { PageInjectionBoundary } from '@open-mercato/ui/backend/injection/PageInjectionBoundary'
 import { DemoFeedbackWidget } from '@/components/DemoFeedbackWidget'
 import { BackendHeaderChrome } from '@/components/BackendHeaderChrome'
+import { APP_BRANDING } from '@/lib/branding'
 
 registerBackendRouteManifests(backendRoutes)
 
@@ -82,16 +83,12 @@ export default async function BackendLayout({
   const collapsedCookie = cookieStore.get('om_sidebar_collapsed')?.value
   const initialCollapsed = collapsedCookie === '1'
   const demoModeEnabled = parseBooleanWithDefault(process.env.DEMO_MODE, true)
-  const deployEnv = process.env.DEPLOY_ENV
   const grantedFeatures = Array.isArray(auth?.features)
     ? auth.features.filter((feature): feature is string => typeof feature === 'string')
     : []
   const canManageUpgradeActions =
     auth?.isSuperAdmin === true || hasAllFeatures(['configs.manage'], grantedFeatures)
-  const baseProductName = translate('appShell.productName', 'Open Mercato')
-  const productName = deployEnv && deployEnv !== 'local'
-    ? `${baseProductName} (${deployEnv.charAt(0).toUpperCase() + deployEnv.slice(1)})`
-    : baseProductName
+  const productName = translate('appShell.productName', APP_BRANDING.name, { appName: APP_BRANDING.name })
 
   const injectionContext = {
     path,
@@ -104,6 +101,7 @@ export default async function BackendLayout({
     <I18nProvider locale={locale} dict={dict}>
       <AppShell
         productName={productName}
+        logo={{ src: APP_BRANDING.logoSrc, alt: productName }}
         email={auth?.email}
         canManageUpgradeActions={canManageUpgradeActions}
         groups={[]}

@@ -2,16 +2,17 @@ import type { Metadata } from 'next'
 import './globals.css'
 import { bootstrap } from '@/bootstrap'
 import { AppProviders } from '@/components/AppProviders'
+import { APP_BRANDING } from '@/lib/branding'
 
 // Bootstrap all package registrations at module load time
 bootstrap()
 import { detectLocale, loadDictionary } from '@open-mercato/shared/lib/i18n/server'
 
 export const metadata: Metadata = {
-  title: 'Open Mercato',
+  title: APP_BRANDING.name,
   description: 'AI-supportive, modular ERP foundation for product & service companies',
   icons: {
-    icon: '/open-mercato.svg',
+    icon: APP_BRANDING.logoSrc,
   },
 }
 

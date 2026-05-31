@@ -14,6 +14,7 @@ import { Spinner } from '@open-mercato/ui/primitives/spinner'
 import { useAiDock } from '@open-mercato/ui/ai'
 import { apiCall } from '@open-mercato/ui/backend/utils/apiCall'
 import { useT } from '@open-mercato/shared/lib/i18n/context'
+import { APP_BRANDING } from '@/lib/branding'
 
 const SUPPRESS_COOKIE = 'om_feedback_suppress'
 const SHOWN_TODAY_COOKIE = 'om_feedback_shown'
@@ -253,9 +254,9 @@ export function DemoFeedbackWidget({ demoModeEnabled }: { demoModeEnabled: boole
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="sm:max-w-md" onKeyDown={handleKeyDown}>
           <DialogHeader className="items-center gap-3">
-            <Image alt="Open Mercato" src="/open-mercato.svg" width={48} height={48} />
+            <Image alt={APP_BRANDING.logoAlt} src={APP_BRANDING.logoSrc} width={48} height={48} />
             <DialogTitle className="text-center text-xl">
-              {t('demoFeedback.dialog.title', 'Talk to Open Mercato team')}
+              {t('app.demoFeedback.dialog.title', `Talk to ${APP_BRANDING.name} team`, { appName: APP_BRANDING.name })}
             </DialogTitle>
             <DialogDescription className="text-center text-balance leading-relaxed">
               {t('demoFeedback.dialog.description', 'What you just saw is ~80% of a real system.\nLet\u2019s talk about how to turn this into a production-ready solution in weeks, not months.')}

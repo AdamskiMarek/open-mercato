@@ -14,6 +14,7 @@ import type { EntityManager } from '@mikro-orm/postgresql'
 import { User } from '@open-mercato/core/modules/auth/data/entities'
 import { Tenant, Organization } from '@open-mercato/core/modules/directory/data/entities'
 import { buildHomeQuickLinks } from '@/lib/homeQuickLinks'
+import { APP_BRANDING } from '@/lib/branding'
 import { Fragment } from 'react'
 
 function FeatureBadge({ label }: { label: string }) {
@@ -83,14 +84,14 @@ export default async function Home() {
     <main className="min-h-svh w-full p-8 flex flex-col gap-8">
       <header className="flex flex-col md:flex-row md:items-center gap-4 md:gap-6">
         <Image
-          src="/open-mercato.svg"
-          alt={t('app.page.logoAlt', 'Open Mercato')}
+          src={APP_BRANDING.logoSrc}
+          alt={t('app.page.logoAlt', APP_BRANDING.logoAlt, { appName: APP_BRANDING.name })}
           width={40}
           height={40}
           priority
         />
         <div className="flex-1">
-          <h1 className="text-3xl font-semibold tracking-tight">{t('app.page.title', 'Open Mercato')}</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">{t('app.page.title', APP_BRANDING.name, { appName: APP_BRANDING.name })}</h1>
           <p className="text-sm text-muted-foreground">{t('app.page.subtitle', 'AI‑supportive, modular ERP foundation for product & service companies')}</p>
         </div>
       </header>

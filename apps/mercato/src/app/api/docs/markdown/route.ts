@@ -3,6 +3,7 @@ import { resolveApiDocsBaseUrl } from '@open-mercato/core/modules/api_docs/lib/r
 import { buildOpenApiDocument, generateMarkdownFromOpenApi, sanitizeOpenApiDocument } from '@open-mercato/shared/lib/openapi'
 import { resolveTranslations } from '@open-mercato/shared/lib/i18n/server'
 import { APP_VERSION } from '@open-mercato/shared/lib/version'
+import { APP_BRANDING } from '@/lib/branding'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,7 +11,7 @@ export async function GET() {
   const { t } = await resolveTranslations()
   const baseUrl = resolveApiDocsBaseUrl()
   const rawDoc = buildOpenApiDocument(modules, {
-    title: t('api.docs.title', 'Open Mercato API'),
+    title: t('api.docs.title', `${APP_BRANDING.name} API`, { appName: APP_BRANDING.name }),
     version: APP_VERSION,
     description: t('api.docs.description', 'Auto-generated OpenAPI definition for all enabled modules.'),
     servers: [{ url: baseUrl, description: t('api.docs.serverDescription', 'Default environment') }],
