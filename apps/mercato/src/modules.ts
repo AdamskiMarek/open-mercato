@@ -68,6 +68,30 @@ export const moduleOverrideExamples: ModuleOverrides = {
   },
 }
 
+const appPreset = process.env.OM_APP_PRESET?.trim().toLowerCase()
+const crmPresetEnabled = appPreset === 'crm'
+const crmPresetModuleIds = new Set([
+  'auth',
+  'directory',
+  'configs',
+  'entities',
+  'query_index',
+  'api_docs',
+  'audit_logs',
+  'notifications',
+  'dashboards',
+  'events',
+  'search',
+  'attachments',
+  'customers',
+  'messages',
+  'dictionaries',
+  'feature_toggles',
+  'currencies',
+  'communication_channels',
+  'ai_assistant',
+])
+
 export const enabledModules: ModuleEntry[] = [
   { id: 'dashboards', from: '@open-mercato/core' },
   { id: 'auth', from: '@open-mercato/core' },
@@ -219,4 +243,9 @@ if (enterpriseModulesEnabled && enterpriseAgentsEnabled) {
   // brand-new module (see apps/mercato/src/modules/agent_examples/README.md).
   // It imports the orchestrator SDK, so it is only enabled alongside it.
   enabledModules.push({ id: 'agent_examples', from: '@app' })
+}
+
+if (crmPresetEnabled) {
+  const crmModules = enabledModules.filter((entry) => crmPresetModuleIds.has(entry.id))
+  enabledModules.splice(0, enabledModules.length, ...crmModules)
 }
