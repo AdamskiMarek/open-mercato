@@ -180,11 +180,6 @@ export const enabledModules: ModuleEntry[] = [
   { id: 'ratelimit_probe', from: '@app' },
 ]
 
-if (crmPresetEnabled) {
-  const crmModules = enabledModules.filter((entry) => crmPresetModuleIds.has(entry.id))
-  enabledModules.splice(0, enabledModules.length, ...crmModules)
-}
-
 // Official modules activated via official-modules.json / official-modules.local.json
 // (managed by `yarn official-modules`; backed by the external/official-modules submodule).
 for (const entry of officialModuleEntries) {
@@ -225,4 +220,9 @@ if (enterpriseModulesEnabled && enterpriseAgentsEnabled) {
   // brand-new module (see apps/mercato/src/modules/agent_examples/README.md).
   // It imports the orchestrator SDK, so it is only enabled alongside it.
   enabledModules.push({ id: 'agent_examples', from: '@app' })
+}
+
+if (crmPresetEnabled) {
+  const crmModules = enabledModules.filter((entry) => crmPresetModuleIds.has(entry.id))
+  enabledModules.splice(0, enabledModules.length, ...crmModules)
 }
