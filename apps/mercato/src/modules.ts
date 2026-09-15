@@ -68,6 +68,30 @@ export const moduleOverrideExamples: ModuleOverrides = {
   },
 }
 
+const appPreset = process.env.OM_APP_PRESET?.trim().toLowerCase()
+const crmPresetEnabled = appPreset === 'crm'
+const crmPresetModuleIds = new Set([
+  'auth',
+  'directory',
+  'configs',
+  'entities',
+  'query_index',
+  'api_docs',
+  'audit_logs',
+  'notifications',
+  'dashboards',
+  'events',
+  'search',
+  'attachments',
+  'customers',
+  'messages',
+  'dictionaries',
+  'feature_toggles',
+  'currencies',
+  'communication_channels',
+  'ai_assistant',
+])
+
 export const enabledModules: ModuleEntry[] = [
   { id: 'dashboards', from: '@open-mercato/core' },
   { id: 'auth', from: '@open-mercato/core' },
@@ -178,6 +202,11 @@ export const enabledModules: ModuleEntry[] = [
   },
   { id: 'ratelimit_probe', from: '@app' },
 ]
+
+if (crmPresetEnabled) {
+  const crmModules = enabledModules.filter((entry) => crmPresetModuleIds.has(entry.id))
+  enabledModules.splice(0, enabledModules.length, ...crmModules)
+}
 
 // Official modules activated via official-modules.json / official-modules.local.json
 // (managed by `yarn official-modules`; backed by the external/official-modules submodule).
