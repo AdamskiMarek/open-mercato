@@ -1,13 +1,6 @@
-import './commands/changePassword'
-import './commands/createEnforcementPolicy'
-import './commands/updateEnforcementPolicy'
-import './commands/deleteEnforcementPolicy'
-import './commands/removeMfaMethod'
-import './commands/regenerateRecoveryCodes'
-import './commands/resetUserMfa'
-import './commands/createSudoConfig'
-import './commands/updateSudoConfig'
-import './commands/deleteSudoConfig'
+import './lib/mfaCompletionRoutes'
+
+export { registerCanonicalMfaCompletionRoutes } from './lib/mfaCompletionRoutes'
 
 export const metadata = {
   id: 'security',

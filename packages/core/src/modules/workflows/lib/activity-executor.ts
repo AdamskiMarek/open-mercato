@@ -22,26 +22,103 @@ import {
   type HostLookup,
 } from '@open-mercato/shared/lib/url-safety'
 import { parseBooleanWithDefault } from '@open-mercato/shared/lib/boolean'
-import { callWebhookConfigSchema } from '../data/validators'
-import { WorkflowActivityJob, WORKFLOW_ACTIVITIES_QUEUE_NAME } from './activity-queue-types'
+import { isPrivateCrossProcessBroadcastEvent } from '@open-mercato/shared/modules/events'
+import { hasAllFeatures } from '@open-mercato/shared/security/features'
+import {
+  definitionDeclaresGrant,
+  resolveWorkflowDefinitionExecutionUserId,
+} from './definition-grant'
+import {
+  callWebhookConfigSchema,
+  invokeAgentConfigSchema,
+  setVariableConfigSchema,
+} from '../data/activity-config-schemas'
+import {
+  buildSetVariableContextPatch,
+  isSetVariableOutput,
+  splitAssignmentPath,
+  type SetVariableOutput,
+} from './set-variable'
+import {
+  DRY_RUN_EVENT_TYPES,
+  WorkflowDryRunRefusalError,
+  isDryRunInstance,
+  isDryRunRefusal,
+} from './dry-run'
+import {
+  applyTransforms,
+  parseInterpolationToken,
+  type WorkflowInterpolationMode,
+} from './interpolation-pipeline'
+
+export { resolveDefinitionInterpolationMode, type WorkflowInterpolationMode } from './interpolation-pipeline'
+import {
+  WorkflowActivityJob,
+  WorkflowActivityJobInvokeAgent,
+  WORKFLOW_ACTIVITIES_QUEUE_NAME,
+  WORKFLOW_INVOKE_AGENT_QUEUE_NAME,
+} from './activity-queue-types'
+import './activity-registry-bootstrap'
+import { bindActivityExecutor } from './activity-types'
+import { getActivityType } from './activity-registry'
 import { logWorkflowEvent } from './event-logger'
-import { parseDuration } from './duration'
+import { calculateWaitDelayMs, parseDuration } from './duration'
+
+export { calculateWaitDelayMs } from './duration'
+import { resolveActivityTimeoutMs } from './activityTimeoutFields'
+import { getWorkflowSafeCommand } from './workflow-safe-commands'
+import { isWorkflowCommandEnabled } from './workflow-command-enablement'
+import { resolveWorkflowCommandPolicyForContainer } from './workflow-command-settings'
+import { resolveAgentReview, toAgentDispositionReview } from './agent-review'
+import type { AgentDispositionReview } from './agent-disposition-task'
 
 export { isPrivateUrl } from '@open-mercato/shared/lib/network'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+
+const logger = createLogger('workflows')
 
 function isAllowPrivateWorkflowWebhookUrlsEnabled(): boolean {
   if (parseBooleanWithDefault(process.env.OM_WORKFLOWS_ALLOW_PRIVATE_URLS, false)) {
+    if (process.env.NODE_ENV === 'production') {
+      logger.warn('OM_WORKFLOWS_ALLOW_PRIVATE_URLS is set but ignored in production. SSRF protection remains enabled.', { component: 'CALL_WEBHOOK' })
+      return false
+    }
+
+    logger.warn('OM_WORKFLOWS_ALLOW_PRIVATE_URLS is enabled. SSRF protection is bypassed for workflow webhooks; use only in development.', { component: 'CALL_WEBHOOK' })
     return true
   }
 
   if (parseBooleanWithDefault(process.env.WORKFLOW_WEBHOOK_ALLOW_PRIVATE_URLS, false)) {
-    console.warn(
-      '[CALL_WEBHOOK] WORKFLOW_WEBHOOK_ALLOW_PRIVATE_URLS is deprecated. Use OM_WORKFLOWS_ALLOW_PRIVATE_URLS instead. SSRF protection is bypassed.'
-    )
+    if (process.env.NODE_ENV === 'production') {
+      logger.warn('WORKFLOW_WEBHOOK_ALLOW_PRIVATE_URLS is deprecated and ignored in production. Use OM_WORKFLOWS_ALLOW_PRIVATE_URLS for development only. SSRF protection remains enabled.', { component: 'CALL_WEBHOOK' })
+      return false
+    }
+
+    logger.warn('WORKFLOW_WEBHOOK_ALLOW_PRIVATE_URLS is deprecated. Use OM_WORKFLOWS_ALLOW_PRIVATE_URLS instead. SSRF protection is bypassed.', { component: 'CALL_WEBHOOK' })
     return true
   }
 
   return false
+}
+
+const DEFAULT_WORKFLOW_ENV_INTERPOLATION_ALLOWLIST = new Set(['APP_URL'])
+const WORKFLOW_ENV_INTERPOLATION_ALLOWLIST_KEY = 'OM_WORKFLOWS_ENV_INTERPOLATION_ALLOWLIST'
+
+function getWorkflowEnvInterpolationAllowlist(): Set<string> {
+  const allowlist = new Set(DEFAULT_WORKFLOW_ENV_INTERPOLATION_ALLOWLIST)
+  const configuredKeys = process.env[WORKFLOW_ENV_INTERPOLATION_ALLOWLIST_KEY]
+  if (!configuredKeys) {
+    return allowlist
+  }
+
+  for (const key of configuredKeys.split(',')) {
+    const trimmedKey = key.trim()
+    if (trimmedKey) {
+      allowlist.add(trimmedKey)
+    }
+  }
+
+  return allowlist
 }
 
 // ============================================================================
@@ -56,6 +133,50 @@ export type ActivityType =
   | 'CALL_WEBHOOK'
   | 'EXECUTE_FUNCTION'
   | 'WAIT'
+  | 'SET_VARIABLE'
+  | 'INVOKE_AGENT'
+
+/**
+ * Signal name the INVOKE_AGENT step parks on when a proposal is routed to a
+ * human. agent_orchestrator's proposal-dispose path emits
+ * `agent_orchestrator.proposal.ready` and calls workflows `sendSignal` with this
+ * name to resume the parked step.
+ */
+export const INVOKE_AGENT_SIGNAL_NAME = 'agent_orchestrator.proposal.ready'
+
+/**
+ * Signal name a parked SUB_WORKFLOW step resumes on once its child instance
+ * reaches a terminal state. `completeWorkflow` enqueues a resume job when the
+ * child carries a parent linkage; the worker resumes the parent step via
+ * `sendSignal` with this name.
+ */
+export const SUB_WORKFLOW_SIGNAL_NAME = 'workflows.sub_workflow.completed'
+
+/**
+ * Small enqueue delay for the INVOKE_AGENT job so the workflow transaction that
+ * parked the step commits before the worker picks the job up. The worker also
+ * guards against the race (it requires the instance to be PAUSED at the step
+ * before running the agent), so this only trims needless retries.
+ */
+export const INVOKE_AGENT_ENQUEUE_DELAY_MS = 1000
+
+/**
+ * Marker carried on an activity result's output when the step must park and wait
+ * for a signal (INVOKE_AGENT routed a proposal to a human). The step handler
+ * inspects activity outputs for this marker and parks the instance accordingly.
+ * researcher / auto_approved outcomes do NOT carry it and proceed inline.
+ */
+export type ActivityParkMarker = { signalName: string }
+
+export function getActivityParkMarker(output: unknown): ActivityParkMarker | null {
+  if (output && typeof output === 'object' && '__park' in output) {
+    const park = (output as { __park?: unknown }).__park
+    if (park && typeof park === 'object' && typeof (park as { signalName?: unknown }).signalName === 'string') {
+      return { signalName: (park as { signalName: string }).signalName }
+    }
+  }
+  return null
+}
 
 export interface ActivityDefinition {
   activityId: string // Unique identifier for activity
@@ -65,8 +186,15 @@ export interface ActivityDefinition {
   async?: boolean // Flag to execute activity asynchronously via queue
   retryPolicy?: RetryPolicy
   timeoutMs?: number
+  /**
+   * @deprecated Use `timeoutMs`. Legacy ISO 8601 duration string accepted by
+   * the definition schema before #4424; normalized by `resolveActivityTimeoutMs`.
+   */
+  timeout?: string
   compensate?: boolean // Flag to execute compensation on failure
 }
+
+export { resolveActivityTimeoutMs }
 
 export interface RetryPolicy {
   maxAttempts: number
@@ -85,6 +213,36 @@ export interface ActivityContext {
   branchInstanceId?: string | null
   transitionId?: string
   userId?: string
+  // The owning definition's `interpolation` mode; absent means lenient.
+  // Async activities enforce strict mode at enqueue-time, so the worker-side
+  // context deliberately leaves this unset.
+  interpolationMode?: WorkflowInterpolationMode
+}
+
+type RbacFeatureResolver = {
+  userHasAllFeatures: (
+    userId: string,
+    required: string[],
+    opts: { tenantId: string | null; organizationId: string | null }
+  ) => Promise<boolean>
+}
+
+async function workflowUserHasAllFeatures(
+  container: AwilixContainer,
+  userId: string,
+  required: readonly string[],
+  tenantId: string | null,
+  organizationId: string | null
+): Promise<boolean> {
+  try {
+    const rbac = container.resolve('rbacService') as RbacFeatureResolver | undefined
+    if (rbac?.userHasAllFeatures) {
+      return await rbac.userHasAllFeatures(userId, [...required], { tenantId, organizationId })
+    }
+  } catch {
+    // Fail closed below when the workflow executor cannot prove the actor's grants.
+  }
+  return false
 }
 
 export interface ActivityExecutionResult {
@@ -98,6 +256,13 @@ export interface ActivityExecutionResult {
   executionTimeMs: number
   async?: boolean // Marks activity as async (queued)
   jobId?: string // Queue job ID for async activities
+  /**
+   * The activity was not attempted because a dry run cannot simulate its type
+   * (spec section 8.2). Callers MUST treat it as a stop, never as a failure:
+   * error routes and error directives describe what to do when an effector
+   * fails, and no effector ran.
+   */
+  dryRunRefused?: boolean
 }
 
 export class ActivityExecutionError extends Error {
@@ -112,11 +277,29 @@ export class ActivityExecutionError extends Error {
   }
 }
 
+/**
+ * Thrown by `interpolateVariables` in strict mode when a token cannot be
+ * resolved (unresolved context path, env-allowlist miss, unknown workflow.*
+ * key, failed or unparseable transform pipeline). Activity call sites rethrow
+ * it as `ActivityExecutionError` so it flows through the normal retry/failure
+ * machinery.
+ */
+export class WorkflowInterpolationError extends Error {
+  constructor(
+    message: string,
+    public token: string
+  ) {
+    super(message)
+    this.name = 'WorkflowInterpolationError'
+  }
+}
+
 // ============================================================================
 // Queue Integration for Async Activities
 // ============================================================================
 
 let activityQueue: Queue<WorkflowActivityJob> | null = null
+let invokeAgentQueue: Queue<WorkflowActivityJob> | null = null
 
 /**
  * Get or create the activity queue (lazy initialization)
@@ -130,6 +313,24 @@ function getActivityQueue(): Queue<WorkflowActivityJob> {
   }
 
   return activityQueue
+}
+
+/**
+ * Get or create the dedicated invoke-agent queue (lazy initialization).
+ *
+ * Minute-long agent runs get their own queue so they never starve the fast
+ * activities sharing 'workflow-activities'. Consumer-side concurrency is
+ * governed by the workflow-invoke-agent worker's metadata.
+ */
+function getInvokeAgentQueue(): Queue<WorkflowActivityJob> {
+  if (!invokeAgentQueue) {
+    invokeAgentQueue = createModuleQueue<WorkflowActivityJob>(
+      WORKFLOW_INVOKE_AGENT_QUEUE_NAME,
+      { concurrency: parseInt(process.env.WORKERS_WORKFLOW_INVOKE_AGENT_CONCURRENCY || '5', 10) },
+    )
+  }
+
+  return invokeAgentQueue
 }
 
 /**
@@ -148,8 +349,23 @@ export async function enqueueActivity(
   const { workflowInstance, workflowContext, stepContext, transitionId, stepInstanceId, branchInstanceId } =
     context
 
-  // Interpolate config variables NOW (before queuing)
-  const interpolatedConfig = interpolateVariables(activity.config, workflowContext, workflowInstance)
+  const registryEntry = getActivityType(activity.activityType)
+  if (registryEntry && registryEntry.async.capable === false) {
+    throw new ActivityExecutionError(
+      `[internal] Activity type ${activity.activityType} cannot run asynchronously (${registryEntry.async.reason})`,
+      activity.activityType,
+      activity.activityName
+    )
+  }
+
+  // Interpolate config variables NOW (before queuing) — strict mode is
+  // enforced here, at enqueue-time, before the job serializes frozen config.
+  const interpolatedConfig = interpolateActivityConfig(
+    activity.config,
+    context,
+    activity.activityType,
+    activity.activityName
+  )
 
   // Create job payload
   const job: WorkflowActivityJob = {
@@ -170,11 +386,12 @@ export async function enqueueActivity(
     userId: context.userId,
   }
 
-  // Enqueue to queue (WAIT activities use delayMs for the actual delay)
+  // Enqueue to queue (entries with enqueueDelayMs, e.g. WAIT, use delayMs for the actual delay)
   const queue = getActivityQueue()
-  const enqueueOptions = activity.activityType === 'WAIT' && (interpolatedConfig.duration || interpolatedConfig.until)
-    ? { delayMs: calculateWaitDelayMs(interpolatedConfig) }
-    : undefined
+  const registryDelayMs = registryEntry?.enqueueDelayMs
+    ? registryEntry.enqueueDelayMs(interpolatedConfig)
+    : null
+  const enqueueOptions = registryDelayMs !== null ? { delayMs: registryDelayMs } : undefined
   const jobId = await queue.enqueue(job, enqueueOptions)
 
   // Log event
@@ -233,6 +450,112 @@ export async function enqueueTimerJob(params: {
   return jobId
 }
 
+/**
+ * Enqueue a delayed SLA job for a USER_TASK (one reminder offset, or the
+ * deadline itself).
+ *
+ * The activity worker handles `kind: 'task_sla'` jobs by calling
+ * `taskSla.runTaskSlaJob`. `deadlineAt` is absolute and carried on the payload
+ * rather than recomputed at run time, so a queue running behind can never
+ * extend the configured deadline — the same guarantee the WAIT_FOR_CONDITION
+ * backstop gives.
+ */
+export async function enqueueTaskSlaJob(params: {
+  workflowInstanceId: string
+  stepInstanceId: string
+  branchInstanceId?: string | null
+  userTaskId: string
+  phase: 'reminder' | 'breach'
+  deadlineAt: string
+  fireAt: string
+  delayMs: number
+  tenantId: string
+  organizationId: string
+  userId?: string
+}): Promise<string> {
+  const {
+    workflowInstanceId,
+    stepInstanceId,
+    branchInstanceId,
+    userTaskId,
+    phase,
+    deadlineAt,
+    fireAt,
+    delayMs,
+    tenantId,
+    organizationId,
+    userId,
+  } = params
+
+  const queue = getActivityQueue()
+  return await queue.enqueue(
+    {
+      kind: 'task_sla',
+      workflowInstanceId,
+      stepInstanceId,
+      branchInstanceId: branchInstanceId ?? undefined,
+      userTaskId,
+      phase,
+      deadlineAt,
+      fireAt,
+      tenantId,
+      organizationId,
+      userId,
+    },
+    { delayMs: delayMs > 0 ? delayMs : undefined }
+  )
+}
+
+/**
+ * Enqueue a delayed poll job for a WAIT_FOR_CONDITION step.
+ *
+ * The activity worker handles `kind: 'condition'` jobs by calling
+ * `conditionHandler.evaluateWaitCondition`. This job is the durability
+ * backstop behind the event-driven wake: `deadlineAt` travels unchanged across
+ * every re-enqueue so the timeout stays anchored to the original step entry.
+ */
+export async function enqueueConditionCheckJob(params: {
+  workflowInstanceId: string
+  stepInstanceId: string
+  branchInstanceId?: string | null
+  tenantId: string
+  organizationId: string
+  userId?: string
+  deadlineAt: string
+  attempt: number
+  delayMs: number
+}): Promise<string> {
+  const {
+    workflowInstanceId,
+    stepInstanceId,
+    branchInstanceId,
+    tenantId,
+    organizationId,
+    userId,
+    deadlineAt,
+    attempt,
+    delayMs,
+  } = params
+
+  const queue = getActivityQueue()
+  const jobId = await queue.enqueue(
+    {
+      kind: 'condition',
+      workflowInstanceId,
+      stepInstanceId,
+      branchInstanceId: branchInstanceId ?? undefined,
+      tenantId,
+      organizationId,
+      userId,
+      deadlineAt,
+      attempt,
+    },
+    { delayMs: delayMs > 0 ? delayMs : undefined }
+  )
+
+  return jobId
+}
+
 // ============================================================================
 // Main Activity Execution Functions
 // ============================================================================
@@ -266,11 +589,13 @@ export async function executeActivity(
     try {
       const startTime = Date.now()
 
-      // Execute with timeout if specified
-      const result = activity.timeoutMs
+      // Execute with timeout if specified (timeoutMs, or a legacy ISO 8601
+      // `timeout` string normalized to ms — see resolveActivityTimeoutMs).
+      const timeoutMs = resolveActivityTimeoutMs(activity)
+      const result = timeoutMs
         ? await executeWithTimeout(
-            () => executeActivityByType(em, container, activity, context),
-            activity.timeoutMs
+            (signal) => executeActivityByType(em, container, activity, context, signal),
+            timeoutMs
           )
         : await executeActivityByType(em, container, activity, context)
 
@@ -290,9 +615,21 @@ export async function executeActivity(
       lastError = error
       retryCount = attempt + 1
 
+      // A dry-run refusal is not a failure — nothing was attempted — so retrying
+      // it would only re-log the same refusal N times before reaching the same
+      // answer.
+      if (isDryRunRefusal(error)) break
+
       // Log activity retry attempt with context
       if (attempt < retryPolicy.maxAttempts - 1) {
-        console.error(`[WORKFLOW] Activity ${activity.activityId} (${activity.activityType}) failed on attempt ${attempt + 1}/${retryPolicy.maxAttempts} (instance: ${context.workflowInstance.id}):`, error instanceof Error ? error.message : error)
+        logger.error('Activity failed; will retry', {
+          activityId: activity.activityId,
+          activityType: activity.activityType,
+          attempt: attempt + 1,
+          maxAttempts: retryPolicy.maxAttempts,
+          instanceId: context.workflowInstance.id,
+          err: error,
+        })
       }
 
       // If not the last attempt, apply backoff and retry
@@ -311,10 +648,26 @@ export async function executeActivity(
 
   // All retries exhausted
   const errorMessage = lastError instanceof Error ? lastError.message : String(lastError)
-  console.error(`[WORKFLOW] Activity ${activity.activityId} (${activity.activityType}) failed after ${retryCount} attempts (instance: ${context.workflowInstance.id}): ${errorMessage}`)
-  if (lastError instanceof Error && lastError.stack) {
-    console.error('[WORKFLOW] Activity error stack:', lastError.stack)
+  if (isDryRunRefusal(lastError)) {
+    return {
+      activityId: activity.activityId,
+      activityName: activity.activityName,
+      activityType: activity.activityType,
+      success: false,
+      dryRunRefused: true,
+      error: `Dry run stopped: activity type ${lastError.activityType} cannot be simulated (${lastError.reason})`,
+      retryCount: 0,
+      executionTimeMs: 0,
+      async: activity.async || false,
+    }
   }
+  logger.error('Activity failed after all attempts', {
+    activityId: activity.activityId,
+    activityType: activity.activityType,
+    attempts: retryCount,
+    instanceId: context.workflowInstance.id,
+    err: lastError,
+  })
 
   return {
     activityId: activity.activityId,
@@ -346,11 +699,17 @@ export async function executeActivities(
 ): Promise<ActivityExecutionResult[]> {
   const results: ActivityExecutionResult[] = []
 
+  // A dry run never enqueues. The queue job would carry no `isDryRun` of its
+  // own, so a worker picking it up would execute the real effector on its own
+  // connection — the isolation would leak out of the request that opted in.
+  // Mocks are pure and synchronous, so running them inline loses nothing.
+  const forceSynchronous = isDryRunInstance(context.workflowInstance)
+
   for (let i = 0; i < activities.length; i++) {
     const activity = activities[i]
 
     // Check if activity should run async
-    if (activity.async) {
+    if (activity.async && !forceSynchronous) {
       // Enqueue for background execution
       const jobId = await enqueueActivity(em, activity, context)
 
@@ -366,7 +725,17 @@ export async function executeActivities(
       })
     } else {
       // Execute synchronously (existing logic)
-      const result = await executeActivity(em, container, activity, context)
+      const executed = await executeActivity(em, container, activity, context)
+      // `executeActivity` echoes the AUTHORED `async` flag, which is what the
+      // transition handler reads to decide whether to park the token in
+      // WAITING_FOR_ACTIVITIES. A dry run that ran an authored-async activity
+      // inline must therefore correct the flag, or the run would park waiting
+      // for a queue job that was deliberately never enqueued — a deadlock, and
+      // the step handler would also misclassify a refusal as "still pending"
+      // instead of a failure.
+      const result = forceSynchronous && activity.async
+        ? { ...executed, async: false }
+        : executed
       results.push(result)
 
       // Stop execution if activity fails (fail-fast)
@@ -374,12 +743,21 @@ export async function executeActivities(
         break
       }
 
-      // Update workflow context with activity output
+      // Update workflow context with activity output. SET_VARIABLE outputs
+      // land at their assignment paths in top-level context; every other
+      // output merges under the activity name/type key.
       if (result.output && typeof result.output === 'object') {
-        const key = activity.activityName || activity.activityType
-        context.workflowContext = {
-          ...context.workflowContext,
-          [key]: result.output,
+        if (activity.activityType === 'SET_VARIABLE' && isSetVariableOutput(result.output)) {
+          context.workflowContext = {
+            ...context.workflowContext,
+            ...buildSetVariableContextPatch(context.workflowContext, result.output.assignments),
+          }
+        } else {
+          const key = activity.activityName || activity.activityType
+          context.workflowContext = {
+            ...context.workflowContext,
+            [key]: result.output,
+          }
         }
       }
     }
@@ -399,46 +777,87 @@ async function executeActivityByType(
   em: EntityManager,
   container: AwilixContainer,
   activity: ActivityDefinition,
-  context: ActivityContext
+  context: ActivityContext,
+  signal?: AbortSignal
 ): Promise<any> {
   // Interpolate config variables from context (including workflow metadata)
-  const interpolatedConfig = interpolateVariables(activity.config, context.workflowContext, context.workflowInstance)
+  const interpolatedConfig = interpolateActivityConfig(
+    activity.config,
+    context,
+    activity.activityType,
+    activity.activityName
+  )
 
-  switch (activity.activityType) {
-    case 'SEND_EMAIL':
-      return await executeSendEmail(interpolatedConfig, context, container)
-
-    case 'CALL_API':
-      return await executeCallApi(em, interpolatedConfig, context, container)
-
-    case 'EMIT_EVENT':
-      return await executeEmitEvent(interpolatedConfig, context, container)
-
-    case 'UPDATE_ENTITY':
-      return await executeUpdateEntity(em, interpolatedConfig, context, container)
-
-    case 'CALL_WEBHOOK':
-      return await executeCallWebhook(interpolatedConfig, context)
-
-    case 'EXECUTE_FUNCTION':
-      return await executeFunction(interpolatedConfig, context, container)
-
-    case 'WAIT':
-      return await executeWait(interpolatedConfig)
-
-    default:
-      throw new ActivityExecutionError(
-        `Unknown activity type: ${activity.activityType}`,
-        activity.activityType,
-        activity.activityName
-      )
+  const entry = getActivityType(activity.activityType)
+  if (!entry) {
+    throw new ActivityExecutionError(
+      `Unknown activity type: ${activity.activityType}`,
+      activity.activityType,
+      activity.activityName
+    )
   }
+
+  // Dry run (spec section 8.2): the ONE place `entry.execute` is reached, so it
+  // is the one place the swap has to happen. Everything side-effecting in the
+  // engine ends up here — the command bus, the event bus, the mailer, the
+  // webhook fetch and the agent bridge — which is what makes "no effector runs"
+  // a property of a single branch rather than a checklist.
+  if (isDryRunInstance(context.workflowInstance)) {
+    if (entry.mock === 'refuse' || entry.mock === undefined) {
+      const refusal = new WorkflowDryRunRefusalError(
+        activity.activityType,
+        entry.mock === 'refuse' ? 'refused' : 'noMock',
+        activity.activityName,
+      )
+      await logWorkflowEvent(em, {
+        workflowInstanceId: context.workflowInstance.id,
+        stepInstanceId: context.stepInstanceId,
+        eventType: DRY_RUN_EVENT_TYPES.activityRefused,
+        eventData: {
+          activityId: activity.activityId,
+          activityName: activity.activityName,
+          activityType: activity.activityType,
+          reason: refusal.reason,
+        },
+        tenantId: context.workflowInstance.tenantId,
+        organizationId: context.workflowInstance.organizationId,
+      })
+      throw refusal
+    }
+
+    const simulated = entry.mock(interpolatedConfig, context)
+    await logWorkflowEvent(em, {
+      workflowInstanceId: context.workflowInstance.id,
+      stepInstanceId: context.stepInstanceId,
+      eventType: DRY_RUN_EVENT_TYPES.activitySimulated,
+      eventData: {
+        activityId: activity.activityId,
+        activityName: activity.activityName,
+        activityType: activity.activityType,
+        output: simulated ?? null,
+      },
+      tenantId: context.workflowInstance.tenantId,
+      organizationId: context.workflowInstance.organizationId,
+    })
+    return simulated
+  }
+
+  // `signal` MUST reach the registry entry: CALL_API / CALL_WEBHOOK thread it
+  // into fetch, and without it a per-activity timeout rejects the promise while
+  // the HTTP request stays in flight — the phantom-execution bug from #4918.
+  return await entry.execute(interpolatedConfig, context, {
+    em: em as PostgreSqlEntityManager,
+    container,
+    signal,
+  })
 }
 
 /**
  * SEND_EMAIL activity handler
  *
- * For MVP, this logs the email (actual email sending can be added later)
+ * Sends via the DI-registered emailService when available; without one it
+ * reports an honest stub result ({ sent: false, simulated: true, reason: 'no-email-service' }).
+ * A real send() failure propagates so the activity retry loop handles it.
  */
 export async function executeSendEmail(
   config: any,
@@ -451,27 +870,28 @@ export async function executeSendEmail(
     throw new Error('SEND_EMAIL requires "to" and "subject" fields')
   }
 
-  // For MVP: Log the email (actual email service integration can be added later)
-  console.log(`[Workflow Activity] Send email to ${to}: ${subject}`)
+  logger.info('Send email activity invoked', { component: 'SEND_EMAIL', subject })
 
-  // Check if email service is available in container
+  let emailService: { send: (input: unknown) => Promise<unknown> | unknown } | undefined
   try {
-    const emailService = container.resolve<{ send: (input: unknown) => Promise<unknown> | unknown }>('emailService')
-    if (emailService && typeof emailService.send === 'function') {
-      await emailService.send({
-        to,
-        subject,
-        template,
-        templateData,
-        body,
-      })
-      return { sent: true, to, subject, via: 'emailService' }
-    }
-  } catch (error) {
-    // Email service not available, just log
+    emailService = container.resolve<{ send: (input: unknown) => Promise<unknown> | unknown }>('emailService')
+  } catch {
+    emailService = undefined
   }
 
-  return { sent: true, to, subject, via: 'console' }
+  if (emailService && typeof emailService.send === 'function') {
+    await emailService.send({
+      to,
+      subject,
+      template,
+      templateData,
+      body,
+    })
+    return { sent: true, to, subject, via: 'emailService' }
+  }
+
+  logger.warn('SEND_EMAIL has no registered email service; email was not sent', { component: 'SEND_EMAIL', subject })
+  return { sent: false, simulated: true, to, subject, via: 'console', reason: 'no-email-service' }
 }
 
 /**
@@ -488,6 +908,25 @@ export async function executeEmitEvent(
 
   if (!eventName) {
     throw new Error('EMIT_EVENT requires "eventName" field')
+  }
+
+  // Workflow definitions are tenant-managed input. Private cross-process
+  // events coordinate trusted server state (for example closing an in-memory
+  // collaboration room), so allowing a workflow to name one would turn a
+  // regular event activity into a cross-process invalidation primitive.
+  if (isPrivateCrossProcessBroadcastEvent(eventName)) {
+    throw new Error(`EMIT_EVENT cannot emit private cross-process event "${eventName}"`)
+  }
+
+  // Emissions are fire-and-forget and no subscriber validates the payload shape,
+  // so an unresolved `{{context.x}}` here is even quieter than on the command
+  // path — it ships the literal template to every consumer. Fail loudly instead.
+  const unresolvedPayloadKeys = findUnresolvedTemplateKeys(payload)
+  if (unresolvedPayloadKeys.length > 0) {
+    throw new Error(
+      `EMIT_EVENT payload contains unresolved template variables for: ${unresolvedPayloadKeys.join(', ')}. ` +
+        `Check that the workflow context provides these keys.`
+    )
   }
 
   // Get event bus from container
@@ -516,6 +955,23 @@ export async function executeEmitEvent(
   return { emitted: true, eventName, payload: enrichedPayload }
 }
 
+const UNRESOLVED_TEMPLATE_PATTERN = /\{\{[^}]+\}\}/
+
+function findUnresolvedTemplateKeys(value: unknown, path = ''): string[] {
+  if (typeof value === 'string') {
+    return UNRESOLVED_TEMPLATE_PATTERN.test(value) ? [path] : []
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => findUnresolvedTemplateKeys(item, `${path}[${index}]`))
+  }
+  if (value && typeof value === 'object') {
+    return Object.entries(value).flatMap(([key, nested]) =>
+      findUnresolvedTemplateKeys(nested, path ? `${path}.${key}` : key)
+    )
+  }
+  return []
+}
+
 /**
  * UPDATE_ENTITY activity handler
  *
@@ -538,11 +994,14 @@ export async function executeEmitEvent(
  *   "commandId": "sales.orders.update",
  *   "statusDictionary": "sales.order_status",
  *   "input": {
- *     "id": "{{context.id}}",
+ *     "id": "{{context.orderId}}",
  *     "statusValue": "pending_approval"
  *   }
  * }
  * ```
+ *
+ * Every `{{...}}` reference in `input` must resolve against the workflow context —
+ * an unresolved reference is rejected rather than forwarded to the command bus.
  */
 export async function executeUpdateEntity(
   em: EntityManager,
@@ -556,8 +1015,41 @@ export async function executeUpdateEntity(
     throw new Error('UPDATE_ENTITY requires "commandId" field (e.g., "sales.documents.update")')
   }
 
+  // Gate 1 — the CODE declares this command possible.
+  const workflowSafeCommand = getWorkflowSafeCommand(commandId)
+  if (!workflowSafeCommand) {
+    throw new Error('UPDATE_ENTITY command is not allowed')
+  }
+
+  // Gate 2 — this TENANT switched it on. A tenant that never saved the setting
+  // resolves to the grandfathered set, so this is byte-identical to the
+  // pre-setting behaviour for every existing tenant.
+  const commandPolicy = await resolveWorkflowCommandPolicyForContainer(
+    container,
+    context.workflowInstance.tenantId,
+  )
+  if (!isWorkflowCommandEnabled(workflowSafeCommand, commandPolicy)) {
+    throw new Error('UPDATE_ENTITY command is not enabled for this tenant')
+  }
+
   if (!input || typeof input !== 'object') {
     throw new Error('UPDATE_ENTITY requires "input" object with entity data')
+  }
+
+  const actorUserId = typeof context.userId === 'string' ? context.userId.trim() : ''
+  if (!actorUserId) {
+    throw new Error('UPDATE_ENTITY requires an authenticated workflow user')
+  }
+
+  const authorized = await workflowUserHasAllFeatures(
+    container,
+    actorUserId,
+    workflowSafeCommand.requiredFeatures,
+    context.workflowInstance.tenantId,
+    context.workflowInstance.organizationId
+  )
+  if (!authorized) {
+    throw new Error('UPDATE_ENTITY command is not authorized')
   }
 
   // Resolve CommandBus from container
@@ -565,6 +1057,14 @@ export async function executeUpdateEntity(
 
   if (!commandBus || typeof commandBus.execute !== 'function') {
     throw new Error('CommandBus not available in container')
+  }
+
+  const unresolvedKeys = findUnresolvedTemplateKeys(input)
+  if (unresolvedKeys.length > 0) {
+    throw new Error(
+      `UPDATE_ENTITY input contains unresolved template variables for: ${unresolvedKeys.join(', ')}. ` +
+        `Check that the workflow context provides these keys.`
+    )
   }
 
   // Prepare final input, resolving statusValue if provided
@@ -586,12 +1086,10 @@ export async function executeUpdateEntity(
   }
 
   // Build synthetic CommandRuntimeContext for workflow execution
-  // Use nil UUID for system actions when no user context is available
-  const SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000000'
   const ctx = {
     container,
     auth: {
-      sub: context.userId || SYSTEM_USER_ID,
+      sub: actorUserId,
       tenantId: context.workflowInstance.tenantId,
       orgId: context.workflowInstance.organizationId,
       isSuperAdmin: false,
@@ -640,7 +1138,7 @@ async function resolveDictionaryEntryId(
     })
 
     if (!dictionary) {
-      console.warn(`[UPDATE_ENTITY] Dictionary not found: ${dictionaryKey}`)
+      logger.warn('Dictionary not found', { component: 'UPDATE_ENTITY', dictionaryKey })
       return null
     }
 
@@ -654,13 +1152,13 @@ async function resolveDictionaryEntryId(
     })
 
     if (!entry) {
-      console.warn(`[UPDATE_ENTITY] Dictionary entry not found: ${dictionaryKey}/${value}`)
+      logger.warn('Dictionary entry not found', { component: 'UPDATE_ENTITY', dictionaryKey, value })
       return null
     }
 
     return entry.id
   } catch (error) {
-    console.error(`[UPDATE_ENTITY] Error resolving dictionary entry:`, error)
+    logger.error('Error resolving dictionary entry', { component: 'UPDATE_ENTITY', err: error })
     return null
   }
 }
@@ -800,27 +1298,6 @@ export async function executeFunction(
 }
 
 /**
- * Calculate delay in milliseconds from a WAIT activity config.
- * Supports either `duration` (relative, e.g. "PT5M") or `until` (absolute ISO 8601 datetime).
- */
-function calculateWaitDelayMs(config: { duration?: string; until?: string }): number {
-  if (config.until) {
-    const targetDate = new Date(config.until)
-    if (isNaN(targetDate.getTime())) {
-      throw new Error(`WAIT activity: invalid "until" datetime: ${config.until}`)
-    }
-    const delayMs = targetDate.getTime() - Date.now()
-    return Math.max(0, delayMs)
-  }
-
-  if (config.duration) {
-    return parseDuration(config.duration)
-  }
-
-  throw new Error('WAIT activity requires "duration" (e.g., "PT5M", "1h") or "until" (ISO 8601 datetime)')
-}
-
-/**
  * WAIT activity handler
  *
  * Delays workflow execution for a configured duration or until a specific datetime.
@@ -830,7 +1307,7 @@ function calculateWaitDelayMs(config: { duration?: string; until?: string }): nu
  * - Async mode: delay is handled by the queue's delayMs option;
  *   this handler returns immediately when called from the worker
  */
-async function executeWait(config: any): Promise<any> {
+export async function executeWait(config: any): Promise<any> {
   const durationMs = calculateWaitDelayMs(config)
 
   // In sync mode, actually sleep for the duration
@@ -838,6 +1315,237 @@ async function executeWait(config: any): Promise<any> {
   await sleep(durationMs)
 
   return { waited: true, durationMs }
+}
+
+/**
+ * SET_VARIABLE activity handler
+ *
+ * Validates the (already interpolated) assignments and echoes them back as
+ * `{ assignments }`. The sync merge points detect this output shape via
+ * `isSetVariableOutput` and apply each assignment at its dot path in
+ * top-level workflow context (see lib/set-variable.ts) instead of
+ * namespacing the output under the activity name/type key.
+ */
+export async function executeSetVariable(
+  config: unknown,
+  context: ActivityContext
+): Promise<SetVariableOutput> {
+  const parsed = setVariableConfigSchema.safeParse(config)
+  if (!parsed.success) {
+    const issues = parsed.error.issues
+      .map((issue) => `${issue.path.join('.') || 'config'}: ${issue.message}`)
+      .join('; ')
+    throw new Error(`SET_VARIABLE config invalid: ${issues}`)
+  }
+
+  for (const assignment of parsed.data.assignments) {
+    const segments = splitAssignmentPath(assignment.path)
+    if (segments === null) {
+      throw new Error(
+        `SET_VARIABLE assignment path contains a forbidden segment (__proto__, constructor, prototype): "${assignment.path}"`
+      )
+    }
+    if (segments.length === 0) {
+      throw new Error(`SET_VARIABLE assignment path is blank: "${assignment.path}"`)
+    }
+  }
+
+  return { assignments: parsed.data.assignments }
+}
+
+/**
+ * INVOKE_AGENT activity handler
+ *
+ * Runs a callable agent via the agent_orchestrator DI bridge (`agentWorkflowBridge`,
+ * an optional peer) and dispositions any proposal:
+ * - researcher → returns the agent data; the step proceeds inline (no park).
+ * - auto_approved → returns the proposalId; the step proceeds inline (no park).
+ * - user_task → returns a result carrying a `__park` marker so the step handler
+ *   parks the instance on `INVOKE_AGENT_SIGNAL_NAME`; agent_orchestrator's
+ *   dispose path later signals it to resume.
+ *
+ * `config` is the already-interpolated INVOKE_AGENT config.
+ */
+type AgentWorkflowBridgeLike = {
+  invokeAgentForWorkflow: (args: {
+    agentId: string
+    input: unknown
+    onResult: { autoApproveThreshold: number; autoApproveMargin?: number } | { alwaysAsk: true }
+    ctx: {
+      tenantId: string
+      organizationId: string
+      userId?: string
+      workflowInstanceId: string
+      stepId: string
+      /**
+       * The step-attempt id. With the instance and the step it IS this
+       * invocation's identity, so the run it produces can be correlated by name
+       * rather than by "the newest run for this agent since now".
+       */
+      invocationId?: string
+      // Optional interpolated business-record descriptor (invokeAgentConfigSchema.subject).
+      subject?: unknown
+      // Optional already-resolved Review section (spec 7.5) — who reviews the
+      // proposal this step raises, and by when. Absent means the unassigned
+      // task the disposition service raised before the section existed.
+      review?: AgentDispositionReview
+    }
+  }) => Promise<
+    | { kind: 'research'; data: unknown }
+    | { kind: 'auto_approved'; proposalId: string; payload: unknown }
+    | { kind: 'user_task'; proposalId: string }
+    // The agent proposed nothing: terminal like `researcher`, never parked.
+    | { kind: 'none_proposed'; proposalId: string; payload: unknown }
+    // The agent PRODUCED files. Terminal and non-mutating, so it routes onto the
+    // same governance handle as a research result: the five outcome handles are a
+    // vocabulary of DECISIONS, and "it made a document" is not one of them.
+    | { kind: 'artifact'; artifacts: unknown[]; summary?: string }
+  >
+}
+
+function tryResolveAgentWorkflowBridge(
+  container: AwilixContainer,
+): AgentWorkflowBridgeLike | undefined {
+  try {
+    return container.resolve<AgentWorkflowBridgeLike>('agentWorkflowBridge')
+  } catch {
+    return undefined
+  }
+}
+
+export async function executeInvokeAgent(
+  config: unknown,
+  context: ActivityContext,
+  container: AwilixContainer
+): Promise<any> {
+  const parsed = invokeAgentConfigSchema.safeParse(config)
+  if (!parsed.success) {
+    const issues = parsed.error.issues
+      .map((issue) => `${issue.path.join('.') || 'config'}: ${issue.message}`)
+      .join('; ')
+    throw new Error(`INVOKE_AGENT config invalid: ${issues}`)
+  }
+  const { agentId, input, onResult, outputMapping, subject, review } = parsed.data
+
+  // The Review section is resolved HERE, against the context the step ran with,
+  // for the same reason a USER_TASK's assignment is resolved at creation rather
+  // than at read time: a definition edit while the agent is running must not
+  // retro-change who the resulting review task belongs to. `config` reaches this
+  // function already interpolated, so a dynamic assignee is either a resolved id
+  // or an untouched `{{…}}` token — which `resolveTaskAssignment` reads as the
+  // fallback-to-the-role-queue case.
+  const dispositionReview = toAgentDispositionReview(resolveAgentReview(review, (value) => value))
+
+  // Fail fast when the optional agent_orchestrator peer is absent — the worker
+  // would otherwise enqueue a job that can never run.
+  const bridge = tryResolveAgentWorkflowBridge(container)
+  if (!bridge) {
+    throw new Error('[internal] agent_orchestrator not installed')
+  }
+
+  const stepId =
+    context.stepContext?.stepId ||
+    context.workflowInstance.currentStepId
+
+  // Resolve the traceable principal this agent run executes as, from the
+  // workflow instance (NOT the unreliable execution `context.userId`, which is
+  // empty for event/sub-workflow paths). Same security model as CALL_API: the
+  // run must never exceed the permissions of the human who triggered (or
+  // authored) the workflow, and there is no anonymous "system" fallback —
+  // passing an empty user id downstream both poisons the DB transaction
+  // (invalid uuid `""`) and would mint a session token attributed to no one.
+  const principalEm = container.resolve<PostgreSqlEntityManager>('em')
+  const effectiveUserId = await resolveWorkflowPrincipalUserId(principalEm, context.workflowInstance)
+  if (!effectiveUserId) {
+    throw new Error(
+      `[INVOKE_AGENT] Refusing to execute for workflow instance ${context.workflowInstance.id}: ` +
+      `no traceable user (instance initiatedBy or definition author) could be resolved. ` +
+      `Agent runs must execute under the identity of the user who triggered them.`
+    )
+  }
+
+  // Parallel-branch agent steps keep the legacy inline path. The async fix below
+  // parks and resumes at the INSTANCE level, and sendSignal's FORKED branch
+  // resume only matches WAIT_FOR_SIGNAL steps — so an instance-level resume would
+  // not reach a parked branch. The claims blueprints (and the common case) run
+  // agents sequentially at the instance level; only rarely-used parallel branches
+  // hit this fallback, where behavior is unchanged from before.
+  if (context.branchInstanceId) {
+    const outcome = await bridge.invokeAgentForWorkflow({
+      agentId,
+      input,
+      onResult,
+      ctx: {
+        tenantId: context.workflowInstance.tenantId,
+        organizationId: context.workflowInstance.organizationId,
+        userId: effectiveUserId,
+        workflowInstanceId: context.workflowInstance.id,
+        stepId,
+        // The step-attempt row id: a retry enters the step again and mints a new
+        // one, so it names THIS attempt and no other.
+        ...(context.stepInstanceId ? { invocationId: context.stepInstanceId } : {}),
+        ...(subject ? { subject } : {}),
+        ...(dispositionReview ? { review: dispositionReview } : {}),
+      },
+    })
+    if (outcome.kind === 'research') {
+      return { kind: 'research', agentId, data: outcome.data }
+    }
+    if (outcome.kind === 'artifact') {
+      return { kind: 'artifact', agentId, artifacts: outcome.artifacts, summary: outcome.summary }
+    }
+    if (outcome.kind === 'auto_approved' || outcome.kind === 'none_proposed') {
+      return { kind: outcome.kind, agentId, proposalId: outcome.proposalId, proposalPayload: outcome.payload }
+    }
+    return {
+      kind: 'user_task',
+      agentId,
+      proposalId: outcome.proposalId,
+      __park: { signalName: INVOKE_AGENT_SIGNAL_NAME },
+    }
+  }
+
+  if (!context.stepInstanceId) {
+    throw new Error('[internal] INVOKE_AGENT requires a step instance to park on')
+  }
+
+  // Run the agent OUTSIDE the workflow transaction. Previously the agent ran
+  // inline here, on the workflow's transactional EM: a failing statement aborted
+  // the whole workflow transaction ("current transaction is aborted, …") and,
+  // for cross-process OpenCode agents, the per-run api_key / session rows were
+  // written into the still-open transaction so the separate mcp:serve-http
+  // process could not see them to authenticate submit_outcome. Instead we enqueue
+  // a dedicated job and PARK the step on the proposal-ready signal: the
+  // workflow-invoke-agent worker runs the agent on its own connection (committed,
+  // cross-process visible) and resumes the parked step via sendSignal. user_task
+  // outcomes stay parked until agent_orchestrator's human dispose fires the same
+  // signal — identical to the prior park behavior.
+  const queue = getInvokeAgentQueue()
+  const job: WorkflowActivityJobInvokeAgent = {
+    kind: 'invoke_agent',
+    workflowInstanceId: context.workflowInstance.id,
+    branchInstanceId: context.branchInstanceId ?? undefined,
+    stepInstanceId: context.stepInstanceId,
+    stepId,
+    signalName: INVOKE_AGENT_SIGNAL_NAME,
+    agentId,
+    input: (input ?? {}) as Record<string, any>,
+    onResult,
+    ...(outputMapping ? { outputMapping } : {}),
+    ...(subject ? { subject } : {}),
+    ...(dispositionReview ? { review: dispositionReview } : {}),
+    tenantId: context.workflowInstance.tenantId,
+    organizationId: context.workflowInstance.organizationId,
+    userId: effectiveUserId,
+  }
+  const jobId = await queue.enqueue(job, { delayMs: INVOKE_AGENT_ENQUEUE_DELAY_MS })
+
+  return {
+    kind: 'pending_agent',
+    agentId,
+    jobId,
+    __park: { signalName: INVOKE_AGENT_SIGNAL_NAME },
+  }
 }
 
 /**
@@ -857,8 +1565,8 @@ export async function executeCallApi(
   container: AwilixContainer,
   signal?: AbortSignal
 ): Promise<any> {
-  // 1. Interpolate variables in config (including {{workflow.*}}, {{context.*}}, {{env.*}}, {{now}})
-  const interpolatedConfig = interpolateVariables(config, context.workflowContext, context.workflowInstance)
+  // 1. Interpolate variables in config (including {{workflow.*}}, {{context.*}}, allowlisted {{env.*}}, {{now}})
+  const interpolatedConfig = interpolateActivityConfig(config, context, 'CALL_API')
 
   const {
     endpoint,
@@ -879,8 +1587,28 @@ export async function executeCallApi(
   // 3. Import the one-time API key helper
   const { withOnetimeApiKey } = await import('../../api_keys/services/apiKeyService')
 
-  // 4. Get EntityManager from container (for correct type)
-  const apiKeyEm = container.resolve<PostgreSqlEntityManager>('em')
+  // 4. Create the one-time API key on an EntityManager that is fully detached
+  //    from the surrounding request/transaction context.
+  //
+  //    CALL_API runs inside `workflowExecutor.executeWorkflow()`, which wraps
+  //    the whole execution in `em.transactional(...)`. The request EM is forked
+  //    with `useContext: true`, so while that transaction is open, EVERY
+  //    operation on the container's `em` — including this API key's
+  //    persist/flush — is transparently redirected to the uncommitted
+  //    transaction fork (MikroORM `getContext()` → `TransactionContext`). The
+  //    key would therefore stay invisible until the transaction commits, but
+  //    the commit cannot happen until this activity returns. The outbound
+  //    self-authenticated `fetch` below opens a SEPARATE DB connection that
+  //    cannot see the uncommitted row, so the internal API responds `401` and
+  //    the activity fails (issue #4202).
+  //
+  //    Forking with `useContext: false` (matching the query_index/webhooks
+  //    isolated-EM convention) gives the key its own pooled connection with
+  //    autocommit, so it is committed and visible to the internal request
+  //    immediately.
+  const apiKeyEm = container
+    .resolve<PostgreSqlEntityManager>('em')
+    .fork({ clear: true, freshEventManager: true, useContext: false }) as PostgreSqlEntityManager
 
   // 5. Resolve the roles that the one-time API key will inherit.
   //
@@ -1032,16 +1760,40 @@ async function resolveActiveRoleIdsForUser(
   return scopedRoles.map((r: any) => r.id as string)
 }
 
+/**
+ * Loads the instance's definition (including soft-deleted rows, so an execution
+ * grant on a deleted definition still binds a run that is still executing).
+ */
+async function loadInstanceDefinition(em: any, instance: CallApiInstanceLike) {
+  if (!instance.definitionId) return null
+  const { findOneWithDecryption } = await import('@open-mercato/shared/lib/encryption/find')
+  const { WorkflowDefinition } = await import('../data/entities')
+  return findOneWithDecryption(
+    em,
+    WorkflowDefinition,
+    { id: instance.definitionId, tenantId: instance.tenantId },
+    {},
+    { tenantId: instance.tenantId, organizationId: instance.organizationId },
+  )
+}
+
 export async function resolveCallApiRoleIds(
   em: any,
   instance: CallApiInstanceLike
 ): Promise<string[]> {
   if (!instance.definitionId) return []
 
-  const { findOneWithDecryption } = await import('@open-mercato/shared/lib/encryption/find')
-  const { WorkflowDefinition } = await import('../data/entities')
-
   const scope = { tenantId: instance.tenantId, organizationId: instance.organizationId }
+  const definition = await loadInstanceDefinition(em, instance)
+
+  // 0. A definition that declares its own execution grant ALWAYS acts as its
+  //    own least-privilege principal, whoever started the run — otherwise a
+  //    CALL_API activity would mint a key carrying the starting admin's roles
+  //    and route straight around the grant.
+  if (definitionDeclaresGrant(definition)) {
+    const principalUserId = await resolveWorkflowDefinitionExecutionUserId(em, definition, null)
+    return principalUserId ? resolveActiveRoleIdsForUser(em, principalUserId, scope) : []
+  }
 
   // 1. Prefer the triggering user (whoever manually started this instance).
   //    WorkflowInstance.metadata.initiatedBy is the canonical record of that
@@ -1056,15 +1808,46 @@ export async function resolveCallApiRoleIds(
 
   // 2. Event-triggered instance with no human initiator: fall back to the
   //    definition author. Soft-deleted definitions must not mint keys.
-  const definition = await findOneWithDecryption(em, WorkflowDefinition, {
-    id: instance.definitionId,
-    tenantId: instance.tenantId,
-    deletedAt: null,
-  }, {}, scope)
-  const authorUserId = definition?.createdBy
+  const authorUserId = definition?.deletedAt ? null : definition?.createdBy
   if (!authorUserId) return []
 
   return resolveActiveRoleIdsForUser(em, authorUserId, scope)
+}
+
+/**
+ * Resolve the traceable principal user id an INVOKE_AGENT run executes as.
+ *
+ * Mirrors `resolveCallApiRoleIds`' principal chain so workflow-originated agent
+ * runs carry the same audited identity as CALL_API:
+ *   1. The instance's `metadata.initiatedBy` (whoever started it; inherited by
+ *      sub-workflows from the parent instance).
+ *   2. The definition's `createdBy` (author) for event-triggered instances with
+ *      no human initiator. Soft-deleted definitions resolve to no principal.
+ *
+ * Both are outranked by the definition's own `grantedFeatures` execution
+ * principal when it declares one (see `lib/definition-grant.ts`).
+ *
+ * Returns `null` when no traceable principal exists — callers MUST refuse rather
+ * than fall back to an empty/anonymous user id (which breaks uuid columns and
+ * bypasses RBAC attribution).
+ */
+export async function resolveWorkflowPrincipalUserId(
+  em: any,
+  instance: CallApiInstanceLike
+): Promise<string | null> {
+  const definition = await loadInstanceDefinition(em, instance)
+
+  // 0. A declared execution grant outranks both — the run acts as its own
+  //    principal regardless of who started it.
+  if (definitionDeclaresGrant(definition)) {
+    return resolveWorkflowDefinitionExecutionUserId(em, definition, null)
+  }
+
+  const initiatorUserId = instance.metadata?.initiatedBy ?? null
+  if (initiatorUserId) return initiatorUserId
+
+  if (definition?.deletedAt) return null
+  return definition?.createdBy ?? null
 }
 
 /**
@@ -1136,6 +1919,106 @@ function classifyAndThrowError(status: number, body: any, url: string): never {
 // Helper Functions
 // ============================================================================
 
+type InterpolationBaseResolution =
+  | { status: 'resolved'; value: unknown }
+  | { status: 'unresolved-context'; contextPath: string }
+  | { status: 'unknown-workflow-key'; workflowKey: string }
+  | { status: 'env-not-allowlisted'; envKey: string }
+
+function resolveInterpolationBaseValue(
+  path: string,
+  context: Record<string, any>,
+  workflowInstance?: WorkflowInstance
+): InterpolationBaseResolution {
+  if (path.startsWith('workflow.') && workflowInstance) {
+    const workflowKey = path.substring('workflow.'.length)
+    switch (workflowKey) {
+      case 'instanceId':
+        return { status: 'resolved', value: workflowInstance.id }
+      case 'tenantId':
+        return { status: 'resolved', value: workflowInstance.tenantId }
+      case 'organizationId':
+        return { status: 'resolved', value: workflowInstance.organizationId }
+      case 'currentStepId':
+        return { status: 'resolved', value: workflowInstance.currentStepId }
+      case 'workflowId':
+        return { status: 'resolved', value: workflowInstance.workflowId }
+      case 'version':
+        return { status: 'resolved', value: workflowInstance.version }
+      default:
+        return { status: 'unknown-workflow-key', workflowKey }
+    }
+  }
+
+  if (path.startsWith('env.')) {
+    const envKey = path.substring('env.'.length)
+    if (!getWorkflowEnvInterpolationAllowlist().has(envKey)) {
+      return { status: 'env-not-allowlisted', envKey }
+    }
+    return { status: 'resolved', value: process.env[envKey] ?? '' }
+  }
+
+  if (path === 'now') {
+    return { status: 'resolved', value: new Date().toISOString() }
+  }
+
+  const contextPath = path.startsWith('context.') ? path.substring('context.'.length) : path
+  const value = getNestedValue(context, contextPath)
+  if (value !== undefined) return { status: 'resolved', value }
+  return { status: 'unresolved-context', contextPath }
+}
+
+function strictInterpolationError(rawToken: string, reason: string): WorkflowInterpolationError {
+  return new WorkflowInterpolationError(
+    `Cannot interpolate {{${rawToken}}}: ${reason}`,
+    rawToken
+  )
+}
+
+function interpolateToken(
+  rawToken: string,
+  context: Record<string, any>,
+  workflowInstance: WorkflowInstance | undefined,
+  strict: boolean
+): { resolved: boolean; value?: unknown } {
+  const parsedToken = parseInterpolationToken(rawToken)
+  if (!parsedToken.ok) {
+    if (strict) throw strictInterpolationError(rawToken, parsedToken.error)
+    return { resolved: false }
+  }
+  const resolution = resolveInterpolationBaseValue(parsedToken.path, context, workflowInstance)
+  if (resolution.status === 'unknown-workflow-key') {
+    if (strict) throw strictInterpolationError(rawToken, `unknown workflow key "${resolution.workflowKey}"`)
+    return { resolved: false }
+  }
+  if (resolution.status === 'env-not-allowlisted') {
+    if (strict) throw strictInterpolationError(rawToken, `env variable "${resolution.envKey}" is not allowlisted`)
+  }
+  const baseValue =
+    resolution.status === 'resolved'
+      ? resolution.value
+      : resolution.status === 'env-not-allowlisted'
+        ? ''
+        : undefined
+  if (parsedToken.transforms.length === 0) {
+    if (resolution.status === 'unresolved-context') {
+      if (strict) throw strictInterpolationError(rawToken, `context path "${resolution.contextPath}" is not defined`)
+      return { resolved: false }
+    }
+    return { resolved: true, value: baseValue }
+  }
+  const transformed = applyTransforms(baseValue, parsedToken.transforms)
+  if (!transformed.ok) {
+    if (strict) throw strictInterpolationError(rawToken, transformed.error.message)
+    return { resolved: false }
+  }
+  if (transformed.value === undefined) {
+    if (strict) throw strictInterpolationError(rawToken, 'the transform pipeline produced no value')
+    return { resolved: false }
+  }
+  return { resolved: true, value: transformed.value }
+}
+
 /**
  * Interpolate variables in config from workflow context
  *
@@ -1145,123 +2028,72 @@ function classifyAndThrowError(status: number, body: any, url: string): never {
  * - {{workflow.tenantId}} - tenant ID
  * - {{workflow.organizationId}} - organization ID
  * - {{workflow.currentStepId}} - current step ID
- * - {{env.VAR_NAME}} - environment variables
+ * - {{env.VAR_NAME}} - server-allowlisted environment variables
  * - {{now}} - current ISO timestamp
+ * - {{ path | transform(args) | ... }} - pill transform pipeline
+ *   (`lib/interpolation-pipeline.ts`): a fixed table of pure transforms folded
+ *   over the resolved base value. Lenient behavior (the default): an
+ *   unparseable token, an unresolved path without a rescuing `default`, or a
+ *   failed transform passes the original token/config through unchanged. In
+ *   strict mode (`options.mode: 'strict'`, opted in per definition) the same
+ *   situations throw `WorkflowInterpolationError` naming the offending token;
+ *   only a `default(...)` transform can rescue an unresolved context path.
  */
-function interpolateVariables(
+export function interpolateVariables(
   config: any,
   context: Record<string, any>,
-  workflowInstance?: WorkflowInstance
+  workflowInstance?: WorkflowInstance,
+  options?: { mode?: WorkflowInterpolationMode }
 ): any {
+  const strict = options?.mode === 'strict'
   if (typeof config === 'string') {
     // Check if this is a single variable reference (e.g., "{{context.cart.items}}")
     // This preserves the original type (array, object, number, boolean)
     const singleVarMatch = config.match(/^\{\{([^}]+)\}\}$/)
 
     if (singleVarMatch) {
-      const trimmedPath = singleVarMatch[1].trim()
-
-      // Handle {{workflow.*}} variables
-      if (trimmedPath.startsWith('workflow.') && workflowInstance) {
-        const workflowKey = trimmedPath.substring('workflow.'.length)
-        switch (workflowKey) {
-          case 'instanceId':
-            return workflowInstance.id
-          case 'tenantId':
-            return workflowInstance.tenantId
-          case 'organizationId':
-            return workflowInstance.organizationId
-          case 'currentStepId':
-            return workflowInstance.currentStepId
-          case 'workflowId':
-            return workflowInstance.workflowId
-          case 'version':
-            return workflowInstance.version // Return as number
-          default:
-            return config // Return original if unknown
-        }
-      }
-
-      // Handle {{env.*}} variables
-      if (trimmedPath.startsWith('env.')) {
-        const envKey = trimmedPath.substring('env.'.length)
-        return process.env[envKey] ?? config
-      }
-
-      // Handle {{now}} - current timestamp
-      if (trimmedPath === 'now') {
-        return new Date().toISOString()
-      }
-
-      // Handle {{context.*}} variables (default behavior)
-      const contextPath = trimmedPath.startsWith('context.')
-        ? trimmedPath.substring('context.'.length)
-        : trimmedPath
-
-      const value = getNestedValue(context, contextPath)
-      return value !== undefined ? value : config // Return raw value to preserve type
+      const outcome = interpolateToken(singleVarMatch[1], context, workflowInstance, strict)
+      return outcome.resolved ? outcome.value : config
     }
 
     // Multiple interpolations or mixed text - return string
-    return config.replace(/\{\{([^}]+)\}\}/g, (match, path) => {
-      const trimmedPath = path.trim()
-
-      // Handle {{workflow.*}} variables
-      if (trimmedPath.startsWith('workflow.') && workflowInstance) {
-        const workflowKey = trimmedPath.substring('workflow.'.length)
-        switch (workflowKey) {
-          case 'instanceId':
-            return workflowInstance.id
-          case 'tenantId':
-            return workflowInstance.tenantId
-          case 'organizationId':
-            return workflowInstance.organizationId
-          case 'currentStepId':
-            return workflowInstance.currentStepId
-          case 'workflowId':
-            return workflowInstance.workflowId
-          case 'version':
-            return String(workflowInstance.version)
-          default:
-            return match // Unknown workflow key
-        }
-      }
-
-      // Handle {{env.*}} variables
-      if (trimmedPath.startsWith('env.')) {
-        const envKey = trimmedPath.substring('env.'.length)
-        const envValue = process.env[envKey]
-        return envValue !== undefined ? envValue : match
-      }
-
-      // Handle {{now}} - current timestamp
-      if (trimmedPath === 'now') {
-        return new Date().toISOString()
-      }
-
-      // Handle {{context.*}} variables (default behavior)
-      const contextPath = trimmedPath.startsWith('context.')
-        ? trimmedPath.substring('context.'.length)
-        : trimmedPath
-
-      const value = getNestedValue(context, contextPath)
-      return value !== undefined ? String(value) : match
+    return config.replace(/\{\{([^}]+)\}\}/g, (match, token) => {
+      const outcome = interpolateToken(token, context, workflowInstance, strict)
+      return outcome.resolved ? String(outcome.value) : match
     })
   }
 
   if (Array.isArray(config)) {
-    return config.map((item) => interpolateVariables(item, context, workflowInstance))
+    return config.map((item) => interpolateVariables(item, context, workflowInstance, options))
   }
 
   if (config && typeof config === 'object') {
     const result: Record<string, any> = {}
     for (const [key, value] of Object.entries(config)) {
-      result[key] = interpolateVariables(value, context, workflowInstance)
+      result[key] = interpolateVariables(value, context, workflowInstance, options)
     }
     return result
   }
 
   return config
+}
+
+function interpolateActivityConfig(
+  config: any,
+  context: ActivityContext,
+  activityType: ActivityType,
+  activityName?: string
+): any {
+  try {
+    return interpolateVariables(config, context.workflowContext, context.workflowInstance, {
+      mode: context.interpolationMode,
+    })
+  } catch (error) {
+    if (error instanceof WorkflowInterpolationError) {
+      throw new ActivityExecutionError(error.message, activityType, activityName, { token: error.token })
+    }
+    throw error
+  }
 }
 
 /**
@@ -1304,22 +2136,40 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * Execute a promise with timeout
+ *
+ * Only CALL_API and CALL_WEBHOOK honour the abort signal today — they forward
+ * it to `fetch`. SEND_EMAIL, EMIT_EVENT, UPDATE_ENTITY and EXECUTE_FUNCTION
+ * still run to completion after the timeout has been recorded. Tracked in
+ * #5148.
  */
 async function executeWithTimeout<T>(
-  executor: () => Promise<T>,
+  executor: (signal: AbortSignal) => Promise<T>,
   timeoutMs: number
 ): Promise<T> {
   let timeoutId: NodeJS.Timeout
+  const abortController = new AbortController()
 
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
+      abortController.abort()
       reject(new Error(`Activity execution timeout after ${timeoutMs}ms`))
     }, timeoutMs)
   })
 
   try {
-    return await Promise.race([executor(), timeoutPromise])
+    return await Promise.race([executor(abortController.signal), timeoutPromise])
   } finally {
     clearTimeout(timeoutId!)
   }
 }
+
+bindActivityExecutor({
+  executeSendEmail,
+  executeEmitEvent,
+  executeUpdateEntity,
+  executeCallWebhook,
+  executeFunction,
+  executeCallApi,
+  executeSetVariable,
+  executeInvokeAgent,
+})

@@ -1,5 +1,5 @@
 import type { EntityManager } from '@mikro-orm/postgresql'
-import { CrudHttpError } from '@open-mercato/shared/lib/crud/errors'
+import { CrudHttpError, notFound } from '@open-mercato/shared/lib/crud/errors'
 import { createRequestContainer } from '@open-mercato/shared/lib/di/container'
 import { getAuthFromRequest } from '@open-mercato/shared/lib/auth/server'
 import {
@@ -35,11 +35,14 @@ export async function loadPersonContext(req: Request, personId: string) {
   )
 
   if (!person) {
-    throw new CrudHttpError(404, { error: translate('customers.errors.person_not_found', 'Person not found') })
+    throw notFound(translate('customers.errors.person_not_found', 'Person not found'))
   }
 
+  // Existence oracle (#5504): deny a cross-org read as not-found — identical to
+  // the parent-not-found above — so it cannot reveal that a person exists in an
+  // organization the caller cannot see.
   if (!isOrganizationReadAccessAllowed({ scope, auth: authenticatedAuth, organizationId: person.organizationId })) {
-    throw new CrudHttpError(403, { error: translate('customers.errors.access_denied', 'Access denied') })
+    throw notFound(translate('customers.errors.person_not_found', 'Person not found'))
   }
 
   const profile = await findOneWithDecryption(
@@ -53,7 +56,7 @@ export async function loadPersonContext(req: Request, personId: string) {
     },
   )
   if (!profile) {
-    throw new CrudHttpError(404, { error: translate('customers.errors.person_profile_not_found', 'Person profile not found') })
+    throw notFound(translate('customers.errors.person_profile_not_found', 'Person profile not found'))
   }
 
   return {

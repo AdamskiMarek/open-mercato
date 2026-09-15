@@ -13,6 +13,9 @@ import {
   resolveExampleIntegrationHref,
 } from './interactionCompatibility'
 import { hydrateCanonicalInteractions, loadCustomerSummaries } from './interactionReadModel'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+
+const logger = createLogger('customers')
 
 export type CustomerTodoRow = {
   id: string
@@ -75,6 +78,17 @@ export type CanonicalTodoListResult = {
   total: number
 }
 
+function emptyCanonicalTodoList(): CanonicalTodoListResult {
+  return { items: [], bridgeIds: new Set(), total: 0 }
+}
+
+function isCollapsedRestrictedOrganizationScope(
+  organizationIds: string[] | null | undefined,
+  isUnrestricted: boolean | undefined,
+): boolean {
+  return isUnrestricted !== true && (!organizationIds || organizationIds.length === 0)
+}
+
 export type ListTodosPagination = { page: number; pageSize: number }
 
 function resolveLegacyTodoSource(source: string | null | undefined): string {
@@ -84,7 +98,10 @@ function resolveLegacyTodoSource(source: string | null | undefined): string {
 }
 
 function extractTodoTitle(record: Record<string, unknown>): string | null {
-  const candidates = ['title', 'subject', 'name', 'summary', 'text', 'description']
+  // `task_name` / `taskName` carry a workflow user task's name; the query engine
+  // returns the raw column on the ORM path and the camelCase property on the
+  // indexed one, so both spellings are read.
+  const candidates = ['title', 'subject', 'name', 'task_name', 'taskName', 'summary', 'text', 'description']
   for (const key of candidates) {
     const value = record[key]
     if (typeof value === 'string' && value.trim().length > 0) {
@@ -360,7 +377,7 @@ export async function resolveLegacyTodoDetails(
         })
       }
     } catch (err) {
-      console.warn(`[customers.todoCompatibility] Failed to resolve details for source="${source}"`, err)
+      logger.warn('Failed to resolve todo details', { component: 'todoCompatibility', source, err })
       continue
     }
   }
@@ -374,8 +391,11 @@ export async function listLegacyTodoRows(
   tenantId: string,
   organizationIds: string[] | null,
   entityId: string | undefined,
-  options?: { limit?: number | null },
+  options?: { limit?: number | null; isUnrestricted?: boolean },
 ): Promise<CustomerTodoRow[]> {
+  if (isCollapsedRestrictedOrganizationScope(organizationIds, options?.isUnrestricted)) {
+    return []
+  }
   const where: Record<string, unknown> = { tenantId }
   if (organizationIds && organizationIds.length > 0) {
     where.organizationId = { $in: organizationIds }
@@ -422,8 +442,12 @@ export async function listCanonicalTodoRows(
     pagination?: ListTodosPagination | null
     searchText?: string | null
     limit?: number | null
+    isUnrestricted?: boolean
   },
 ): Promise<CanonicalTodoListResult> {
+  if (isCollapsedRestrictedOrganizationScope(organizationIds, options?.isUnrestricted)) {
+    return emptyCanonicalTodoList()
+  }
   const where: Record<string, unknown> = {
     tenantId: auth.tenantId,
     interactionType: 'task',

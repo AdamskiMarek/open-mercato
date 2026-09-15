@@ -73,6 +73,7 @@ Detailed variant tables, size matrices, props, examples, and MUST rules for ever
 - [Separator](#separator)
 - [Tabs](#tabs)
 - [Table](#table)
+- [Utility primitives (brief reference)](#utility-primitives-brief-reference)
 
 ---
 
@@ -83,7 +84,8 @@ import { Button } from '@open-mercato/ui/primitives/button'
 ```
 
 **Variants**:
-- `default` (primary CTA) · `destructive` (danger filled)
+- `default` (primary CTA) · `destructive` (danger, quiet: red text + red border on the page surface)
+- `destructive-solid` (danger filled — point-of-no-return confirmations only)
 - `destructive-outline` · `destructive-soft` · `destructive-ghost` (danger family)
 - `outline` · `secondary` · `ghost` · `muted` · `link`
 
@@ -114,7 +116,20 @@ All sizes share `rounded-md`. Same-row buttons MUST share `size`.
 
 **Anti-patterns:** `<Button className="h-9">` (redundant, hides contract from grep), `<Button size="sm">` next to `size="icon"`, raw `<Link>` styled as a button.
 
-> Use the destructive family for danger actions: `destructive` for primary delete CTAs, `destructive-outline` for confirmation dialogs, `destructive-soft` for inline destructive chips, `destructive-ghost` for low-emphasis menu items.
+### Destructive loudness (MUST)
+
+`destructive` is **quiet by default** — red text and a red border on the page surface. A screen full of solid red buttons trains users to ignore red, so the fill is reserved for the one moment it has to be unmissable.
+
+| Control | Variant | Why |
+|---|---|---|
+| Delete / Remove / Discard trigger (row action, toolbar, form header, edit-dialog footer) | `destructive` | Opening a confirmation is reversible — Escape gets you out. |
+| The confirm button inside a confirmation dialog | `destructive-solid` | The single point of no return. `ConfirmDialog` with `variant="destructive"` already resolves to this — do not hand-roll it. |
+| Inline destructive chip | `destructive-soft` | Low-emphasis surface treatment. |
+| Low-emphasis destructive menu item | `destructive-ghost` | No border/fill in a list context. |
+
+MUST NOT put `destructive-solid` on a button that only *opens* a dialog, and MUST NOT leave a final confirmation on the quiet `destructive`. Status and validation copy is not a destructive action — that takes `text-status-error-text`, never `text-destructive` (see [`ds-rules.md`](ds-rules.md)).
+
+`destructive-outline` remains as an alias of the quiet treatment for call sites that predate the policy; new code uses `destructive`.
 
 ---
 
@@ -849,6 +864,21 @@ Set `showCount` + `maxLength` to render a `current/max` indicator below the text
 
 `aria-live="polite"` on the counter so screen readers announce the changing count.
 
+### Auto-resize
+
+Set `autoResize` to let the field grow with its content instead of hiding the tail behind an inner scrollbar. The cap is expressed in **rows** (`maxRows`, default `12`) so it follows the element's own type scale rather than a magic pixel height; past the cap the field scrolls. `autoResize` implies `resize-none` — the height is owned by the content, so a manual grabber would fight it.
+
+```tsx
+<Textarea
+  autoResize
+  maxRows={10}
+  value={description}
+  onChange={(e) => setDescription(e.target.value)}
+/>
+```
+
+Reach for this on prose fields the author cannot see the end of otherwise (descriptions, notes, composers). Do NOT hand-roll `element.style.height = scrollHeight` in a page — that pattern was duplicated three times before this prop existed.
+
 ### Composition with FormField
 
 ```tsx
@@ -871,6 +901,8 @@ import { Textarea } from '@open-mercato/ui/primitives/textarea'
 | Prop | Default | Notes |
 |---|---|---|
 | `showCount` | `false` | Render `length/maxLength` counter below |
+| `autoResize` | `false` | Grow with content; implies `resize-none` |
+| `maxRows` | `12` | Rows to grow to before scrolling (`autoResize` only) |
 | `wrapperClassName` | — | Applied to outer wrapper when counter visible |
 | `className` | — | Applied to the `<textarea>` element |
 | All native textarea props | — | `value`, `onChange`, `placeholder`, `disabled`, `required`, `maxLength`, `rows`, etc. |
@@ -881,7 +913,8 @@ import { Textarea } from '@open-mercato/ui/primitives/textarea'
 - For form fields with label + error, wrap with `FormField`.
 - Keep `min-h-[80px]` default (matches Figma) — only override when a specific design demands it.
 - For `showCount`, ALWAYS set `maxLength` — without it, the counter shows just `length` which is less actionable.
-- `resize-y` is allowed (user grows vertically); avoid `resize-none` unless layout breaks.
+- `resize-y` is allowed (user grows vertically); avoid `resize-none` unless layout breaks or `autoResize` owns the height.
+- **NEVER hand-roll auto-grow** (`el.style.height = el.scrollHeight`) in page code — pass `autoResize` instead.
 
 ---
 
@@ -2380,7 +2413,7 @@ Tokens map to the Figma `state/{x}/*` variable family — `status-{x}-icon` ↔ 
 | `stroke` | White bg, neutral text, soft border + drop shadow | `bg-background text-foreground border-border shadow-lg` | Rounded badge with `bg-status-{x}-icon` + white icon |
 | `filled` | Saturated bg, white text | `bg-status-{x}-icon text-white border-transparent` | Plain white icon (no badge wrap) |
 
-`feature` status maps to `--brand-violet` tokens instead of `--status-*` because there is no dedicated `feature` token set in `globals.css`.
+`feature` status maps to the `--status-neutral-*` token family (Figma `state/faded/*` gray) — there is no dedicated `feature` token set in `globals.css`, and it deliberately does NOT use `--brand-violet` (see MUST rules below).
 
 ### Size (3)
 
@@ -4159,8 +4192,8 @@ Both share the underlying Radix Dialog, the same `Cmd/Ctrl+Enter` submit + `Esca
 
 | `side` | Slot | Default size | Use case |
 |---|---|---|---|
-| `right` (default) | `inset-y-0 right-0` | `w-full max-w-md` (~420px) | Detail panes, edit forms — the most common case |
-| `left` | `inset-y-0 left-0` | `w-full max-w-md` | Navigation drawers, mobile menus |
+| `right` (default) | `inset-y-0 right-0` | `w-full max-w-[400px]` (Figma: 400px) | Detail panes, edit forms — the most common case |
+| `left` | `inset-y-0 left-0` | `w-full max-w-[400px]` | Navigation drawers, mobile menus |
 | `top` | `inset-x-0 top-0` | `max-h-[80vh]` | Notification banners, quick filters |
 | `bottom` | `inset-x-0 bottom-0` | `max-h-[80vh]` | Mobile action sheets, command palette |
 
@@ -4269,7 +4302,7 @@ Matches Figma `Drawer Footer [1.1]` variants 1–6.
 - **Overlay:** `bg-foreground/40 backdrop-blur-sm` — page chrome stays visible-but-dimmed behind the drawer.
 - **Content panel:** `bg-background shadow-2xl` + rounded corners on the inner (viewport-facing) edges only. Per Figma there is NO border on the seam — the rounded corners + the shadow do the visual separation work. Resulting classes by side: `rounded-l-2xl` (right), `rounded-r-2xl` (left), `rounded-b-2xl` (top), `rounded-t-2xl` (bottom).
 - **No chrome dividers** between Header / Body / Footer. Section separators inside the body (e.g. "ELIGIBILITY CRITERIA" labels) come from content composition, not from the Drawer primitive.
-- Default `max-w-md` (~420px) for right/left works well for forms; pass `className="max-w-2xl"` on `DrawerContent` for wider detail panes.
+- Default `max-w-[400px]` (Figma Drawer width) for right/left works well for forms; pass `className="max-w-2xl"` on `DrawerContent` for wider detail panes.
 - Auto-rendered top-right close button (`X` icon, `size-8`, muted-foreground, hover bg `muted/40`). Use `hideCloseButton` when the body provides its own dismissal (e.g. a Save/Cancel footer alone).
 
 ---
@@ -4825,7 +4858,9 @@ const [value, setValue] = React.useState<string>('')
 - **Blur**: a 200 ms delay before commit lets `onClick` on a suggestion win the race.
 - **`allowCustomValues={false}`**: on blur or `Enter`, if the typed text does not match any option (by value or case-insensitive label), the input reverts to the current `value`.
 - **Inner element**: deliberately a raw `<input>` (not the `Input` primitive) — the focus / suggestion-popup interplay relies on a plain input. The raw element is styled to *match* the DS `Input` visual contract (`h-9 rounded-md border-input shadow-xs`, `focus-visible:shadow-focus focus-visible:border-foreground`, `placeholder:text-muted-foreground`). Do not "fix" by swapping to the DS `Input` wrapper.
-- **Popup visual**: `rounded-2xl` container with Figma drop-shadow (`0 16px 32px -12px rgba(14,18,27,0.1)`), `p-2`, items `rounded-lg p-2` with `bg-muted` for keyboard-highlighted row — matches the DS `SelectContent` / `SelectItem` token contract.
+- **Popup placement**: the suggestion list is rendered through the DS [`Popover`](#popover) (`PopoverAnchor` + `PopoverContent`), so it is portaled to `<body>` and cannot be clipped by a scrolling ancestor such as a `Dialog` (`overflow-y-auto`). Query it from the document, not from the field wrapper, in tests — and by `role="option"`, since the items are not exposed as buttons. Focus stays on the `<input>` — `onOpenAutoFocus` / `onCloseAutoFocus` are prevented, and `aria-owns` keeps the portaled listbox a logical descendant so `aria-activedescendant` stays valid.
+- **MUST NOT** place a `ComboboxInput` inside a `<DialogContent elevated>`. Because the popup is portaled it no longer inherits the dialog's stacking context, and `z-popover` (45) is below `z-modal-elevated` (55) — the list would render behind that dialog and its overlay. Regular (non-`elevated`) dialogs, drawers and side panels are fine: `z-popover` sits above `z-modal` (40).
+- **Popup visual**: `PopoverContent` container (`rounded-md border-input bg-popover shadow-md`, `z-popover`) sized to the trigger via `--radix-popover-trigger-width`, `p-2`, items `rounded-lg p-2` with `bg-muted` for the keyboard-highlighted row — matches the DS `SelectContent` / `SelectItem` token contract.
 
 ### Props
 
@@ -5652,3 +5687,18 @@ All accept native HTML attributes. Style only via `className`.
 ### Accessibility
 - Use `TableCaption` to describe the table for screen readers
 - For sortable columns, render the sort affordance inside `TableHead` with `aria-sort`
+
+---
+
+## Utility primitives (brief reference)
+
+Small primitives that need no full section — listed here so nothing shipped is undocumented.
+
+| Primitive | Import | What it is | Rules |
+|---|---|---|---|
+| `Card` (+ `CardHeader` / `CardTitle` / `CardDescription` / `CardAction` / `CardContent` / `CardFooter`) | `@open-mercato/ui/primitives/card` | Generic surface container: `bg-card rounded-xl border shadow-sm`, `gap-6`, `px-6` sections | Use for standalone content cards; do NOT hand-roll `<div className="rounded-xl border bg-card">` |
+| `Popover` (+ `PopoverTrigger` / `PopoverContent` / `PopoverAnchor` / `PopoverClose`) | `@open-mercato/ui/primitives/popover` | Radix popover portal at `z-popover`, `bg-popover` surface, `min-w-[280px]` | Base for custom floating panels; prefer higher-level `Select`/`Tooltip`/`CompactSelect` when they fit |
+| `Label` | `@open-mercato/ui/primitives/label` | Radix label: `text-sm font-medium`, disabled propagation via `peer-disabled`/`group-data-[disabled]` | Every standalone input needs one (or use `FormField`, which renders it) |
+| `DataLoader` | `@open-mercato/ui/primitives/DataLoader` | `isLoading`-gated wrapper rendering a centered `Spinner` before children | For simple section-level loading; full pages prefer `LoadingMessage` |
+| `Calendar` | `@open-mercato/ui/primitives/calendar` | Internal engine for `DatePicker`/`DateRangePicker` (incl. month/year grid navigation) | INTERNAL — consume via `DatePicker`/`DateRangePicker`, do not embed directly |
+| `Notice` / `ErrorNotice` | — | DEPRECATED shells kept for BC only; migration to `Alert` is complete and guard-tested | NEVER import in new code — use `Alert` |

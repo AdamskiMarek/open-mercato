@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { login } from '@open-mercato/core/modules/core/__integration__/helpers/auth';
+import { login } from '@open-mercato/core/helpers/integration/auth';
 
 /**
  * TC-ADMIN-007: Custom Entity Creation
@@ -16,7 +16,7 @@ test.describe('TC-ADMIN-007: Custom Entity Creation', () => {
 
     // Navigate to User Entities
     await page.goto('/backend/entities/user');
-    await expect(page.getByRole('heading', { name: 'User Entities', level: 2 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'User Entities', level: 1 })).toBeVisible();
     await page.getByText('Loading data...').waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => {});
 
     // Verify table columns

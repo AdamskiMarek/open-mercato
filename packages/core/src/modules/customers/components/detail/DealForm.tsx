@@ -15,6 +15,7 @@ import {
 } from '@open-mercato/ui/primitives/select'
 import { apiCall } from '@open-mercato/ui/backend/utils/apiCall'
 import { createCrudFormError } from '@open-mercato/ui/backend/utils/serverErrors'
+import { DEAL_DESCRIPTION_MAX_LENGTH } from '../../data/validators'
 import { DictionarySelectField } from '../formConfig'
 import { createDictionarySelectLabels } from './utils'
 import { E } from '#generated/entities.ids.generated'
@@ -69,6 +70,14 @@ export type DealFormProps = {
   showCancelAction?: boolean
   initialPipelineOptions?: PipelineOption[]
   initialPipelineStageOptions?: PipelineStageOption[]
+  /**
+   * Injection spot id for the form-scoped record_locks widget (e.g.
+   * `customers.deal`). Mirrors how people-v2/companies-v2 mount their save-time
+   * `crud-form:*` widget so a deal save conflict surfaces the merge dialog.
+   */
+  injectionSpotId?: string
+  /** Optimistic-lock version (`deal.updatedAt`) for the embedded CrudForm. */
+  optimisticLockUpdatedAt?: string | null
 }
 
 type EntityOption = {
@@ -93,6 +102,12 @@ type EntityMultiSelectProps = {
   fetchByIds: (ids: string[]) => Promise<EntityOption[]>
   disabled?: boolean
   autoFocus?: boolean
+  /**
+   * Minimum trimmed query length before a lookup request is issued. Defaults to
+   * `1`, so a blank input never queries the address book (issue #5118). Set `0`
+   * to opt back into prefetching an unfiltered first page on mount.
+   */
+  minQueryLength?: number
 }
 
 const DEAL_ENTITY_IDS = [E.customers.customer_deal]
@@ -255,7 +270,10 @@ const schema = z.object({
       'customers.people.detail.deals.expectedCloseInvalid',
     )
     .optional(),
-  description: z.string().max(4000, 'customers.people.detail.deals.descriptionTooLong').optional(),
+  description: z
+    .string()
+    .max(DEAL_DESCRIPTION_MAX_LENGTH, 'customers.people.detail.deals.descriptionTooLong')
+    .optional(),
   personIds: z.array(z.string().trim().min(1)).optional(),
   companyIds: z.array(z.string().trim().min(1)).optional(),
 }).passthrough()
@@ -341,6 +359,7 @@ function EntityMultiSelect({
   fetchByIds,
   disabled = false,
   autoFocus = false,
+  minQueryLength = 1,
 }: EntityMultiSelectProps) {
   const [input, setInput] = React.useState('')
   const [suggestions, setSuggestions] = React.useState<EntityOption[]>([])
@@ -389,11 +408,18 @@ function EntityMultiSelect({
       setLoading(false)
       return
     }
+    const term = input.trim()
+    if (term.length < minQueryLength) {
+      setSuggestions([])
+      setLoading(false)
+      setError(null)
+      return
+    }
     let cancelled = false
     const handler = window.setTimeout(async () => {
       setLoading(true)
       try {
-        const results = await search(input.trim())
+        const results = await search(term)
         if (cancelled) return
         setSuggestions(results)
         setCache((prev) => {
@@ -417,7 +443,7 @@ function EntityMultiSelect({
       cancelled = true
       window.clearTimeout(handler)
     }
-  }, [disabled, errorLabel, input, search])
+  }, [disabled, errorLabel, input, minQueryLength, search])
 
   const filteredSuggestions = React.useMemo(
     () => suggestions.filter((option) => !normalizedValue.includes(option.id)),
@@ -648,12 +674,14 @@ export function DealPeopleSelector({
   options = [],
   disabled = false,
   autoFocus = false,
+  minQueryLength,
 }: {
   value: string[]
   onChange: (next: string[]) => void
   options?: EntityOption[]
   disabled?: boolean
   autoFocus?: boolean
+  minQueryLength?: number
 }) {
   const t = useT()
   const { searchPeople, fetchPeopleByIds } = useDealAssociationLookups()
@@ -673,6 +701,7 @@ export function DealPeopleSelector({
       fetchByIds={fetchPeopleByIds}
       disabled={disabled}
       autoFocus={autoFocus}
+      minQueryLength={minQueryLength}
     />
   )
 }
@@ -682,11 +711,13 @@ export function DealCompaniesSelector({
   onChange,
   options = [],
   disabled = false,
+  minQueryLength,
 }: {
   value: string[]
   onChange: (next: string[]) => void
   options?: EntityOption[]
   disabled?: boolean
+  minQueryLength?: number
 }) {
   const t = useT()
   const { searchCompanies, fetchCompaniesByIds } = useDealAssociationLookups()
@@ -705,6 +736,7 @@ export function DealCompaniesSelector({
       search={searchCompanies}
       fetchByIds={fetchCompaniesByIds}
       disabled={disabled}
+      minQueryLength={minQueryLength}
     />
   )
 }
@@ -732,6 +764,8 @@ export function DealForm({
   showCancelAction = true,
   initialPipelineOptions,
   initialPipelineStageOptions,
+  injectionSpotId,
+  optimisticLockUpdatedAt,
 }: DealFormProps) {
   const t = useT()
   const [pending, setPending] = React.useState(false)
@@ -1165,9 +1199,12 @@ export function DealForm({
       embedded={embedded}
       trackDirtyWhenEmbedded={trackDirtyWhenEmbedded}
       title={title}
+      titleHeadingLevel={2}
       backHref={backHref}
       hideFooterActions={hideFooterActions}
       onDirtyChange={onDirtyChange}
+      injectionSpotId={injectionSpotId}
+      optimisticLockUpdatedAt={optimisticLockUpdatedAt}
       collapsibleGroups={collapsibleGroups}
       sortableGroups={sortableGroups}
       versionHistory={showVersionHistory && mode === 'edit' && initialValues?.id

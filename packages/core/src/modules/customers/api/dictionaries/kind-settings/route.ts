@@ -19,6 +19,10 @@ import {
   customerKindSettingsUpsertSchema,
   type CustomerKindSettingsUpsertInput,
 } from '../../../data/validators'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+import { getCommandInterceptorHttpRejection } from '@open-mercato/shared/lib/commands/errors'
+
+const logger = createLogger('customers')
 
 export const metadata = {
   GET: { requireAuth: true, requireFeatures: ['customers.people.view'] },
@@ -82,7 +86,7 @@ export async function GET(req: Request) {
     if (isCrudHttpError(err)) {
       return NextResponse.json(err.body, { status: err.status })
     }
-    console.error('[customers/dictionaries/kind-settings.GET]', err)
+    logger.error('customers/dictionaries/kind-settings.GET', { err })
     return NextResponse.json({ error: translate('customers.errors.kind_settings_load_failed', 'Failed to load kind settings') }, { status: 500 })
   }
 }
@@ -183,7 +187,11 @@ export async function PATCH(req: Request) {
     if (isCrudHttpError(err)) {
       return NextResponse.json(err.body, { status: err.status })
     }
-    console.error('[customers/dictionaries/kind-settings.PATCH]', err)
+    const interceptorRejection = getCommandInterceptorHttpRejection(err)
+    if (interceptorRejection) {
+      return NextResponse.json(interceptorRejection.body, { status: interceptorRejection.status })
+    }
+    logger.error('customers/dictionaries/kind-settings.PATCH', { err })
     return NextResponse.json({ error: 'Failed to update kind setting' }, { status: 500 })
   }
 }

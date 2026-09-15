@@ -15,6 +15,9 @@ import { useChannelFields, buildChannelPayload, type ChannelFormValues } from '@
 import { E } from '#generated/entities.ids.generated'
 import { SalesChannelOffersPanel } from '@open-mercato/core/modules/sales/components/channels/SalesChannelOffersPanel'
 import { SendObjectMessageDialog } from '@open-mercato/ui/backend/messages'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+
+const logger = createLogger('sales')
 
 type ChannelApiResponse = {
   items?: Array<Record<string, unknown>>
@@ -63,7 +66,7 @@ export default function EditChannelPage({ params }: { params?: { channelId?: str
           setInitialValues(mapChannelToFormValues(item))
         }
       } catch (err) {
-        console.error('sales.channels.load', err)
+        logger.error('sales.channels.load', { err })
         if (!cancelled) {
           if ((err as { status?: number }).status === 404) {
             setIsNotFound(true)
@@ -156,6 +159,7 @@ export default function EditChannelPage({ params }: { params?: { channelId?: str
         {activeTab === 'settings' ? (
           <CrudForm<ChannelFormValues>
             title={t('sales.channels.form.editTitle', 'Edit channel')}
+            titleHeadingLevel={1}
             versionHistory={{ resourceKind: 'sales.channel', resourceId: channelId ? String(channelId) : '' }}
             extraActions={channelId ? (
               <SendObjectMessageDialog

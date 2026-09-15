@@ -7,6 +7,7 @@ const tenantId = '11111111-1111-4111-8111-111111111111'
 const orgId = '22222222-2222-4222-8222-222222222222'
 const entityId = '33333333-3333-4333-8333-333333333333'
 const interactionId = '44444444-4444-4444-8444-444444444444'
+const personId = '55555555-5555-4555-8555-555555555555'
 const userA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const userB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 
@@ -119,8 +120,125 @@ describe('interaction validators — extended scheduling fields', () => {
         id: interactionId,
         tenantId,
         organizationId: orgId,
-        linkedEntities: [{ id: entityId, type: 'person', label: 'Nope' }],
+        linkedEntities: [{ id: entityId, type: 'unicorn', label: 'Nope' }],
       }),
+    ).toThrow()
+  })
+
+  test('interactionCreateSchema accepts a person linked entity', () => {
+    const parsed = interactionCreateSchema.parse({
+      tenantId,
+      organizationId: orgId,
+      entityId,
+      interactionType: 'task',
+      linkedEntities: [{ id: personId, type: 'person', label: 'Ada Lovelace' }],
+    })
+    expect(parsed.linkedEntities).toEqual([
+      { id: personId, type: 'person', label: 'Ada Lovelace' },
+    ])
+  })
+
+  test('interactionUpdateSchema accepts a person linked entity', () => {
+    const parsed = interactionUpdateSchema.parse({
+      id: interactionId,
+      tenantId,
+      organizationId: orgId,
+      linkedEntities: [{ id: personId, type: 'person', label: 'Ada Lovelace' }],
+    })
+    expect(parsed.linkedEntities).toEqual([
+      { id: personId, type: 'person', label: 'Ada Lovelace' },
+    ])
+  })
+
+  test.each(['company', 'deal', 'offer', 'resource', 'person'])(
+    'interactionUpdateSchema accepts the %s linked entity type',
+    (type) => {
+      const parsed = interactionUpdateSchema.parse({
+        id: interactionId,
+        tenantId,
+        organizationId: orgId,
+        linkedEntities: [{ id: entityId, type, label: 'Linked' }],
+      })
+      expect(parsed.linkedEntities?.[0].type).toBe(type)
+    },
+  )
+
+  test('interactionCreateSchema accepts a guest participant identified only by email', () => {
+    const parsed = interactionCreateSchema.parse({
+      tenantId,
+      organizationId: orgId,
+      entityId,
+      interactionType: 'meeting',
+      participants: [{ name: 'External Guest', email: 'guest@example.org' }],
+    })
+    expect(parsed.participants).toEqual([{ name: 'External Guest', email: 'guest@example.org' }])
+  })
+
+  test('interactionCreateSchema rejects a participant with neither userId nor email', () => {
+    expect(() =>
+      interactionCreateSchema.parse({
+        tenantId,
+        organizationId: orgId,
+        entityId,
+        interactionType: 'meeting',
+        participants: [{ name: 'Nobody' }],
+      }),
+    ).toThrow()
+  })
+
+  test('interactionCreateSchema rejects a guest whose only identity is not a valid email', () => {
+    expect(() =>
+      interactionCreateSchema.parse({
+        tenantId,
+        organizationId: orgId,
+        entityId,
+        interactionType: 'meeting',
+        participants: [{ name: 'External Guest', email: 'not-an-email' }],
+      }),
+    ).toThrow()
+  })
+
+  test('interactionCreateSchema keeps an unvalidated auxiliary email on a participant with a userId', () => {
+    const parsed = interactionCreateSchema.parse({
+      tenantId,
+      organizationId: orgId,
+      entityId,
+      interactionType: 'meeting',
+      participants: [{ userId: userA, name: 'Ada', email: 'ada (work)' }],
+    })
+    expect(parsed.participants).toEqual([{ userId: userA, name: 'Ada', email: 'ada (work)' }])
+  })
+})
+
+describe('interaction validators — dictionary-backed status (lenient widening)', () => {
+  const createBase = { tenantId, organizationId: orgId, entityId, interactionType: 'task' }
+
+  test('create defaults status to planned when omitted', () => {
+    const parsed = interactionCreateSchema.parse(createBase)
+    expect(parsed.status).toBe('planned')
+  })
+
+  test.each(['in_progress', 'waiting', 'done', 'canceled', 'blocked_by_legal'])(
+    'create accepts seeded and custom status %s',
+    (status) => {
+      const parsed = interactionCreateSchema.parse({ ...createBase, status })
+      expect(parsed.status).toBe(status)
+    },
+  )
+
+  test('update accepts a non-legacy status (in_progress)', () => {
+    const parsed = interactionUpdateSchema.parse({
+      id: interactionId,
+      tenantId,
+      organizationId: orgId,
+      status: 'in_progress',
+    })
+    expect(parsed.status).toBe('in_progress')
+  })
+
+  test('create rejects a status longer than 50 chars', () => {
+    expect(() =>
+      interactionCreateSchema.parse({ ...createBase, status: 'x'.repeat(51) }),
     ).toThrow()
   })
 })

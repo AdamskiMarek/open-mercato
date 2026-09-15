@@ -30,6 +30,10 @@ import {
 } from '../../dictionaries/context'
 import { invalidateDictionaryCache } from '../../dictionaries/cache'
 import type { OpenApiRouteDoc } from '@open-mercato/shared/lib/openapi'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+import { getCommandInterceptorHttpRejection } from '@open-mercato/shared/lib/commands/errors'
+
+const logger = createLogger('customers')
 
 export const metadata = {
   GET: { requireAuth: true, requireFeatures: ['customers.settings.manage'] },
@@ -154,7 +158,7 @@ export async function GET(req: Request) {
       return NextResponse.json(err.body, { status: err.status })
     }
     const { translate } = await resolveTranslations()
-    console.error('customers.settings.dictionary-sort-modes.get failed', err)
+    logger.error('customers.settings.dictionary-sort-modes.get failed', { err })
     return NextResponse.json(
       { error: translate('customers.errors.lookup_failed', 'Failed to load settings') },
       { status: 400 },
@@ -219,8 +223,12 @@ export async function PATCH(req: Request) {
     if (isCrudHttpError(err)) {
       return NextResponse.json(err.body, { status: err.status })
     }
+    const interceptorRejection = getCommandInterceptorHttpRejection(err)
+    if (interceptorRejection) {
+      return NextResponse.json(interceptorRejection.body, { status: interceptorRejection.status })
+    }
     const { translate } = await resolveTranslations()
-    console.error('customers.settings.dictionary-sort-modes.patch failed', err)
+    logger.error('customers.settings.dictionary-sort-modes.patch failed', { err })
     return NextResponse.json(
       { error: translate('customers.errors.save_failed', 'Failed to save settings') },
       { status: 400 },

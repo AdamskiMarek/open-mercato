@@ -1,7 +1,7 @@
 'use client'
 
 import React from 'react'
-import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Page, PageBody } from '@open-mercato/ui/backend/Page'
 import { Button } from '@open-mercato/ui/primitives/button'
 import { PasswordInput } from '@open-mercato/ui/primitives/password-input'
@@ -45,11 +45,8 @@ interface SsoIdentityRow {
   createdAt: string
 }
 
-export default function SsoConfigDetailPage() {
-  const params = useParams()
-  const configId = (params?.slug && Array.isArray(params.slug))
-    ? params.slug[2]
-    : (Array.isArray(params?.id) ? params.id[0] : params?.id as string)
+export default function SsoConfigDetailPage({ params }: { params?: { id?: string } }) {
+  const configId = params?.id ?? ''
   const router = useRouter()
   const searchParams = useSearchParams()
   const t = useT()
@@ -647,7 +644,7 @@ function RoleMappingsTab({
   return (
     <div>
       <p className="text-sm text-muted-foreground mb-4">
-        {t('sso.admin.roles.description', 'Map IdP app role names to local roles. On each SSO login, SSO-sourced roles are synced — roles no longer sent by the IdP are removed, while manually-assigned roles are preserved.')}
+        {t('sso.admin.roles.description', 'Map IdP app role names to local roles. Only explicitly mapped IdP roles grant local roles; on each SSO login, SSO-sourced roles are synced while manually-assigned roles are preserved.')}
       </p>
       <div className="flex items-end gap-2 mb-4">
         <div className="flex-1">
@@ -696,7 +693,7 @@ function RoleMappingsTab({
         </div>
       ) : (
         <p className="text-sm text-muted-foreground py-4 text-center mb-4">
-          {t('sso.admin.roles.empty', 'No role mappings configured. IdP role names will be matched directly against local role names.')}
+          {t('sso.admin.roles.empty', 'No role mappings configured. Users will not receive SSO-sourced roles until an IdP role is explicitly mapped to a local role.')}
         </p>
       )}
 

@@ -1,5 +1,8 @@
 import type { BusinessRule } from '../data/entities'
 import { evaluateExpression, type EvaluationContext, type ConditionExpression } from './expression-evaluator'
+import { createLogger, isLevelEnabled } from '@open-mercato/shared/lib/logger'
+
+const logger = createLogger('business_rules').child({ component: 'rule-evaluator' })
 
 /**
  * Rule evaluation context
@@ -102,20 +105,20 @@ export async function evaluateSingleRule(
 ): Promise<SingleRuleResult> {
   const startTime = Date.now()
 
-  console.log('[RULE EVAL] ========================================')
-  console.log('[RULE EVAL] Evaluating rule:', {
-    ruleId: rule.ruleId,
-    ruleName: rule.ruleName,
-    ruleType: rule.ruleType,
-    entityType: rule.entityType,
-    eventType: rule.eventType,
-  })
-  console.log('[RULE EVAL] Conditions:', JSON.stringify(rule.conditionExpression, null, 2))
+  if (isLevelEnabled('debug')) {
+    logger.debug('Evaluating rule', {
+      ruleId: rule.ruleId,
+      ruleName: rule.ruleName,
+      ruleType: rule.ruleType,
+      entityType: rule.entityType,
+      eventType: rule.eventType,
+    })
+  }
 
   try {
     // Check if rule is enabled
     if (!rule.enabled) {
-      console.log('[RULE EVAL] ✗ Rule is disabled')
+      logger.debug('Rule is disabled', { ruleId: rule.ruleId })
       return {
         rule,
         conditionsPassed: false,
@@ -127,7 +130,7 @@ export async function evaluateSingleRule(
 
     // Check effective date range
     if (!isRuleEffective(rule)) {
-      console.log('[RULE EVAL] ✗ Rule is not effective (outside date range)')
+      logger.debug('Rule is not effective (outside date range)', { ruleId: rule.ruleId })
       return {
         rule,
         conditionsPassed: false,
@@ -142,12 +145,11 @@ export async function evaluateSingleRule(
 
     const evaluationTime = Math.max(0, Date.now() - startTime)
 
-    console.log('[RULE EVAL] Final result:', {
+    logger.debug('Rule evaluated', {
       ruleId: rule.ruleId,
-      conditionsPassed: conditionsPassed ? '✓ PASS' : '✗ FAIL',
-      evaluationTime: `${evaluationTime}ms`,
+      conditionsPassed,
+      evaluationTimeMs: evaluationTime,
     })
-    console.log('[RULE EVAL] ========================================')
 
     return {
       rule,
@@ -159,8 +161,7 @@ export async function evaluateSingleRule(
     const evaluationTime = Math.max(0, Date.now() - startTime)
     const errorMessage = error instanceof Error ? error.message : String(error)
 
-    console.log('[RULE EVAL] ✗ ERROR:', errorMessage)
-    console.log('[RULE EVAL] ========================================')
+    logger.debug('Rule evaluation error', { ruleId: rule.ruleId, message: errorMessage })
 
     return {
       rule,

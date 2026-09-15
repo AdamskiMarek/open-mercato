@@ -2,7 +2,6 @@
 
 import * as React from 'react'
 import { Calendar, CalendarClock, Clock, Mail, Phone, StickyNote, Users } from 'lucide-react'
-import { toZonedTime } from 'date-fns-tz'
 import { cn } from '@open-mercato/shared/lib/utils'
 import { useT } from '@open-mercato/shared/lib/i18n/context'
 import type { TranslateFn } from '@open-mercato/shared/lib/i18n/context'
@@ -10,6 +9,11 @@ import { readApiResultOrThrow } from '@open-mercato/ui/backend/utils/apiCall'
 import { ActivitiesDayStrip } from './ActivitiesDayStrip'
 import { ActivitiesAddNewMenu, type ActivityKind } from './ActivitiesAddNewMenu'
 import type { InteractionSummary } from './types'
+import { isOpenInteractionStatus } from '../../lib/interactionStatus'
+import { isSameDay, toLocalZonedDate } from '../../lib/localDay'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+
+const logger = createLogger('customers')
 
 interface ActivitiesCardProps {
   entityId: string
@@ -39,28 +43,10 @@ const TYPE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = 
   note: StickyNote,
 }
 
-const USER_TIMEZONE = (() => {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
-  } catch {
-    return 'UTC'
-  }
-})()
-
-// Project a UTC instant to the user's local timezone before extracting day/month/year
-// for "same day" comparisons (issue #1809 — E3 timezone drift).
-function toLocalZonedDate(value: string | Date): Date {
-  return toZonedTime(value, USER_TIMEZONE)
-}
-
 function startOfDay(date: Date): Date {
   const next = new Date(date)
   next.setHours(0, 0, 0, 0)
   return next
-}
-
-function isSameDay(a: Date, b: Date): boolean {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 }
 
 function isOverdue(activity: InteractionSummary, now: Date): boolean {
@@ -68,7 +54,7 @@ function isOverdue(activity: InteractionSummary, now: Date): boolean {
   if (!scheduled) return false
   const date = new Date(scheduled)
   if (Number.isNaN(date.getTime())) return false
-  return date.getTime() < now.getTime() && activity.status !== 'done'
+  return date.getTime() < now.getTime() && isOpenInteractionStatus(activity.status)
 }
 
 // Visible window for the day-strip + activity list. Mirrors `VISIBLE_DAYS = 5`
@@ -150,7 +136,7 @@ export function ActivitiesCard({
         setFetchedEvents(Array.isArray(payload?.items) ? payload.items : [])
       } catch (err) {
         if ((err as { name?: string } | null)?.name !== 'AbortError') {
-          console.warn('[ActivitiesCard] failed to load interactions', err)
+          logger.warn('failed to load interactions', { component: 'ActivitiesCard', err })
           setFetchedEvents(null)
         }
       }
@@ -253,7 +239,7 @@ function PlannedEventRow({ activity, onClick, entityCompanyName, t }: PlannedEve
   const validDate = !Number.isNaN(date.getTime())
   const Icon = TYPE_ICONS[activity.interactionType] ?? Users
   const duration = typeof activity.duration === 'number' && activity.duration > 0 ? activity.duration : null
-  const overdue = validDate && date.getTime() < Date.now() && activity.status !== 'done'
+  const overdue = validDate && date.getTime() < Date.now() && isOpenInteractionStatus(activity.status)
   const typeLabel = labelForType(activity.interactionType, t)
   const subtitleSuffix = activity.dealTitle ?? entityCompanyName ?? null
   const subtitle = subtitleSuffix ? `${typeLabel} · ${subtitleSuffix}` : typeLabel

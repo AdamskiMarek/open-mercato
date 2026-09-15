@@ -8,6 +8,9 @@ import {
   invalidateBusinessRuleDiscoveryCache,
   type RuleDiscoveryCache,
 } from '@open-mercato/core/modules/business_rules/lib/rule-engine'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+
+const logger = createLogger('workflows')
 
 const __esmDirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -75,11 +78,13 @@ async function seedWorkflowDefinition(
   const seed = readExampleJson<WorkflowSeedDefinition>(fileName)
   const workflowId = requireString(seed.workflowId, 'workflowId')
 
+  // Version-aware: pin to the latest version so re-seeding never updates an
+  // older coexisting version row (workflowId is no longer unique per tenant).
   const existing = await em.findOne(WorkflowDefinition, {
     workflowId,
     tenantId: scope.tenantId,
     organizationId: scope.organizationId,
-  })
+  }, { orderBy: { version: 'DESC' } })
 
   if (existing) {
     // Check if the definition needs to be updated by comparing steps and transitions
@@ -110,7 +115,14 @@ async function seedWorkflowDefinition(
       (seedHasTransitionPreConditions && !existingHasTransitionPreConditions)
 
     if (needsUpdate) {
-      console.log(`[seed] Updating workflow ${workflowId} (steps: ${existingStepCount}→${seedStepCount}, transitions: ${existingTransitionCount}→${seedTransitionCount})`)
+      logger.info('Updating seeded workflow', {
+        component: 'seed',
+        workflowId,
+        existingStepCount,
+        seedStepCount,
+        existingTransitionCount,
+        seedTransitionCount,
+      })
       existing.definition = seed.definition
       await em.flush()
       return true
@@ -155,7 +167,12 @@ async function seedGuardRules(
       // Check if entityType or eventType needs updating
       const needsUpdate = existing.entityType !== rule.entityType || existing.eventType !== rule.eventType
       if (needsUpdate) {
-        console.log(`[seed] Updating business rule ${ruleId}: entityType=${rule.entityType}, eventType=${rule.eventType}`)
+        logger.info('Updating seeded business rule', {
+          component: 'seed',
+          ruleId,
+          entityType: rule.entityType,
+          eventType: rule.eventType,
+        })
         existing.entityType = rule.entityType
         existing.eventType = rule.eventType ?? null
         updated += 1

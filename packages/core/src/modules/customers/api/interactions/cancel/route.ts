@@ -15,6 +15,10 @@ import {
 } from '@open-mercato/shared/lib/crud/mutation-guard'
 import { resolveAuthActorId } from '../../../lib/interactionRequestContext'
 import { withOperationMetadata } from '../../../lib/operationMetadata'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+import { getCommandInterceptorHttpRejection } from '@open-mercato/shared/lib/commands/errors'
+
+const logger = createLogger('customers')
 
 export const metadata = {
   POST: { requireAuth: true, requireFeatures: ['customers.interactions.manage'] },
@@ -83,10 +87,14 @@ export async function POST(req: Request) {
     if (isCrudHttpError(err)) {
       return NextResponse.json(err.body, { status: err.status })
     }
+    const interceptorRejection = getCommandInterceptorHttpRejection(err)
+    if (interceptorRejection) {
+      return NextResponse.json(interceptorRejection.body, { status: interceptorRejection.status })
+    }
     if (err instanceof z.ZodError) {
       return NextResponse.json({ error: 'Validation failed', details: err.issues }, { status: 400 })
     }
-    console.error('customers.interactions.cancel failed', err)
+    logger.error('customers.interactions.cancel failed', { err })
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

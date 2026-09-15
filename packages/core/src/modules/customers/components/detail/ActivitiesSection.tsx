@@ -10,7 +10,11 @@ import { Button } from '@open-mercato/ui/primitives/button'
 import { Kbd } from '@open-mercato/ui/primitives/kbd'
 import { ActivityTimelineFilters } from './ActivityTimelineFilters'
 import { ActivityTimeline } from './ActivityTimeline'
+import { resolveAuthorUserNames } from './authorUserLookup'
 import type { ActivitySummary, InteractionSummary } from './types'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+
+const logger = createLogger('customers')
 
 type GuardedMutationRunner = <T>(
   operation: () => Promise<T>,
@@ -33,6 +37,8 @@ export type ActivitiesSectionProps = {
   runGuardedMutation?: GuardedMutationRunner
   refreshKey?: number
   onEditActivity?: (activity: InteractionSummary) => void
+  /** Interaction type hidden from the timeline by default ('task' unless overridden); pass null to show every type. */
+  excludeInteractionType?: string | null
 }
 
 function toDateOnly(value: string | null | undefined): string {
@@ -106,6 +112,7 @@ export function ActivitiesSection({
   refreshKey = 0,
   onEditActivity,
   runGuardedMutation,
+  excludeInteractionType = 'task',
 }: ActivitiesSectionProps) {
   const t = useT()
   const [filterTypes, setFilterTypes] = React.useState<string[]>([])
@@ -166,17 +173,18 @@ export function ActivitiesSection({
     setLoading(true)
     try {
       // Always fetch canonical interactions (new activities are always created here)
-      const taskFilterActive = filterTypes.includes('task')
+      const excludedFilterActive = excludeInteractionType ? filterTypes.includes(excludeInteractionType) : true
       const canonicalParams = new URLSearchParams({
         entityId,
         limit: '50',
         sortField: 'occurredAt',
         sortDir: 'desc',
       })
-      // Hide tasks from the activity timeline by default — they have their own tab —
-      // but lift the exclusion when the user explicitly toggled the Task chip on
-      // (mirrors `ActivityHistorySection.tsx` after the #1805 fix).
-      if (!taskFilterActive) canonicalParams.set('excludeInteractionType', 'task')
+      // Hide the configured type (tasks by default — they have their own tab)
+      // from the activity timeline, but lift the exclusion when the user
+      // explicitly toggled that type's chip on (mirrors
+      // `ActivityHistorySection.tsx` after the #1805 fix).
+      if (excludeInteractionType && !excludedFilterActive) canonicalParams.set('excludeInteractionType', excludeInteractionType)
       if (dealId) canonicalParams.set('dealId', dealId)
       if (filterTypes.length > 0) canonicalParams.set('type', filterTypes.join(','))
       if (filterDateFrom) canonicalParams.set('from', filterDateFrom)
@@ -204,21 +212,30 @@ export function ActivitiesSection({
         return
       }
 
-      // In legacy mode, also fetch legacy activities and merge with canonical
+      // In legacy mode, also fetch legacy activities and merge with canonical.
+      // Legacy fallback uses known page numbers, so request every page up front
+      // and resolve them together instead of awaiting each one sequentially.
+      const legacyPageNumbers = Array.from({ length: loadedPages }, (_, index) => index + 1)
+      const legacyPayloads = await Promise.all(
+        legacyPageNumbers.map((legacyPage) => {
+          const legacyParams = new URLSearchParams({
+            entityId,
+            page: String(legacyPage),
+            pageSize: '50',
+            sortField: 'occurredAt',
+            sortDir: 'desc',
+          })
+          if (dealId) legacyParams.set('dealId', dealId)
+          return readApiResultOrThrow<{ items?: ActivitySummary[]; totalPages?: number }>(
+            `/api/customers/activities?${legacyParams.toString()}`,
+          ).catch(() => ({ items: [] as ActivitySummary[], totalPages: 1 }))
+        }),
+      )
+      // Merge in page order so timeline ordering stays stable regardless of
+      // which request settles first.
       const legacyItems: InteractionSummary[] = []
       let legacyTotalPages = 1
-      for (let legacyPage = 1; legacyPage <= loadedPages; legacyPage += 1) {
-        const legacyParams = new URLSearchParams({
-          entityId,
-          page: String(legacyPage),
-          pageSize: '50',
-          sortField: 'occurredAt',
-          sortDir: 'desc',
-        })
-        if (dealId) legacyParams.set('dealId', dealId)
-        const legacyPayload = await readApiResultOrThrow<{ items?: ActivitySummary[]; totalPages?: number }>(
-          `/api/customers/activities?${legacyParams.toString()}`,
-        ).catch(() => ({ items: [] as ActivitySummary[], totalPages: 1 }))
+      for (const legacyPayload of legacyPayloads) {
         legacyItems.push(...(Array.isArray(legacyPayload?.items) ? legacyPayload.items.map(normalizeLegacyActivity) : []))
         legacyTotalPages = typeof legacyPayload?.totalPages === 'number' ? legacyPayload.totalPages : legacyTotalPages
       }
@@ -242,14 +259,14 @@ export function ActivitiesSection({
       setActivities(sortTimelineActivities(merged))
       setHasMore(canonicalHasMore || legacyTotalPages > loadedPages)
     } catch (error) {
-      console.error('customers.activities.history failed', error)
+      logger.error('customers.activities.history failed', { err: error })
       flash(t('customers.activities.loadFailed', 'Failed to load activities.'), 'error')
       setActivities([])
       setHasMore(false)
     } finally {
       setLoading(false)
     }
-  }, [dealId, entityId, filterDateFrom, filterDateTo, filterTypes, loadedPages, useCanonicalInteractions, refreshKey, t])
+  }, [dealId, entityId, excludeInteractionType, filterDateFrom, filterDateTo, filterTypes, loadedPages, useCanonicalInteractions, refreshKey, t])
 
   React.useEffect(() => {
     setLoadedPages(1)
@@ -275,7 +292,7 @@ export function ActivitiesSection({
       flash(t('customers.activities.actions.markDoneSuccess', 'Activity marked done'), 'success')
       await loadActivities()
     } catch (err) {
-      console.warn('[customers.activitiesSection] mark done failed', activityId, err)
+      logger.warn('Mark done failed', { component: 'ActivitiesSection', activityId, err })
       flash(t('customers.activities.actions.markDoneError', 'Could not mark activity as done'), 'error')
     }
   }, [loadActivities, runGuardedMutation, t])
@@ -286,7 +303,7 @@ export function ActivitiesSection({
   React.useEffect(() => {
     loadActivities()
       .then(() => { resolvedUserIdsRef.current = new Set() })
-      .catch((err) => console.warn('[ActivitiesSection] loadActivities failed', err))
+      .catch((err) => logger.warn('loadActivities failed', { component: 'ActivitiesSection', err }))
   }, [loadActivities])
 
   React.useEffect(() => {
@@ -298,25 +315,14 @@ export function ActivitiesSection({
     }
     if (unresolvedIds.size === 0) return
 
-    for (const uid of unresolvedIds) resolvedUserIdsRef.current.add(uid)
-
     const controller = new AbortController()
-    readApiResultOrThrow<{ items?: Array<Record<string, unknown>> }>(
-      `/api/auth/users?ids=${[...unresolvedIds].join(',')}`,
-      { signal: controller.signal },
-    )
-      .then((data) => {
-        const users = Array.isArray(data?.items) ? data.items : []
-        const nameMap = new Map<string, string>()
-        for (const user of users) {
-          const userId = typeof user.id === 'string' ? user.id : null
-          const name = typeof user.display_name === 'string' && user.display_name.trim()
-            ? user.display_name.trim()
-            : typeof user.email === 'string'
-              ? user.email
-              : null
-          if (userId && name) nameMap.set(userId, name)
-        }
+    resolveAuthorUserNames([...unresolvedIds], controller.signal)
+      .then(({ names: nameMap, resolvedIds }) => {
+        if (controller.signal.aborted) return
+        // Only ids the server actually answered for are remembered. Marking an id whose request
+        // failed — or one the server silently dropped past its `?ids=` cap — would leave that
+        // author blank for the life of the component, even though the next attempt would work.
+        for (const uid of resolvedIds) resolvedUserIdsRef.current.add(uid)
         if (nameMap.size > 0) {
           setActivities((prev) =>
             prev.map((a) => {
@@ -328,7 +334,7 @@ export function ActivitiesSection({
           )
         }
       })
-      .catch((err) => console.warn('[ActivitiesSection] resolve author names failed', err))
+      .catch((err) => logger.warn('resolve author names failed', { component: 'ActivitiesSection', err }))
     return () => controller.abort()
   }, [activities])
 

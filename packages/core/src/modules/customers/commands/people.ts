@@ -46,7 +46,7 @@ import {
 } from './shared'
 import { withAtomicFlush } from '@open-mercato/shared/lib/commands/flush'
 import { resolveRedoSnapshot } from '@open-mercato/shared/lib/commands/redo'
-import { CrudHttpError } from '@open-mercato/shared/lib/crud/errors'
+import { CrudHttpError, notFound } from '@open-mercato/shared/lib/crud/errors'
 import { resolveTranslations } from '@open-mercato/shared/lib/i18n/server'
 import {
   loadCustomFieldSnapshot,
@@ -181,6 +181,7 @@ type PersonSnapshot = {
     id: string
     dealId: string
     participantRole: string | null
+    isPrimary?: boolean
     createdAt: Date
   }>
   activities: PersonActivitySnapshot[]
@@ -206,6 +207,7 @@ const personCrudEvents: CrudEventsConfig<CustomerEntity> = {
     entityId: ctx.entity?.id ?? ctx.identifiers.id,
     organizationId: ctx.identifiers.organizationId,
     tenantId: ctx.identifiers.tenantId,
+    ...(ctx.syncOrigin ? { syncOrigin: ctx.syncOrigin } : {}),
   }),
 }
 
@@ -345,6 +347,7 @@ function serializePersonSnapshot(
         id: link.id,
         dealId: link.deal.id,
         participantRole: link.participantRole ?? null,
+        isPrimary: link.isPrimary === true,
         createdAt: link.createdAt,
       })),
     activities: activities.map((activity) => ({
@@ -721,6 +724,8 @@ const createPersonCommand: CommandHandler<PersonCreateInput, { entityId: string;
         tenantId,
         organizationId,
       },
+      syncOrigin: ctx.syncOrigin,
+      actorUserId: ctx.auth?.sub ?? null,
       indexer: personCrudIndexer,
       events: personCrudEvents,
     })
@@ -782,6 +787,8 @@ const createPersonCommand: CommandHandler<PersonCreateInput, { entityId: string;
       action: 'deleted',
       entity,
       identifiers,
+      syncOrigin: ctx.syncOrigin,
+      actorUserId: ctx.auth?.sub ?? null,
       indexer: personCrudIndexer,
       events: personCrudEvents,
     })
@@ -851,7 +858,7 @@ const createPersonCommand: CommandHandler<PersonCreateInput, { entityId: string;
         undefined,
         { tenantId: after.entity.tenantId, organizationId: after.entity.organizationId },
       )
-      if (!existingProfile) throw new CrudHttpError(404, { error: 'Person profile not found' })
+      if (!existingProfile) throw notFound('Person profile not found')
       profile = existingProfile
       const survivingEntity = entity
       await withAtomicFlush(em, [
@@ -902,6 +909,8 @@ const createPersonCommand: CommandHandler<PersonCreateInput, { entityId: string;
         tenantId: restoredEntity.tenantId,
         organizationId: restoredEntity.organizationId,
       },
+      syncOrigin: ctx.syncOrigin,
+      actorUserId: ctx.auth?.sub ?? null,
       indexer: personCrudIndexer,
       events: personCrudEvents,
     })
@@ -927,7 +936,7 @@ const updatePersonCommand: CommandHandler<PersonUpdateInput, { entityId: string 
     ensureTenantScope(ctx, record.tenantId)
     ensureOrganizationScope(ctx, record.organizationId)
     const profile = await em.findOne(CustomerPersonProfile, { entity: record })
-    if (!profile) throw new CrudHttpError(404, { error: 'Person profile not found' })
+    if (!profile) throw notFound('Person profile not found')
 
     if (parsed.displayName !== undefined) {
       const nextDisplayName = parsed.displayName.trim()
@@ -1055,6 +1064,8 @@ const updatePersonCommand: CommandHandler<PersonUpdateInput, { entityId: string 
         tenantId: record.tenantId,
         organizationId: record.organizationId,
       },
+      syncOrigin: ctx.syncOrigin,
+      actorUserId: ctx.auth?.sub ?? null,
       indexer: personCrudIndexer,
       events: personCrudEvents,
     })
@@ -1197,6 +1208,8 @@ const updatePersonCommand: CommandHandler<PersonUpdateInput, { entityId: string 
         organizationId: before.entity.organizationId,
         tenantId: before.entity.tenantId,
       },
+      syncOrigin: ctx.syncOrigin,
+      actorUserId: ctx.auth?.sub ?? null,
       indexer: personCrudIndexer,
       events: personCrudEvents,
     })
@@ -1320,6 +1333,8 @@ const deletePersonCommand: CommandHandler<{ body?: Record<string, unknown>; quer
           organizationId: record.organizationId,
           tenantId: record.tenantId,
         },
+        syncOrigin: ctx.syncOrigin,
+        actorUserId: ctx.auth?.sub ?? null,
         indexer: personCrudIndexer,
         events: personCrudEvents,
       })
@@ -1522,6 +1537,7 @@ const deletePersonCommand: CommandHandler<{ body?: Record<string, unknown>; quer
           deal,
           person: entity,
           participantRole: link.participantRole,
+          isPrimary: link.isPrimary === true,
           createdAt: link.createdAt,
         })
         em.persist(restoredLink)
@@ -1674,6 +1690,8 @@ const deletePersonCommand: CommandHandler<{ body?: Record<string, unknown>; quer
           organizationId: entity.organizationId,
           tenantId: entity.tenantId,
         },
+        syncOrigin: ctx.syncOrigin,
+        actorUserId: ctx.auth?.sub ?? null,
         indexer: personCrudIndexer,
         events: personCrudEvents,
       })

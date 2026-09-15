@@ -419,12 +419,9 @@ const updateTaskCommand: CommandHandler<TaskUpdateInput, { taskId: string }> = {
 };
 ```
 
-### 3.3 Register Commands
+### 3.3 Expose Commands
 
-```ts title="packages/<pkg>/src/modules/tasks/commands/index.ts"
-import "./tasks";
-import "./comments";
-```
+Command files under `commands/` are auto-discovered by `yarn generate`. The generated command-loader registry imports the matching command file on first use, so module `index.ts` should not import commands just for registration side effects.
 
 ## Step 4: Create API Routes
 
@@ -621,6 +618,23 @@ const crud = makeCrudRoute({
 
 export const { GET, POST, PUT, DELETE } = crud;
 ```
+
+:::note Who maintains the query index on the `actions.*` path
+
+A verb configured through `actions.*` executes via the command bus, which flushes the CRUD
+side effects the **command handler** queued — the route never marks the record itself. The
+route's own `indexer:` declaration is still honoured: it is handed to the data engine for
+the duration of that command and applied to a handler mark that carries no `indexer` of its
+own, so a handler ending in `emitCrudSideEffects({ ..., events })` indexes the record under
+the route's `entityType`. A handler that passes its own `indexer:` keeps it, and the
+declaration only ever applies to marks for the route's own `orm.entity` class, so a handler
+that also marks a related entity is unaffected.
+
+A handler that queues **no** side effect at all indexes nothing — there is no mark to
+complete. That case is logged as a warning naming the route, verb and command id, so a
+projection that silently stops updating is diagnosable instead of invisible.
+
+:::
 
 ### 4.2 OpenAPI Specification
 
@@ -959,7 +973,7 @@ ensureTenantScope(ctx, entity.tenantId);
 1. **"Entity not found"** - Check that `E.tasks.task_entity` exists in generated files
 2. **Custom fields not working** - Ensure `ce.ts` exports entities correctly
 3. **OpenAPI not generating** - Verify route exports `openApi` constant
-4. **Commands not registering** - Check command imports in `commands/index.ts`
+4. **Commands not registering** - Run `yarn generate` and verify `command-loaders.generated.ts` includes the command file
 5. **Tenant scoping errors** - Verify `tenantId` and `organizationId` are provided
 
 ### Debugging

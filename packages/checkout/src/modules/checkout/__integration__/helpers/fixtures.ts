@@ -40,6 +40,15 @@ export type CheckoutTemplateInput = {
     terms?: { title: string; markdown: string; required?: boolean }
     privacyPolicy?: { title: string; markdown: string; required?: boolean }
   }
+  sendStartEmail?: boolean
+  startEmailSubject?: string | null
+  startEmailBody?: string | null
+  sendSuccessEmail?: boolean
+  successEmailSubject?: string | null
+  successEmailBody?: string | null
+  sendErrorEmail?: boolean
+  errorEmailSubject?: string | null
+  errorEmailBody?: string | null
   displayCustomFieldsOnPage?: boolean
   password?: string | null
   maxCompletions?: number | null
@@ -392,11 +401,14 @@ export async function waitForCheckoutStatus(
   token: string,
   transactionId: string,
   expectedStatus: string,
+  options?: { attempts?: number; intervalMs?: number },
 ): Promise<CheckoutTransactionRecord> {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  const attempts = options?.attempts ?? 20
+  const intervalMs = options?.intervalMs ?? 150
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     const transaction = await readCheckoutTransaction(request, token, transactionId)
     if (transaction.status === expectedStatus) return transaction
-    await new Promise((resolve) => setTimeout(resolve, 150))
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
   }
   return readCheckoutTransaction(request, token, transactionId)
 }

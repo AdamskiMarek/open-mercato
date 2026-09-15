@@ -28,9 +28,18 @@ const RAW_COUNTRIES: IsoCountry[] = (registry as RegistryEntry[])
     name: entry.Description.join(', '),
   }))
 
-export const ISO_COUNTRIES: IsoCountry[] = [...RAW_COUNTRIES].sort((a, b) =>
-  a.name.localeCompare(b.name, 'en', { sensitivity: 'base' })
-)
+// Codes in common use that the language-subtag registry does not list as region subtags.
+// XK is user-assigned rather than ISO 3166-1 assigned, so it never appears in the registry.
+const SUPPLEMENTAL_COUNTRIES: IsoCountry[] = [
+  { code: 'XK', name: 'Kosovo' },
+]
+
+const RAW_COUNTRY_CODES = new Set(RAW_COUNTRIES.map((entry) => entry.code))
+
+export const ISO_COUNTRIES: IsoCountry[] = [
+  ...RAW_COUNTRIES,
+  ...SUPPLEMENTAL_COUNTRIES.filter((entry) => !RAW_COUNTRY_CODES.has(entry.code)),
+].sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }))
 
 export const COUNTRY_PRIORITY: string[] = ['PL', 'DE', 'ES', 'FR', 'IT', 'US', 'GB', 'CA']
 
@@ -58,7 +67,9 @@ export function resolveCountryName(code: string, options: { locale?: string } = 
   if (!displayNames) return fallback
   try {
     const label = displayNames.of(normalized as any)
-    return typeof label === 'string' ? label : fallback
+    // Intl echoes the raw code back when its ICU data cannot resolve the region.
+    if (typeof label !== 'string' || label === normalized) return fallback
+    return label
   } catch {
     return fallback
   }
@@ -94,4 +105,21 @@ export function buildCountryOptions(options: {
     .sort((a, b) => a.label.localeCompare(b.label, locale ?? 'en', { sensitivity: 'base' }))
 
   return [...prioritized, ...remaining]
+}
+
+export function matchCountryCodes(
+  term: string,
+  options: { locales?: string[] } = {},
+): string[] {
+  const needle = term.trim().toLowerCase()
+  if (!needle) return []
+  const searchLocales = options.locales?.length ? options.locales : ['en']
+  return ISO_COUNTRIES
+    .filter((entry) => {
+      if (entry.name.toLowerCase().includes(needle)) return true
+      return searchLocales.some((locale) =>
+        resolveCountryName(entry.code, { locale }).toLowerCase().includes(needle),
+      )
+    })
+    .map((entry) => entry.code)
 }

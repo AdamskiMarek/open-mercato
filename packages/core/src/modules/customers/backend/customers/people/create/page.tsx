@@ -47,6 +47,7 @@ export default function CreatePersonPage() {
       <PageBody>
         <CrudForm<PersonFormValues>
           title={t('customers.people.create.title')}
+          titleHeadingLevel={1}
           backHref={returnTo ?? '/backend/customers/people'}
           fields={fields}
           groups={groups}
@@ -110,6 +111,8 @@ export default function CreatePersonPage() {
                 if (postalCode !== undefined) body.postalCode = postalCode
                 const country = normalize(entry.country)
                 if (country !== undefined) body.country = country.toUpperCase()
+                if (typeof entry.latitude === 'number') body.latitude = entry.latitude
+                if (typeof entry.longitude === 'number') body.longitude = entry.longitude
                 try {
                   await createCrud('customers/addresses', body)
                 } catch (addressErr) {

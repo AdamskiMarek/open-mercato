@@ -1,10 +1,14 @@
 import type { EntityManager } from '@mikro-orm/postgresql'
 import type { JobContext, QueuedJob, WorkerMeta } from '@open-mercato/queue'
 import type { WebhookEvent } from '@open-mercato/shared/modules/payment_gateways/types'
+import { isTrustedWebhookDispatch } from '@open-mercato/shared/lib/queue/dispatchOrigin'
 import type { IntegrationLogService } from '@open-mercato/core/modules/integrations/lib/log-service'
 import type { PaymentGatewayService } from '@open-mercato/core/modules/payment_gateways/lib/gateway-service'
 import { claimWebhookProcessing, releaseWebhookClaim } from '@open-mercato/core/modules/payment_gateways/lib/webhook-utils'
 import { mapWebhookEventToStatus, mapStripeStatus } from '../lib/status-map'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+
+const logger = createLogger('gateway_stripe').child({ component: 'webhook-processor' })
 
 type WebhookJobPayload = {
   providerKey: string
@@ -34,28 +38,25 @@ function readSessionIdFromEvent(event: WebhookEvent): string | null {
   return null
 }
 
-function readScopeFromEvent(event: WebhookEvent): { organizationId: string; tenantId: string } | null {
-  const metadata = event.data.metadata
-  if (!metadata || typeof metadata !== 'object') return null
-
-  const metadataRecord = metadata as Record<string, unknown>
-  const organizationId = typeof metadataRecord.organizationId === 'string'
-    ? metadataRecord.organizationId.trim()
-    : ''
-  const tenantId = typeof metadataRecord.tenantId === 'string'
-    ? metadataRecord.tenantId.trim()
-    : ''
-
-  if (!organizationId || !tenantId) return null
-  return { organizationId, tenantId }
-}
-
 export default async function handle(job: QueuedJob<WebhookJobPayload>, ctx: HandlerContext): Promise<void> {
+  // Fail closed on untrusted dispatch origins (#5213): only jobs enqueued by the
+  // inbound webhook route (signature verified against per-tenant credentials) may
+  // drive Stripe payment state. Scheduler-dispatched or unmarked jobs are dropped.
+  if (!isTrustedWebhookDispatch(job.payload)) {
+    logger.error('Dropping webhook job with missing or untrusted dispatch origin', {
+      eventType: job.payload?.event?.eventType,
+      transactionId: job.payload?.transactionId ?? null,
+    })
+    return
+  }
+
   const em = ctx.resolve<EntityManager>('em')
   const paymentGatewayService = ctx.resolve<PaymentGatewayService>('paymentGatewayService')
   const integrationLogService = ctx.resolve<IntegrationLogService>('integrationLogService')
   const event = job.payload.event
-  const scope = job.payload.scope ?? readScopeFromEvent(event)
+  // Scope MUST come from the trusted enqueuer (a signature-verified transaction), never from
+  // attacker-controlled `event.data.metadata` — that fallback was the cross-tenant-write vector.
+  const scope = job.payload.scope ?? null
 
   try {
     let transaction = job.payload.transactionId && scope
@@ -98,14 +99,17 @@ export default async function handle(job: QueuedJob<WebhookJobPayload>, ctx: Han
       unifiedStatus,
     })
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Stripe webhook processing failed'
+    const message = error instanceof Error ? error.message : 'Unknown webhook processing error'
     if (scope) {
       await releaseWebhookClaim(em, event.idempotencyKey, 'stripe', scope)
       await integrationLogService.write({
         integrationId: 'gateway_stripe',
         level: 'error',
-        message: 'Stripe webhook processing failed',
-        code: 'stripe_webhook_processing_failed',
+        // The cause belongs in the message, not only in `payload`: the payload is
+        // the durable record and never leaves the database, so an operator paged by
+        // the reported error would otherwise learn only that a webhook failed.
+        message: `Stripe webhook processing failed: ${message}`,
+        code: 'gateway_stripe.webhook_processing_failed',
         payload: {
           error: message,
           eventType: event.eventType,
@@ -113,9 +117,10 @@ export default async function handle(job: QueuedJob<WebhookJobPayload>, ctx: Han
         },
       }, scope)
     } else {
-      console.error('[gateway-stripe:webhook-processor]', message, {
+      logger.error('Stripe webhook processing failed', {
         eventType: event.eventType,
         transactionId: job.payload.transactionId ?? null,
+        err: error,
       })
     }
     throw error

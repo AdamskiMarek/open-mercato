@@ -3,21 +3,32 @@
 import * as React from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@open-mercato/ui/primitives/button'
+import { IconButton } from '@open-mercato/ui/primitives/icon-button'
+import { Badge } from '@open-mercato/ui/primitives/badge'
+import { Tabs, TabsList, TabsTrigger } from '@open-mercato/ui/primitives/tabs'
 import { Input } from '@open-mercato/ui/primitives/input'
 import { ComboboxInput } from '@open-mercato/ui/backend/inputs'
 import { LoadingMessage, ErrorMessage } from '@open-mercato/ui/backend/detail'
 import { flash } from '@open-mercato/ui/backend/FlashMessages'
 import { apiCall, readApiResultOrThrow, withScopedApiRequestHeaders } from '@open-mercato/ui/backend/utils/apiCall'
 import { buildOptimisticLockHeader } from '@open-mercato/ui/backend/utils/optimisticLock'
+import { surfaceRecordConflict } from '@open-mercato/ui/backend/conflicts'
+import { useGuardedMutation } from '@open-mercato/ui/backend/injection/useGuardedMutation'
 import { useCustomFieldDefs } from '@open-mercato/ui/backend/utils/customFieldDefs'
 import { Save, Plus, X } from 'lucide-react'
 import { useOrganizationScopeVersion } from '@open-mercato/shared/lib/frontend/useOrganizationScope'
 import { useT } from '@open-mercato/shared/lib/i18n/context'
-import { locales as defaultLocales } from '@open-mercato/shared/lib/i18n/config'
+import { defaultLocale, locales as defaultLocales } from '@open-mercato/shared/lib/i18n/config'
 import { ISO_639_1, isValidIso639, getIso639Label } from '@open-mercato/shared/lib/i18n/iso639'
 import { formatEntityLabel, buildEntityListUrl, getRecordLabel, resolveBaseValue } from '../lib/helpers'
 import { resolveFieldList } from '../lib/resolve-field-list'
 import type { ResolvedField } from '../lib/resolve-field-list'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+
+const logger = createLogger('translations').child({ component: 'TranslationManager' })
+
+const TRANSLATION_MUTATION_CONTEXT_ID = 'translations.entity-translations'
+const SUPPORTED_LOCALES_MUTATION_CONTEXT_ID = 'translations.supported-locales'
 
 type TranslationManagerProps = {
   entityType?: string
@@ -38,15 +49,27 @@ type TranslationsResponse = {
   updatedAt?: string
 }
 
+type TranslationLocales = {
+  /** The tenant's stored selection: which locales content can be translated into. */
+  locales: string[]
+  /** Which of those the admin UI itself can be rendered in. Resolved on the server. */
+  servable: string[]
+}
+
 function useTranslationLocales() {
-  return useQuery<string[]>({
+  return useQuery<TranslationLocales>({
     queryKey: ['translation-locales'],
     queryFn: async () => {
-      const res = await apiCall<{ locales: string[] }>('/api/translations/locales')
-      if (!res.ok) return [...defaultLocales]
-      return Array.isArray(res.result?.locales) && res.result.locales.length > 0
+      const res = await apiCall<TranslationLocales>('/api/translations/locales')
+      const fallback = { locales: [...defaultLocales], servable: [...defaultLocales] }
+      if (!res.ok) return fallback
+      const locales = Array.isArray(res.result?.locales) && res.result.locales.length > 0
         ? res.result.locales
         : [...defaultLocales]
+      const servable = Array.isArray(res.result?.servable) && res.result.servable.length > 0
+        ? res.result.servable
+        : [...defaultLocales]
+      return { locales, servable }
     },
     staleTime: 60_000,
   })
@@ -75,7 +98,10 @@ export function TranslationManager({
   const entityType = isEmbedded ? (propEntityType ?? '') : selectedEntityType
   const recordId = isEmbedded ? (propRecordId ?? '') : selectedRecordId
 
-  const { data: locales = [...defaultLocales] } = useTranslationLocales()
+  const { data: localeData } = useTranslationLocales()
+  // Memoized: `locales` feeds effect dependency lists below, and a fresh array
+  // on every render while the query is still loading would re-fire them.
+  const locales = React.useMemo(() => localeData?.locales ?? [...defaultLocales], [localeData])
 
   React.useEffect(() => {
     if (locales.length > 0 && (!activeLocale || !locales.includes(activeLocale))) {
@@ -188,6 +214,17 @@ export function TranslationManager({
     },
   })
 
+  // Optimistic lock keys off the TRANSLATION ROW'S OWN version (`updatedAt` from
+  // the GET response), not the host entity's: the host's EAV `entityType`
+  // (`module:entity`) has no reliable server-side mapping to a registered
+  // optimistic-lock reader, so the route enforces against the translation row's
+  // own `updated_at`. `null` for a brand-new translation (no existing row → the
+  // header is omitted and the route enforces nothing on insert).
+  const translationRowUpdatedAt = React.useMemo(() => {
+    const value = translationData?.updatedAt
+    return typeof value === 'string' && value.trim().length > 0 ? value : null
+  }, [translationData])
+
   const translationSignature = React.useMemo(() => JSON.stringify(translationData ?? null), [translationData])
   const lastTranslationSignatureRef = React.useRef<string | null>(null)
 
@@ -218,6 +255,16 @@ export function TranslationManager({
     }
   }, [translationSignature, translationData])
 
+  const { runMutation, retryLastMutation } = useGuardedMutation<{
+    formId: string
+    entityType: string
+    recordId: string
+    resourceKind: string
+    resourceId: string
+    data: TranslationsResponse | null
+    retryLastMutation: () => Promise<boolean>
+  }>({ contextId: TRANSLATION_MUTATION_CONTEXT_ID })
+
   const mutation = useMutation({
     mutationFn: async () => {
       if (!entityType || !recordId) {
@@ -236,24 +283,38 @@ export function TranslationManager({
         if (hasValues) body[locale] = localeFields
       }
       if (Object.keys(body).length === 0) {
-        console.warn('[translations] Save skipped: payload is empty — no locale contains any non-empty field')
+        logger.warn('Save skipped: payload is empty — no locale contains any non-empty field')
         throw new Error(t('translations.manager.errors.nothingToSave', 'Nothing to save — enter a translation first'))
       }
-      const res = await withScopedApiRequestHeaders(
-        buildOptimisticLockHeader(translationData?.updatedAt),
-        () => apiCall(
-          `/api/translations/${encodeURIComponent(entityType)}/${encodeURIComponent(recordId)}`,
-          {
-            method: 'PUT',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(body),
-          },
-        ),
-      )
-      if (!res.ok) {
-        throw new Error(t('translations.manager.errors.save', 'Failed to save translations'))
-      }
-      return true
+      return runMutation({
+        operation: async () => {
+          const res = await withScopedApiRequestHeaders(
+            buildOptimisticLockHeader(translationRowUpdatedAt),
+            () => apiCall(
+              `/api/translations/${encodeURIComponent(entityType)}/${encodeURIComponent(recordId)}`,
+              {
+                method: 'PUT',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify(body),
+              },
+            ),
+          )
+          if (!res.ok) {
+            throw new Error(t('translations.manager.errors.save', 'Failed to save translations'))
+          }
+          return true
+        },
+        context: {
+          formId: TRANSLATION_MUTATION_CONTEXT_ID,
+          entityType,
+          recordId,
+          resourceKind: 'translation',
+          resourceId: recordId,
+          data: translationData ?? null,
+          retryLastMutation,
+        },
+        mutationPayload: body,
+      })
     },
     onSuccess: () => {
       flash(t('translations.manager.flash.saved', 'Translations saved'), 'success')
@@ -262,6 +323,7 @@ export function TranslationManager({
       void refetchTranslation()
     },
     onError: (err: unknown) => {
+      if (surfaceRecordConflict(err, t)) return
       const message = err instanceof Error ? err.message : t('translations.manager.errors.save', 'Failed to save translations')
       flash(message, 'error')
     },
@@ -309,27 +371,15 @@ export function TranslationManager({
   }
 
   const renderLocaleTabs = () => (
-    <div className="flex gap-1 border-b">
-      {locales.map((locale) => {
-        const isActive = activeLocale === locale
-        return (
-          <button
-            key={locale}
-            type="button"
-            data-state={isActive ? 'active' : 'inactive'}
-            data-locale={locale}
-            className={`px-3 py-1.5 text-sm font-medium transition-colors ${
-              isActive
-                ? 'border-b-2 border-accent-indigo text-foreground'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-            onClick={() => setActiveLocale(locale)}
-          >
+    <Tabs variant="underline" value={activeLocale} onValueChange={setActiveLocale}>
+      <TabsList>
+        {locales.map((locale) => (
+          <TabsTrigger key={locale} value={locale}>
             {locale.toUpperCase()}
-          </button>
-        )
-      })}
-    </div>
+          </TabsTrigger>
+        ))}
+      </TabsList>
+    </Tabs>
   )
 
   const renderFieldTable = () => {
@@ -538,22 +588,49 @@ export function TranslationManager({
 export function LocaleManager() {
   const t = useT()
   const queryClient = useQueryClient()
-  const { data: locales = [], isLoading } = useTranslationLocales()
+  const { data: localeData, isLoading } = useTranslationLocales()
+  const locales = React.useMemo(() => localeData?.locales ?? [], [localeData])
+  const servable = React.useMemo(() => localeData?.servable ?? [], [localeData])
   const [newLocale, setNewLocale] = React.useState('')
+
+  const { runMutation, retryLastMutation } = useGuardedMutation<{
+    formId: string
+    resourceKind: string
+    retryLastMutation: () => Promise<boolean>
+  }>({ contextId: SUPPORTED_LOCALES_MUTATION_CONTEXT_ID })
 
   const mutation = useMutation({
     mutationFn: async (updatedLocales: string[]) => {
       // optimistic-lock-exempt: single-row tenant supported-locales settings list — no per-record version / concurrent record edit
-      const res = await apiCall<{ locales: string[] }>('/api/translations/locales', {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ locales: updatedLocales }),
+      return runMutation({
+        operation: async () => {
+          const res = await apiCall<{ locales: string[] }>('/api/translations/locales', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ locales: updatedLocales }),
+          })
+          if (!res.ok) throw new Error('Failed to save locales')
+          return res.result?.locales ?? updatedLocales
+        },
+        context: {
+          formId: SUPPORTED_LOCALES_MUTATION_CONTEXT_ID,
+          resourceKind: 'translation-locales',
+          retryLastMutation,
+        },
+        mutationPayload: { locales: updatedLocales },
       })
-      if (!res.ok) throw new Error('Failed to save locales')
-      return res.result?.locales ?? updatedLocales
     },
     onSuccess: (result) => {
-      queryClient.setQueryData(['translation-locales'], result)
+      // The PUT response carries the stored selection only, so `servable` has to
+      // come from the cached entry. With no entry to read, defaulting it to `[]`
+      // would mark every chip "Content only" — including the shipped locales —
+      // which is the one answer that is definitely wrong. Refetch instead.
+      const previous = queryClient.getQueryData<TranslationLocales>(['translation-locales'])
+      if (previous) {
+        queryClient.setQueryData<TranslationLocales>(['translation-locales'], { ...previous, locales: result })
+      } else {
+        void queryClient.invalidateQueries({ queryKey: ['translation-locales'] })
+      }
       flash(t('translations.locales.flash.saved', 'Locales updated'), 'success')
     },
     onError: () => {
@@ -561,11 +638,32 @@ export function LocaleManager() {
     },
   })
 
+  // A locale the app has no dictionary for can be translated into, but the admin
+  // UI can never be shown in it — `resolveSupportedLocalesForRequest` intersects
+  // the selection with what the app serves. Saying so at the point of action is
+  // what keeps the successful-looking add honest.
+  const contentOnlyLabel = t('translations.locales.contentOnly', 'Content only')
+  const isServable = React.useCallback(
+    (code: string) => servable.includes(code.toLowerCase()),
+    [servable],
+  )
+
   const availableLocales = React.useMemo(
     () => ISO_639_1.filter((entry) => !locales.includes(entry.code)).map((entry) => ({
       value: entry.code,
-      label: `${entry.code.toUpperCase()} — ${entry.label}`,
+      label: isServable(entry.code)
+        ? `${entry.code.toUpperCase()} — ${entry.label}`
+        : `${entry.code.toUpperCase()} — ${entry.label} (${contentOnlyLabel})`,
     })),
+    [locales, isServable, contentOnlyLabel],
+  )
+
+  // `resolveSupportedLocalesForRequest` keeps `defaultLocale` in the served set
+  // whatever the stored selection says, so a tenant whose saved list omits it
+  // still gets it in the language switcher. Rendering the raw selection here
+  // would leave this screen and the switcher disagreeing about what is served.
+  const chips = React.useMemo(
+    () => (locales.includes(defaultLocale) ? locales : [defaultLocale, ...locales]),
     [locales],
   )
 
@@ -578,6 +676,10 @@ export function LocaleManager() {
 
   const removeLocale = (locale: string) => {
     if (locales.length <= 1) return
+    // The default locale stays servable whatever the selection says
+    // (`resolveSupportedLocalesForRequest` re-adds it), so letting it be removed
+    // here would leave the chip list claiming something untrue.
+    if (locale === defaultLocale) return
     mutation.mutate(locales.filter((l) => l !== locale))
   }
 
@@ -590,30 +692,49 @@ export function LocaleManager() {
       <div className="space-y-1">
         <h3 className="text-lg font-semibold">{t('translations.locales.title', 'Supported locales')}</h3>
         <p className="text-sm text-muted-foreground">
-          {t('translations.locales.description', 'Configure which locales are available for translations. Add ISO language codes (e.g. fr, it, ja, zh).')}
+          {t('translations.locales.description', 'Which languages content can be translated into. A language the application ships an interface for is also offered in the admin language switcher; the rest are available for content only.')}
         </p>
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {locales.map((locale) => (
-          <span
-            key={locale}
-            className="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1 text-sm font-medium"
-            title={getIso639Label(locale) ?? locale}
-          >
-            {locale.toUpperCase()}{getIso639Label(locale) ? ` — ${getIso639Label(locale)}` : ''}
-            {locales.length > 1 && (
-              <button
-                type="button"
-                className="rounded-full p-0.5 text-muted-foreground hover:text-foreground transition-colors"
-                onClick={() => removeLocale(locale)}
-                disabled={mutation.isPending}
-              >
-                <X className="h-3 w-3" />
-              </button>
-            )}
-          </span>
-        ))}
+        {chips.map((locale) => {
+          const localeLabel = getIso639Label(locale) ?? locale.toUpperCase()
+          const isDefault = locale === defaultLocale
+          const isStored = locales.includes(locale)
+          const removeLabel = t('translations.locales.remove', 'Remove {{locale}}', { locale: localeLabel })
+          const defaultLabel = t(
+            'translations.locales.alwaysServed',
+            '{{locale}} is the default language and is always served, so it cannot be removed.',
+            { locale: localeLabel },
+          )
+          return (
+            <span
+              key={locale}
+              className="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1 text-sm font-medium"
+              title={isStored ? (getIso639Label(locale) ?? locale) : defaultLabel}
+            >
+              {locale.toUpperCase()}{getIso639Label(locale) ? ` — ${getIso639Label(locale)}` : ''}
+              {!isServable(locale) && (
+                <Badge variant="outline" size="sm" title={t('translations.locales.contentOnlyHint', 'The application ships no interface for this language, so it is available for content translations only.')}>
+                  {contentOnlyLabel}
+                </Badge>
+              )}
+              {isStored && locales.length > 1 && (
+                <IconButton
+                  variant="ghost"
+                  size="xs"
+                  fullRadius
+                  aria-label={isDefault ? defaultLabel : removeLabel}
+                  title={isDefault ? defaultLabel : removeLabel}
+                  onClick={() => removeLocale(locale)}
+                  disabled={mutation.isPending || isDefault}
+                >
+                  <X className="h-3 w-3" />
+                </IconButton>
+              )}
+            </span>
+          )
+        })}
       </div>
 
       <div className="flex gap-2 items-center">
@@ -621,11 +742,12 @@ export function LocaleManager() {
           <ComboboxInput
             value={newLocale}
             onChange={setNewLocale}
-            placeholder={t('translations.locales.addPlaceholder', 'Search language...')}
+            placeholder={t('translations.locales.addPlaceholder', 'e.g. fr, it, ja...')}
             suggestions={availableLocales}
             resolveLabel={(value) => {
               const label = getIso639Label(value)
-              return label ? `${value.toUpperCase()} — ${label}` : value.toUpperCase()
+              const base = label ? `${value.toUpperCase()} — ${label}` : value.toUpperCase()
+              return isServable(value) ? base : `${base} (${contentOnlyLabel})`
             }}
           />
         </div>

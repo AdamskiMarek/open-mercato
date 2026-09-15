@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { createRequestContainer } from '@open-mercato/shared/lib/di/container'
 import type { CommandBus, CommandRuntimeContext } from '@open-mercato/shared/lib/commands'
 import { resolveTranslations } from '@open-mercato/shared/lib/i18n/server'
-import { CrudHttpError, isCrudHttpError } from '@open-mercato/shared/lib/crud/errors'
+import { CrudHttpError, isCrudHttpError, notFound } from '@open-mercato/shared/lib/crud/errors'
 import type { OpenApiRouteDoc } from '@open-mercato/shared/lib/openapi'
 import type { EntityManager } from '@mikro-orm/postgresql'
 import { LockMode } from '@mikro-orm/core'
@@ -11,14 +11,19 @@ import { getAuthFromRequest } from '@open-mercato/shared/lib/auth/server'
 import { findOneWithDecryption } from '@open-mercato/shared/lib/encryption/find'
 import { getCachedRateLimiterService } from '@open-mercato/core/bootstrap'
 import { readEndpointRateLimitConfig } from '@open-mercato/shared/lib/ratelimit/config'
-import { checkRateLimit, getClientIp, rateLimitErrorSchema } from '@open-mercato/shared/lib/ratelimit/helpers'
+import { checkRateLimit, getClientIp, RATE_LIMIT_FALLBACK_KEY, rateLimitErrorSchema } from '@open-mercato/shared/lib/ratelimit/helpers'
 import { validateSameOriginMutationRequest } from './originGuard'
 import { hashAuthToken } from '../../../../auth/lib/tokenHash'
 import { SalesOrder, SalesQuote } from '../../../data/entities'
 import { quoteAcceptSchema } from '../../../data/validators'
 import { sendEmail } from '@open-mercato/shared/lib/email/send'
 import { resolveStatusEntryIdByValue } from '../../../lib/statusHelpers'
+import { resolveEffectiveTenantId } from '../../../lib/publicQuoteTenantScope'
 import { QuoteAcceptedAdminEmail } from '../../../emails/QuoteAcceptedAdminEmail'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+import { getCommandInterceptorHttpRejection } from '@open-mercato/shared/lib/commands/errors'
+
+const logger = createLogger('sales')
 
 type ConvertToOrderResult = {
   result?: { orderId?: string } | null
@@ -49,11 +54,11 @@ export async function POST(req: Request) {
 
     const rateLimiterService = getCachedRateLimiterService()
     const clientIp = rateLimiterService ? getClientIp(req, rateLimiterService.trustProxyDepth) : null
-    if (rateLimiterService && clientIp) {
+    if (rateLimiterService) {
       const rateLimitResponse = await checkRateLimit(
         rateLimiterService,
         quoteAcceptRateLimitConfig,
-        clientIp,
+        clientIp ?? RATE_LIMIT_FALLBACK_KEY,
         translate('api.errors.rateLimit', 'Too many requests. Please try again later.'),
       )
       if (rateLimitResponse) return rateLimitResponse
@@ -65,7 +70,13 @@ export async function POST(req: Request) {
     const em = (container.resolve('em') as EntityManager).fork()
 
     const hashedToken = hashAuthToken(token)
-    const tenantScope = auth?.tenantId ? { tenantId: auth.tenantId } : undefined
+    const effectiveTenantId = resolveEffectiveTenantId(auth)
+    // A session whose tenant cannot be resolved must not fall through to an unscoped lookup.
+    // Anonymous callers (no auth) and tenant-less API keys stay unscoped by design.
+    if (auth && effectiveTenantId === null && auth.isApiKey !== true) {
+      throw new CrudHttpError(404, { error: translate('sales.quotes.accept.notFound', 'Quote not found.') })
+    }
+    const tenantScope = effectiveTenantId ? { tenantId: effectiveTenantId } : undefined
 
     const commandBus = container.resolve('commandBus') as CommandBus
 
@@ -82,15 +93,15 @@ export async function POST(req: Request) {
           SalesQuote,
           {
             acceptanceToken,
-            ...(auth?.tenantId ? { tenantId: auth.tenantId } : {}),
+            ...(effectiveTenantId ? { tenantId: effectiveTenantId } : {}),
             deletedAt: null,
           },
           { lockMode: LockMode.PESSIMISTIC_WRITE },
           tenantScope,
         )
-      const quote = (await findQuoteByToken(hashedToken)) ?? (await findQuoteByToken(token))
+      const quote = await findQuoteByToken(hashedToken)
       if (!quote) {
-        throw new CrudHttpError(404, { error: translate('sales.quotes.accept.notFound', 'Quote not found.') })
+        throw notFound(translate('sales.quotes.accept.notFound', 'Quote not found.'))
       }
 
       const now = new Date()
@@ -158,9 +169,11 @@ export async function POST(req: Request) {
             orderNumber,
           }),
           react: QuoteAcceptedAdminEmail({ orderUrl, copy }),
+          tenantId: quote.tenantId,
+          organizationId: quote.organizationId,
         })
       } catch (err) {
-        console.error('sales.quotes.accept.adminEmail failed', err)
+        logger.error('sales.quotes.accept.adminEmail failed', { err })
       }
     }
 
@@ -169,8 +182,12 @@ export async function POST(req: Request) {
     if (isCrudHttpError(err)) {
       return NextResponse.json(err.body, { status: err.status })
     }
+    const interceptorRejection = getCommandInterceptorHttpRejection(err)
+    if (interceptorRejection) {
+      return NextResponse.json(interceptorRejection.body, { status: interceptorRejection.status })
+    }
     const { translate } = await resolveTranslations()
-    console.error('sales.quotes.accept failed', err)
+    logger.error('sales.quotes.accept failed', { err })
     return NextResponse.json({ error: translate('sales.quotes.accept.failed', 'Failed to accept quote.') }, { status: 400 })
   }
 }

@@ -40,6 +40,7 @@ import type {
 } from '@open-mercato/ui/backend/CrudForm'
 import {
   DictionaryEntrySelect,
+  DictionaryOptionsUnavailableError,
   type DictionarySelectLabels,
 } from '@open-mercato/core/modules/dictionaries/components/DictionaryEntrySelect'
 import { RolesSection } from './detail/RolesSection'
@@ -51,7 +52,12 @@ import {
   ensureCustomerDictionary,
   invalidateCustomerDictionary,
 } from './detail/hooks/useCustomerDictionary'
-import type { CustomerDictionaryKind } from '../lib/dictionaries'
+import {
+  CUSTOMER_DICTIONARIES_MANAGE_HREF,
+  CUSTOMER_DICTIONARY_ORGANIZATION_REQUIRED_CODE,
+  getCustomerDictionaryManageHref,
+  type CustomerDictionaryKind,
+} from '../lib/dictionaries'
 import { normalizeCustomFieldSubmitValue } from './detail/customFieldUtils'
 import { CUSTOMER_PHONE_INVALID_MESSAGE_KEY } from '../data/validators'
 
@@ -115,6 +121,8 @@ type DictionarySelectFieldProps = {
   showLabelInput?: boolean
   showActiveAppearance?: boolean
 }
+
+export { CUSTOMER_DICTIONARIES_MANAGE_HREF, getCustomerDictionaryManageHref }
 
 const emailValidationSchema = z.string().email()
 const EMAIL_CHECK_DEBOUNCE_MS = 350
@@ -182,14 +190,30 @@ export function DictionarySelectField({
   )
 
   const fetchOptions = React.useCallback(async () => {
-    const data = await ensureCustomerDictionary(queryClient, kind, scopeVersion)
-    return data.entries.map((entry) => ({
-      value: entry.value,
-      label: entry.label,
-      color: entry.color ?? null,
-      icon: entry.icon ?? null,
-    }))
-  }, [kind, queryClient, scopeVersion])
+    try {
+      const data = await ensureCustomerDictionary(queryClient, kind, scopeVersion)
+      return data.entries.map((entry) => ({
+        value: entry.value,
+        label: entry.label,
+        color: entry.color ?? null,
+        icon: entry.icon ?? null,
+      }))
+    } catch (err) {
+      const responseError = err as { status?: unknown; code?: unknown } | null
+      if (
+        responseError?.status === 400 &&
+        responseError.code === CUSTOMER_DICTIONARY_ORGANIZATION_REQUIRED_CODE
+      ) {
+        const serverMessage = err instanceof Error ? err.message.trim() : ''
+        throw new DictionaryOptionsUnavailableError(
+          serverMessage.length
+            ? serverMessage
+            : translate('customers.errors.organization_required', 'Organization context is required'),
+        )
+      }
+      throw err
+    }
+  }, [kind, queryClient, scopeVersion, translate])
 
   const createOption = React.useCallback(
     async (input: { value: string; label?: string; color?: string | null; icon?: string | null }) => {
@@ -233,7 +257,7 @@ export function DictionarySelectField({
       fetchOptions={fetchOptions}
       createOption={createOption}
       labels={labels}
-      manageHref={manageHref}
+      manageHref={manageHref ?? getCustomerDictionaryManageHref(kind)}
       selectClassName={selectClassName}
       allowInlineCreate={allowInlineCreate}
       allowAppearance={allowAppearance}
@@ -394,10 +418,11 @@ const companyDictionaryFieldDefinitions: DictionaryFieldDefinition[] = [
   },
 ]
 
-const createPrimaryPhoneField = (t: Translator): CrudField => ({
+const createPrimaryPhoneField = (t: Translator, defaultCountryIso2?: string): CrudField => ({
   id: 'primaryPhone',
   label: t('customers.people.form.primaryPhone'),
   type: 'custom',
+  rendersOwnError: true,
   component: function PrimaryPhoneField({ value, setValue, error, autoFocus, disabled, recordId }: CrudCustomFieldRenderProps) {
     const currentRecordId = React.useMemo(() => (typeof recordId === 'string' ? recordId : null), [recordId])
 
@@ -423,6 +448,7 @@ const createPrimaryPhoneField = (t: Translator): CrudField => ({
         invalidLabel={t('customers.people.form.primaryPhone.invalid', 'Enter a valid phone number with country code (e.g. +1 212 555 1234)')}
         minDigits={7}
         onDuplicateLookup={!disabled && !error ? duplicateLookup : undefined}
+        defaultCountryIso2={defaultCountryIso2}
       />
     )
   },
@@ -845,7 +871,8 @@ export const createDisplayNameSection = (t: Translator) =>
     )
   }
 
-export const createPersonFormFields = (t: Translator): CrudField[] => {
+export const createPersonFormFields = (t: Translator, options?: { defaultCountryIso2?: string }): CrudField[] => {
+  const defaultCountryIso2 = options?.defaultCountryIso2
   const contactSection = createSectionHeadingField('__contactInformationSection', t('customers.people.form.sections.contactInformation'))
   const companySection = createSectionHeadingField('__companyInformationSection', t('customers.people.form.sections.companyInformation'))
   const dictionaryFields: CrudField[] = dictionaryFieldDefinitions.map((definition) => ({
@@ -906,7 +933,7 @@ export const createPersonFormFields = (t: Translator): CrudField[] => {
     },
     contactSection,
     createPrimaryEmailField(t),
-    createPrimaryPhoneField(t),
+    createPrimaryPhoneField(t, defaultCountryIso2),
     companySection,
     {
       id: 'companyEntityId',
@@ -949,6 +976,7 @@ export const createPersonFormFields = (t: Translator): CrudField[] => {
             t={t}
             emptyLabel={t('customers.people.detail.empty.addresses')}
             gridClassName="grid gap-4 min-[480px]:grid-cols-1 xl:grid-cols-2"
+            showCoordinateFields
             onCreate={async (payload: CustomerAddressInput) => {
               const nextId =
                 typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -967,6 +995,8 @@ export const createPersonFormFields = (t: Translator): CrudField[] => {
                 region: payload.region ?? undefined,
                 postalCode: payload.postalCode ?? undefined,
                 country: payload.country ?? undefined,
+                latitude: payload.latitude ?? undefined,
+                longitude: payload.longitude ?? undefined,
                 isPrimary: payload.isPrimary ?? false,
               }
               const current = Array.isArray(addresses) ? addresses : []
@@ -995,6 +1025,8 @@ export const createPersonFormFields = (t: Translator): CrudField[] => {
                   region: payload.region ?? null,
                   postalCode: payload.postalCode ?? null,
                   country: payload.country ?? null,
+                  latitude: payload.latitude ?? null,
+                  longitude: payload.longitude ?? null,
                   isPrimary: payload.isPrimary ?? false,
                 }
               })
@@ -1196,7 +1228,8 @@ export const createCompanyFormSchema = () =>
     })
     .passthrough()
 
-export const createCompanyFormFields = (t: Translator): CrudField[] => {
+export const createCompanyFormFields = (t: Translator, options?: { defaultCountryIso2?: string }): CrudField[] => {
+  const defaultCountryIso2 = options?.defaultCountryIso2
   const dictionaryFields: CrudField[] = companyDictionaryFieldDefinitions.map((definition) => ({
     id: definition.id,
     label: t(definition.labelKey),
@@ -1230,6 +1263,7 @@ export const createCompanyFormFields = (t: Translator): CrudField[] => {
       id: 'primaryPhone',
       label: t('customers.companies.detail.highlights.primaryPhone', 'Primary phone'),
       type: 'custom',
+      rendersOwnError: true,
       layout: 'half',
       component: ({ value, setValue, error, disabled, autoFocus }: CrudCustomFieldRenderProps) => (
         <PhoneNumberField
@@ -1241,6 +1275,7 @@ export const createCompanyFormFields = (t: Translator): CrudField[] => {
           placeholder={t('customers.companies.form.primaryPhonePlaceholder', '+1 555 123 4567')}
           invalidLabel={t('customers.people.form.primaryPhone.invalid', 'Enter a valid phone number with country code (e.g. +1 212 555 1234)')}
           minDigits={7}
+          defaultCountryIso2={defaultCountryIso2}
         />
       ),
     } as CrudField,
@@ -1310,6 +1345,7 @@ export const createCompanyFormFields = (t: Translator): CrudField[] => {
             t={t}
             emptyLabel={t('customers.companies.detail.empty.addresses')}
             gridClassName="grid gap-4 min-[480px]:grid-cols-1 xl:grid-cols-2"
+            showCoordinateFields
             onCreate={async (payload: CustomerAddressInput) => {
               const nextId =
                 typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -1328,6 +1364,8 @@ export const createCompanyFormFields = (t: Translator): CrudField[] => {
                 region: payload.region ?? undefined,
                 postalCode: payload.postalCode ?? undefined,
                 country: payload.country ?? undefined,
+                latitude: payload.latitude ?? undefined,
+                longitude: payload.longitude ?? undefined,
                 isPrimary: payload.isPrimary ?? false,
               }
               const current = Array.isArray(addresses) ? addresses : []
@@ -1356,6 +1394,8 @@ export const createCompanyFormFields = (t: Translator): CrudField[] => {
                   region: payload.region ?? null,
                   postalCode: payload.postalCode ?? null,
                   country: payload.country ?? null,
+                  latitude: payload.latitude ?? null,
+                  longitude: payload.longitude ?? null,
                   isPrimary: payload.isPrimary ?? false,
                 }
               })
@@ -1464,12 +1504,29 @@ export function buildCompanyPayload(
 
 // URL/email/phone fields are clearable on edit: blanking a previously-set value transmits null,
 // so the edit-form value types widen to `string | null` to match the edit-schema output. See #2526.
-export type CompanyEditFormValues = Omit<CompanyFormValues, 'addresses' | 'primaryEmail' | 'primaryPhone' | 'websiteUrl' | 'domain'> & {
+export type CompanyEditFormValues = Omit<
+  CompanyFormValues,
+  | 'addresses'
+  | 'primaryEmail'
+  | 'primaryPhone'
+  | 'websiteUrl'
+  | 'domain'
+  | 'legalName'
+  | 'brandName'
+  | 'sizeBucket'
+  | 'annualRevenue'
+  | 'description'
+> & {
   id: string
   primaryEmail?: string | null
   primaryPhone?: string | null
   websiteUrl?: string | null
   domain?: string | null
+  legalName?: string | null
+  brandName?: string | null
+  sizeBucket?: string | null
+  annualRevenue?: string | null
+  description?: string | null
 }
 
 export type PersonEditFormValues = Omit<PersonFormValues, 'addresses' | 'primaryEmail' | 'primaryPhone'> & {
@@ -1530,6 +1587,18 @@ const clearableDomainField = () =>
     .transform((val) => (val === '' ? null : val))
     .optional()
 
+// Plain optional string fields that map to nullable columns (legal name, brand name,
+// company size, annual revenue, description). On edit a blanked value must transmit null
+// so it actually clears — create-mode keeps the '' → undefined transform. See #3050.
+const clearableTextField = () =>
+  z
+    .string()
+    .trim()
+    .optional()
+    .or(z.literal(''))
+    .transform((val) => (val === '' ? null : val))
+    .optional()
+
 const clearablePhoneField = () =>
   z
     .string()
@@ -1548,6 +1617,11 @@ export const createCompanyEditSchema = () =>
     primaryPhone: clearablePhoneField(),
     websiteUrl: clearableUrlField(),
     domain: clearableDomainField(),
+    legalName: clearableTextField(),
+    brandName: clearableTextField(),
+    sizeBucket: clearableTextField(),
+    annualRevenue: clearableTextField(),
+    description: clearableTextField(),
   })
 
 export const createPersonEditSchema = () =>
@@ -1583,8 +1657,8 @@ const buildIndustryLabels = (t: Translator): DictionarySelectLabels => ({
   manageTitle: t('customers.people.form.dictionary.manage'),
 })
 
-export const createCompanyEditFields = (t: Translator): CrudField[] => {
-  const baseFields = createCompanyFormFields(t)
+export const createCompanyEditFields = (t: Translator, options?: { defaultCountryIso2?: string }): CrudField[] => {
+  const baseFields = createCompanyFormFields(t, options)
   const industryLabels = buildIndustryLabels(t)
 
   return baseFields.map((field) => {
@@ -1608,8 +1682,8 @@ export const createCompanyEditFields = (t: Translator): CrudField[] => {
   })
 }
 
-export const createPersonEditFields = (t: Translator): CrudField[] => {
-  const baseFields = createPersonFormFields(t)
+export const createPersonEditFields = (t: Translator, options?: { defaultCountryIso2?: string }): CrudField[] => {
+  const baseFields = createPersonFormFields(t, options)
   return [
     ...baseFields,
     {
@@ -1859,6 +1933,21 @@ export function buildCompanyEditPayload(values: CompanyEditFormValues, organizat
   assignClearable(payload, 'primaryPhone', values.primaryPhone)
   assignClearable(payload, 'websiteUrl', values.websiteUrl)
   assignClearable(payload, 'domain', typeof values.domain === 'string' ? values.domain.toLowerCase() : values.domain)
+
+  // Plain nullable string fields that must transmit null when blanked on edit (#3050).
+  assignClearable(payload, 'legalName', values.legalName)
+  assignClearable(payload, 'brandName', values.brandName)
+  assignClearable(payload, 'sizeBucket', values.sizeBucket)
+  assignClearable(payload, 'description', values.description)
+
+  // Annual revenue maps to a nullable numeric column: a blanked value must clear it.
+  // Non-empty values are already validated/normalized by buildCompanyPayload; an omitted
+  // (undefined) value stays a no-op like the other clearable fields. (#3050)
+  const annualRevenueRaw = values.annualRevenue
+  const annualRevenueBlank =
+    annualRevenueRaw === null ||
+    (typeof annualRevenueRaw === 'string' && annualRevenueRaw.trim().length === 0)
+  if (annualRevenueBlank) payload.annualRevenue = null
 
   return payload
 }

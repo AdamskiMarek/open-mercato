@@ -1,8 +1,9 @@
 "use client"
 import * as React from 'react'
+import { extensionPoints } from '@open-mercato/core/modules/directory/extension-points'
 import Link from 'next/link'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { ColumnDef } from '@tanstack/react-table'
+import type { LegacyColumnDef as ColumnDef } from '@tanstack/react-table/legacy'
 import { Page, PageBody } from '@open-mercato/ui/backend/Page'
 import { DataTable } from '@open-mercato/ui/backend/DataTable'
 import { ListEmptyState } from '@open-mercato/ui/backend/filters/ListEmptyState'
@@ -13,6 +14,8 @@ import { Button } from '@open-mercato/ui/primitives/button'
 import { apiCall, apiCallOrThrow, readApiResultOrThrow, withScopedApiRequestHeaders } from '@open-mercato/ui/backend/utils/apiCall'
 import { buildOptimisticLockHeader } from '@open-mercato/ui/backend/utils/optimisticLock'
 import { flash } from '@open-mercato/ui/backend/FlashMessages'
+import { useGuardedMutation } from '@open-mercato/ui/backend/injection/useGuardedMutation'
+import { surfaceRecordConflict } from '@open-mercato/ui/backend/conflicts'
 import { useConfirmDialog } from '@open-mercato/ui/backend/confirm-dialog'
 import { useOrganizationScopeVersion } from '@open-mercato/shared/lib/frontend/useOrganizationScope'
 import { useT } from '@open-mercato/shared/lib/i18n/context'
@@ -43,6 +46,7 @@ type OrganizationsResponse = {
   page: number
   pageSize: number
   totalPages: number
+  totalIsCapped?: boolean
   isSuperAdmin?: boolean
 }
 
@@ -176,6 +180,18 @@ export default function DirectoryOrganizationsPage() {
   }, [isSuperAdmin, t])
   const total = data?.total ?? 0
   const totalPages = data?.totalPages ?? 0
+  const totalIsCapped = data?.totalIsCapped === true
+
+  const deleteMutationContextId = 'directory-organizations-list:single-delete'
+  const { runMutation: runDeleteMutation, retryLastMutation: retryDeleteMutation } = useGuardedMutation<{
+    formId: string
+    resourceKind: string
+    resourceId: string
+    retryLastMutation: () => Promise<boolean>
+  }>({
+    contextId: deleteMutationContextId,
+    blockedMessage: t('ui.forms.flash.saveBlocked', 'Save blocked by validation'),
+  })
 
   const handleDelete = React.useCallback(async (org: OrganizationRow) => {
     const confirmLabel = t('directory.organizations.list.confirmDelete', 'Archive organization "{{name}}"?', { name: org.name })
@@ -187,28 +203,43 @@ export default function DirectoryOrganizationsPage() {
     if (!confirmed) return
 
     try {
-      await withScopedApiRequestHeaders(
-        buildOptimisticLockHeader(org.updatedAt),
-        () => apiCallOrThrow(
-          `/api/directory/organizations?id=${encodeURIComponent(org.id)}`,
-          { method: 'DELETE' },
-          { errorMessage: t('directory.organizations.list.error.delete', 'Failed to delete organization') },
+      await runDeleteMutation({
+        operation: () => withScopedApiRequestHeaders(
+          buildOptimisticLockHeader(org.updatedAt),
+          () => apiCallOrThrow(
+            `/api/directory/organizations?id=${encodeURIComponent(org.id)}`,
+            { method: 'DELETE' },
+            { errorMessage: t('directory.organizations.list.error.delete', 'Failed to delete organization') },
+          ),
         ),
-      )
+        context: {
+          formId: deleteMutationContextId,
+          resourceKind: 'directory.organization',
+          resourceId: org.id,
+          retryLastMutation: retryDeleteMutation,
+        },
+      })
       await queryClient.invalidateQueries({ queryKey: ['directory-organizations'] })
       flash(t('directory.organizations.flash.deleted', 'Organization deleted'), 'success')
     } catch (err: unknown) {
+      // A stale delete surfaces the unified conflict bar (via the guarded
+      // mutation) — skip the generic error flash to avoid a double message.
+      if (surfaceRecordConflict(err, t)) {
+        await queryClient.invalidateQueries({ queryKey: ['directory-organizations'] })
+        return
+      }
       const fallback = t('directory.organizations.list.error.delete', 'Failed to delete organization')
       const message = err instanceof Error ? err.message : fallback
       flash(message, 'error')
     }
-  }, [confirm, queryClient, t])
+  }, [confirm, deleteMutationContextId, queryClient, retryDeleteMutation, runDeleteMutation, t])
 
   return (
     <Page>
       <PageBody>
         <DataTable
-          title={t('directory.organizations.list.title', 'Organizations')}
+        title={t('directory.organizations.list.title', 'Organizations')}
+        titleHeadingLevel={1}
           actions={canManage ? (
             <Button asChild>
               <Link href="/backend/directory/organizations/create">
@@ -244,7 +275,7 @@ export default function DirectoryOrganizationsPage() {
             setPage(1)
           }}
           sortable={false}
-          perspective={{ tableId: 'directory.organizations.list' }}
+          perspective={{ tableId: extensionPoints.hosts.organizationsTable.tableId }}
           rowActions={(row) => (
             canManage ? (
               <RowActions
@@ -262,7 +293,7 @@ export default function DirectoryOrganizationsPage() {
               createLabel={t('directory.organizations.list.actions.create', 'Create')}
             />
           )}
-          pagination={{ page, pageSize: 50, total, totalPages, onPageChange: setPage }}
+          pagination={{ page, pageSize: 50, total, totalPages, totalIsCapped, onPageChange: setPage }}
           isLoading={isLoading}
         />
       </PageBody>

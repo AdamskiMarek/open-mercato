@@ -13,7 +13,11 @@ import { resolveOrganizationScopeForRequest } from '@open-mercato/core/modules/d
 import { findOneWithDecryption } from '@open-mercato/shared/lib/encryption/find'
 import { WorkflowInstance } from '../../../../data/entities'
 import * as workflowExecutor from '../../../../lib/workflow-executor'
+import { isRetryableRunOutcome } from '../../../../lib/run-outcome'
 import { workflowInstanceResponseSchema, workflowExecutionResultSchema } from '../../../openapi'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+
+const logger = createLogger('workflows')
 
 export const metadata = {
   requireAuth: true,
@@ -87,6 +91,21 @@ export async function POST(
       )
     }
 
+    // A `partial_failure` reached END: replaying the graph would re-run every
+    // part that already succeeded in order to re-attempt the parts that did
+    // not (maintainer decision, 2026-07-30). Its status is COMPLETED, so the
+    // status guard below already refuses it — this runs FIRST so the operator
+    // gets the actionable remedy instead of the generic status message.
+    if (instance.outcome != null && !isRetryableRunOutcome(instance.outcome)) {
+      return NextResponse.json(
+        {
+          error: `Cannot retry a run whose outcome is ${instance.outcome}. Rerun the specific failed step instead.`,
+          code: 'WORKFLOW_RUN_OUTCOME_NOT_RETRYABLE',
+        },
+        { status: 400 }
+      )
+    }
+
     // Check if instance can be retried
     if (instance.status !== 'FAILED') {
       return NextResponse.json(
@@ -130,7 +149,7 @@ export async function POST(
       message: 'Workflow retry initiated successfully',
     })
   } catch (error) {
-    console.error('Error retrying workflow instance:', error)
+    logger.error('Error retrying workflow instance', { err: error })
 
     // Handle specific errors
     if (error instanceof workflowExecutor.WorkflowExecutionError) {
@@ -170,8 +189,8 @@ export const openApi = {
         },
         {
           status: 400,
-          description: 'Bad request - Workflow cannot be retried in current status or execution error',
-          schema: z.object({ error: z.string() }),
+          description: 'Bad request - Workflow cannot be retried in its current status or with its current outcome, or execution error',
+          schema: z.object({ error: z.string(), code: z.string().optional() }),
         },
         {
           status: 401,

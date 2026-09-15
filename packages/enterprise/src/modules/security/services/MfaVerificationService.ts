@@ -24,6 +24,10 @@ type ChallengeCreationResult = {
   availableMethods: AvailableMethod[]
 }
 
+export type MfaVerificationAuthScope = {
+  userId: string
+}
+
 export class MfaVerificationServiceError extends Error {
   constructor(
     message: string,
@@ -81,12 +85,33 @@ export class MfaVerificationService {
     }
   }
 
+  /**
+   * @deprecated Since 0.6 — pass an {@link MfaVerificationAuthScope} bound to the
+   *   authenticated user (`auth.sub`). The no-scope overload now treats the caller as
+   *   unknown and rejects every challenge lookup with 404; it will be removed in a
+   *   future release.
+   */
   async prepareChallenge(
     challengeId: string,
     methodType: string,
     context?: MfaProviderRuntimeContext,
+  ): Promise<{ clientData?: Record<string, unknown> }>
+  async prepareChallenge(
+    challengeId: string,
+    methodType: string,
+    context: MfaProviderRuntimeContext | undefined,
+    scope: MfaVerificationAuthScope,
+  ): Promise<{ clientData?: Record<string, unknown> }>
+  async prepareChallenge(
+    challengeId: string,
+    methodType: string,
+    context?: MfaProviderRuntimeContext,
+    scope?: MfaVerificationAuthScope,
   ): Promise<{ clientData?: Record<string, unknown> }> {
-    const challenge = await this.getValidChallenge(challengeId)
+    if (!scope) {
+      throw new MfaVerificationServiceError('MFA challenge not found', 404)
+    }
+    const challenge = await this.getValidChallenge(challengeId, scope)
     await this.assertMethodAllowedByPolicy(challenge.userId, methodType)
     const provider = this.mfaProviderRegistry.get(methodType)
     if (!provider) {
@@ -98,6 +123,8 @@ export class MfaVerificationService {
       id: method.id,
       type: method.type,
       userId: method.userId,
+      tenantId: method.tenantId,
+      organizationId: method.organizationId ?? null,
       secret: method.secret ?? null,
       providerMetadata: method.providerMetadata,
     }, context)
@@ -109,13 +136,36 @@ export class MfaVerificationService {
     return result
   }
 
+  /**
+   * @deprecated Since 0.6 — pass an {@link MfaVerificationAuthScope} bound to the
+   *   authenticated user (`auth.sub`). The no-scope overload now treats the caller as
+   *   unknown and rejects every challenge lookup with 404; it will be removed in a
+   *   future release.
+   */
   async verifyChallenge(
     challengeId: string,
     methodType: string,
     payload: unknown,
     runtimeContext?: MfaProviderRuntimeContext,
+  ): Promise<boolean>
+  async verifyChallenge(
+    challengeId: string,
+    methodType: string,
+    payload: unknown,
+    runtimeContext: MfaProviderRuntimeContext | undefined,
+    scope: MfaVerificationAuthScope,
+  ): Promise<boolean>
+  async verifyChallenge(
+    challengeId: string,
+    methodType: string,
+    payload: unknown,
+    runtimeContext?: MfaProviderRuntimeContext,
+    scope?: MfaVerificationAuthScope,
   ): Promise<boolean> {
-    const challenge = await this.getValidChallenge(challengeId)
+    if (!scope) {
+      throw new MfaVerificationServiceError('MFA challenge not found', 404)
+    }
+    const challenge = await this.getValidChallenge(challengeId, scope)
     if (challenge.attempts >= this.securityConfig.mfa.maxAttempts) {
       return false
     }
@@ -142,6 +192,8 @@ export class MfaVerificationService {
       id: method.id,
       type: method.type,
       userId: method.userId,
+      tenantId: method.tenantId,
+      organizationId: method.organizationId ?? null,
       secret: method.secret ?? null,
       providerMetadata: method.providerMetadata,
     }, payload, context, runtimeContext)
@@ -167,8 +219,14 @@ export class MfaVerificationService {
     return this.mfaService.verifyRecoveryCode(userId, code)
   }
 
-  private async getValidChallenge(challengeId: string): Promise<MfaChallenge> {
-    const challenge = await this.em.findOne(MfaChallenge, { id: challengeId })
+  private async getValidChallenge(
+    challengeId: string,
+    scope: MfaVerificationAuthScope,
+  ): Promise<MfaChallenge> {
+    const challenge = await this.em.findOne(MfaChallenge, {
+      id: challengeId,
+      userId: scope.userId,
+    })
     if (!challenge) {
       throw new MfaVerificationServiceError('MFA challenge not found', 404)
     }

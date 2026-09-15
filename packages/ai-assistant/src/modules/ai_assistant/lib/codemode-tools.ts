@@ -1,3 +1,5 @@
+import { createLogger } from '@open-mercato/shared/lib/logger'
+
 /**
  * Code Mode Tools
  *
@@ -11,9 +13,10 @@
 import { z } from 'zod'
 import type { RbacService } from '@open-mercato/core/modules/auth/services/rbacService'
 import { registerMcpTool } from './tool-registry'
-import type { McpToolContext } from './types'
+import type { AiToolDefinition, McpToolContext } from './types'
 import { createSandbox } from './sandbox'
 import { truncateResult } from './truncate'
+import { applyContextScopeToQuery, applyContextScopeToBody } from './scope-injection'
 import { hasRequiredFeatures } from './auth'
 import { getApiEndpoints, getRawOpenApiSpec, type ApiEndpoint } from './api-endpoint-index'
 import {
@@ -29,6 +32,8 @@ import {
   incrementToolCallCount,
 } from './session-memory'
 import { fetchWithTimeout, resolveTimeoutMs } from '@open-mercato/shared/lib/http/fetchWithTimeout'
+
+const logger = createLogger('ai_assistant').child({ component: 'codemode' })
 
 const DEFAULT_AI_API_REQUEST_TIMEOUT_MS = 30_000
 
@@ -336,7 +341,7 @@ async function generateCommonTypes(): Promise<string> {
   }
 
   cachedCommonTypes = typeLines.join('\n')
-  console.error(`[Code Mode] Generated ${typeLines.length - 1} common type stubs`)
+  logger.debug('Generated common type stubs', { count: typeLines.length - 1 })
   return cachedCommonTypes
 }
 
@@ -556,6 +561,15 @@ export const CODE_MODE_MAX_API_CALLS = 50
 export const CODE_MODE_MAX_MUTATION_CALLS = 20
 
 /**
+ * Register a Code Mode tool through the typed definition so the optional
+ * metadata (`isMutation`, `isDestructive`) survives registration — the MCP
+ * `tools/list` annotations are derived from those flags.
+ */
+function registerCodeModeTool(tool: AiToolDefinition<{ code: string }>): void {
+  registerMcpTool(tool, { moduleId: 'codemode' })
+}
+
+/**
  * Load and register the two Code Mode tools.
  * Generates TypeScript type stubs for common endpoints at startup.
  * @returns Number of tools registered (always 2)
@@ -571,9 +585,10 @@ export async function loadCodeModeTools(): Promise<number> {
  * search — Query the OpenAPI spec and entity graph programmatically.
  */
 function registerSearchTool(): void {
-  registerMcpTool(
+  registerCodeModeTool(
     {
       name: 'search',
+      isMutation: false,
       description: `Query the OpenAPI spec and entity schemas. READ-ONLY, no side effects.
 Globals: spec.findEndpoints(keyword), spec.describeEndpoint(path, method), spec.describeEntity(keyword), spec.paths, spec.entitySchemas.
 Use BEFORE execute to learn endpoint schemas for CREATE/UPDATE. Skip for common paths (companies, people, orders, quotes, products).`,
@@ -586,14 +601,13 @@ Use BEFORE execute to learn endpoint schemas for CREATE/UPDATE. Skip for common 
       }),
       requiredFeatures: [...CODE_MODE_REQUIRED_FEATURES],
       handler: async (input: { code: string }, ctx: McpToolContext) => {
-        const codePreview = input.code.slice(0, 120).replace(/\n/g, ' ')
-        console.error(`[AI Usage] search: code="${codePreview}${input.code.length > 120 ? '...' : ''}"`)
+        logger.debug('search tool invoked', { codeChars: input.code.length })
 
         // Check session memory for cached result
         if (ctx.sessionId) {
           const cached = lookupSearchCache(ctx.sessionId, input.code)
           if (cached) {
-            console.error(`[AI Usage] search: CACHE HIT (label="${cached.label}")`)
+            logger.debug('search tool cache hit', { label: cached.label })
             const memoryContext = buildMemoryContext(ctx.sessionId)
             return {
               success: true,
@@ -606,7 +620,7 @@ Use BEFORE execute to learn endpoint schemas for CREATE/UPDATE. Skip for common 
           // Enforce tool call limit
           const { count, exceeded } = incrementToolCallCount(ctx.sessionId)
           if (exceeded) {
-            console.error(`[AI Usage] search: TOOL CALL LIMIT EXCEEDED (count=${count})`)
+            logger.warn('search tool call limit exceeded', { count })
             return {
               success: false,
               error: 'Tool call limit exceeded. Summarize what you know and respond to the user.',
@@ -619,7 +633,7 @@ Use BEFORE execute to learn endpoint schemas for CREATE/UPDATE. Skip for common 
         const result = await sandbox.execute(input.code)
 
         if (result.error) {
-          console.error(`[AI Usage] search: ERROR in ${result.durationMs}ms — ${result.error}`)
+          logger.info('search tool errored', { durationMs: result.durationMs, err: result.error })
           return {
             success: false,
             error: result.error,
@@ -629,7 +643,7 @@ Use BEFORE execute to learn endpoint schemas for CREATE/UPDATE. Skip for common 
         }
 
         const truncated = truncateResult(result.result)
-        console.error(`[AI Usage] search: OK in ${result.durationMs}ms — ${truncated.length} chars`)
+        logger.info('search tool succeeded', { durationMs: result.durationMs, resultChars: truncated.length })
 
         // Store in session memory
         if (ctx.sessionId) {
@@ -646,8 +660,7 @@ Use BEFORE execute to learn endpoint schemas for CREATE/UPDATE. Skip for common 
           _memoryContext: memoryContext,
         }
       },
-    },
-    { moduleId: 'codemode' }
+    }
   )
 }
 
@@ -659,9 +672,15 @@ function registerExecuteTool(commonTypes: string): void {
     ? `\n\n${commonTypes}`
     : ''
 
-  registerMcpTool(
+  registerCodeModeTool(
     {
       name: 'execute',
+      // api.request() reaches every documented endpoint, including POST/PUT/DELETE,
+      // so the tool is neither read-only nor guaranteed non-destructive. It is
+      // intentionally exempt from prepareMutation: arbitrary sandbox code cannot
+      // provide the structured before/after preview that approval flow requires.
+      isMutation: true,
+      isDestructive: true,
       description: `Make API calls. Returns JSON.
 Globals: api.request({ method, path, query?, body? }) → { success, statusCode, data }, context { tenantId, organizationId, userId }.
 RULES: For FIND/LIST → GET only (1 call). For UPDATE → PUT to collection path with id in BODY. NEVER PUT/POST/DELETE unless user explicitly asked to change data. Before ANY write operation (POST/PUT/DELETE), you MUST use the AskUserQuestion tool to get explicit user confirmation. Do NOT just ask in text — use the tool so execution pauses until the user responds.${typesBlock}`,
@@ -674,14 +693,13 @@ RULES: For FIND/LIST → GET only (1 call). For UPDATE → PUT to collection pat
       }),
       requiredFeatures: [...CODE_MODE_REQUIRED_FEATURES],
       handler: async (input: { code: string }, ctx: McpToolContext) => {
-        const codePreview = input.code.slice(0, 120).replace(/\n/g, ' ')
-        console.error(`[AI Usage] execute: code="${codePreview}${input.code.length > 120 ? '...' : ''}" user=${ctx.userId || 'unknown'}`)
+        logger.debug('execute tool invoked', { codeChars: input.code.length, userId: ctx.userId || 'unknown' })
 
         // Enforce tool call limit
         if (ctx.sessionId) {
           const { count, exceeded } = incrementToolCallCount(ctx.sessionId)
           if (exceeded) {
-            console.error(`[AI Usage] execute: TOOL CALL LIMIT EXCEEDED (count=${count})`)
+            logger.warn('execute tool call limit exceeded', { count })
             return {
               success: false,
               error: 'Tool call limit exceeded. Summarize what you know and respond to the user.',
@@ -723,7 +741,7 @@ RULES: For FIND/LIST → GET only (1 call). For UPDATE → PUT to collection pat
         const result = await sandbox.execute(input.code)
 
         if (result.error) {
-          console.error(`[AI Usage] execute: ERROR in ${result.durationMs}ms — apiCalls=${apiCallCount} — ${result.error}`)
+          logger.info('execute tool errored', { durationMs: result.durationMs, apiCalls: apiCallCount, err: result.error })
           return {
             success: false,
             error: result.error,
@@ -734,7 +752,7 @@ RULES: For FIND/LIST → GET only (1 call). For UPDATE → PUT to collection pat
         }
 
         const truncated = truncateResult(result.result)
-        console.error(`[AI Usage] execute: OK in ${result.durationMs}ms — apiCalls=${apiCallCount} — ${truncated.length} chars`)
+        logger.info('execute tool succeeded', { durationMs: result.durationMs, apiCalls: apiCallCount, resultChars: truncated.length })
 
         const memoryContext = ctx.sessionId ? buildMemoryContext(ctx.sessionId) : undefined
         return {
@@ -746,8 +764,7 @@ RULES: For FIND/LIST → GET only (1 call). For UPDATE → PUT to collection pat
           _memoryContext: memoryContext,
         }
       },
-    },
-    { moduleId: 'codemode' }
+    }
   )
 }
 
@@ -779,9 +796,7 @@ export function createApiRequestFn(
 
     if (!authorization.allowed) {
       const callDuration = Date.now() - callStart
-      console.error(
-        `[AI Usage] api.request: ${normalizedMethod} ${apiPath} → ${authorization.statusCode} in ${callDuration}ms (blocked by Code Mode RBAC)`
-      )
+      logger.warn('api.request blocked by Code Mode RBAC', { method: normalizedMethod, path: apiPath, statusCode: authorization.statusCode, durationMs: callDuration })
       return {
         success: false,
         statusCode: authorization.statusCode,
@@ -792,25 +807,19 @@ export function createApiRequestFn(
 
     let url = `${baseUrl}${apiPath}`
 
-    // Build query parameters
-    const queryParams: Record<string, string> = { ...query }
-
-    if (normalizedMethod === 'GET') {
-      if (ctx.tenantId) queryParams.tenantId = ctx.tenantId
-      if (ctx.organizationId) queryParams.organizationId = ctx.organizationId
-    }
+    // Build query parameters — scope is enforced from ctx for every method, not only
+    // GET, so AI-supplied tenantId/organizationId can never survive (see scope-injection).
+    const queryParams = applyContextScopeToQuery(query, ctx)
 
     if (Object.keys(queryParams).length > 0) {
       const separator = url.includes('?') ? '&' : '?'
       url += separator + new URLSearchParams(queryParams).toString()
     }
 
-    // Build request body with context injection
+    // Build request body with context-enforced scope
     let requestBody: Record<string, unknown> | undefined
     if (['POST', 'PUT', 'PATCH'].includes(normalizedMethod)) {
-      requestBody = { ...body }
-      if (ctx.tenantId) requestBody.tenantId = ctx.tenantId
-      if (ctx.organizationId) requestBody.organizationId = ctx.organizationId
+      requestBody = applyContextScopeToBody(body, ctx)
     }
 
     // Build headers
@@ -834,7 +843,7 @@ export function createApiRequestFn(
     const callDuration = Date.now() - callStart
 
     if (!response.ok) {
-      console.error(`[AI Usage] api.request: ${normalizedMethod} ${apiPath} → ${response.status} in ${callDuration}ms`)
+      logger.debug('api.request completed with error status', { method: normalizedMethod, path: apiPath, status: response.status, durationMs: callDuration })
 
       // Format 400 validation errors into a clear fix instruction for the LLM
       if (response.status === 400) {
@@ -853,7 +862,7 @@ export function createApiRequestFn(
       }
     }
 
-    console.error(`[AI Usage] api.request: ${normalizedMethod} ${apiPath} → ${response.status} in ${callDuration}ms (${responseText.length} bytes)`)
+    logger.debug('api.request completed', { method: normalizedMethod, path: apiPath, status: response.status, durationMs: callDuration, bytes: responseText.length })
 
     // Add mutation warning for non-GET calls
     if (!['GET', 'HEAD', 'OPTIONS'].includes(normalizedMethod)) {

@@ -13,6 +13,7 @@ import {
   getOrCreateThreadToken,
 } from '../lib/thread-token'
 import { stringOrUndefined, stripBrackets } from '../lib/email-mime'
+import { resolveOutboundReplyExternalId, stripCallerReplyTargeting } from '../lib/outbound-reply-ref'
 import type { ChannelAdapterRegistry } from '../lib/registry'
 import { isUniqueViolation } from '../lib/pg-errors'
 import { Message } from '../../messages/data/entities'
@@ -22,6 +23,9 @@ import {
   ExternalMessage,
   MessageChannelLink,
 } from '../data/entities'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+
+const moduleLogger = createLogger('communication_channels').child({ component: 'deliver-outbound-message' })
 
 /**
  * Sentinel — `Message.threadId` of an internal-only (no channel link) message
@@ -279,9 +283,17 @@ const deliverOutboundMessageCommand: CommandHandler<
     // Per-user credentials scope: pass `channel.userId` so the credentials
     // service returns this user's row, not whoever connected last. See
     // review R2-C1 / N1 (2026-05-26).
+    //
+    // Key the org on the CHANNEL's own org, not the message's org. Tenant-wide
+    // channels store `organization_id = NULL` and their credentials live at
+    // `organization_id = tenantId` (see connect-credential-channel.ts), so
+    // `channel.organizationId ?? tenantId` matches the write key for both
+    // org-scoped and tenant-wide channels. Keying on the message org would
+    // resolve `{}` the moment a tenant-wide provider delivers from a message
+    // that carries a non-null org.
     const credentialsScope = {
       tenantId: input.scope.tenantId,
-      organizationId: input.scope.organizationId ?? input.scope.tenantId,
+      organizationId: channel.organizationId ?? input.scope.tenantId,
       userId: channel.userId ?? null,
     }
     let credentials: Record<string, unknown> = {}
@@ -311,7 +323,7 @@ const deliverOutboundMessageCommand: CommandHandler<
       },
       {
         credentialsService,
-        logger: (...args) => console.warn(...args),
+        logger: (...args) => moduleLogger.warn('credential refresh diagnostic', { details: args }),
       },
     )
     credentials = refreshResult.credentials
@@ -334,10 +346,42 @@ const deliverOutboundMessageCommand: CommandHandler<
       // Token creation should never block a send — if it fails, the message
       // still goes out, just without our thread-token attachment point.
       // Threading falls back to the JWZ strategy via Message-Id headers.
-      console.warn(
-        '[communication_channels:deliver-outbound] thread token unavailable, proceeding without it:',
-        tokenErr instanceof Error ? tokenErr.message : tokenErr,
-      )
+      moduleLogger.warn('thread token unavailable, proceeding without it', { err: tokenErr })
+    }
+
+    // (4c) Chat-provider reply threading — resolve the provider-native id of the
+    // message this one answers so a threading adapter can attach it (Discord's
+    // `message_reference`). Email adapters ignore this and keep threading on the
+    // `inReplyTo` / `references` headers built above. Best-effort like the thread
+    // token: an unresolvable parent sends an unthreaded reply rather than failing
+    // a delivery.
+    let replyToExternalId: string | null = null
+    try {
+      replyToExternalId = await resolveOutboundReplyExternalId(em, {
+        parentMessageId: message.parentMessageId ?? null,
+        externalConversationId: mapping.externalConversationId,
+        capabilities: adapter.capabilities,
+        scope: {
+          tenantId: input.scope.tenantId,
+          organizationId: input.scope.organizationId ?? null,
+        },
+      })
+    } catch (replyRefErr) {
+      moduleLogger.warn('outbound reply reference unavailable, sending unthreaded', {
+        err: replyRefErr,
+      })
+    }
+    if (!replyToExternalId && message.parentMessageId && adapter.capabilities?.threading === true) {
+      // The provider threads and the caller asked for a reply, yet nothing
+      // resolved — the parent never reached this channel, or it belongs to
+      // another conversation. Delivery is unaffected, but say so: an unthreaded
+      // reply is otherwise indistinguishable from a non-reply, which is exactly
+      // the silent-unreachability shape #5541 was filed about.
+      moduleLogger.debug('reply parent has no external id on this channel, sending unthreaded', {
+        messageId: message.id,
+        parentMessageId: message.parentMessageId,
+        conversationId: mapping.externalConversationId,
+      })
     }
 
     // (5) + (6) Convert + send.
@@ -384,9 +428,17 @@ const deliverOutboundMessageCommand: CommandHandler<
         bodyFormat: outboundBodyFormat,
         channelMetadata: {
           thread_id: mapping.externalThreadRef,
-          ...baseMetadata,
+          // Reply targeting is hub-resolved only. `send-as-user` merges
+          // caller-supplied metadata onto the link, so every reply-targeting key
+          // is stripped off the stored metadata here rather than merely
+          // out-ranked below: merge order settles the contest only when the hub
+          // resolved a parent, and the uncontested case — no `parentMessageId`,
+          // or a parent that does not resolve — is exactly the one a caller
+          // controls.
+          ...stripCallerReplyTargeting(baseMetadata),
           references: mergedReferences,
           ...(threadToken ? { omThreadToken: threadToken } : {}),
+          ...(replyToExternalId ? { replyToExternalId } : {}),
         },
       })
 
@@ -406,7 +458,7 @@ const deliverOutboundMessageCommand: CommandHandler<
         credentials,
         scope: {
           tenantId: input.scope.tenantId,
-          organizationId: input.scope.organizationId ?? input.scope.tenantId,
+          organizationId: channel.organizationId ?? input.scope.tenantId,
         },
         metadata: converted.metadata,
       })

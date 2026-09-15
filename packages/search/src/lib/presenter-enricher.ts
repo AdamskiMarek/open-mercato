@@ -11,17 +11,17 @@ import type { QueryEngine } from '@open-mercato/shared/lib/query/types'
 import type { EntityId } from '@open-mercato/shared/modules/entities'
 import type { TenantDataEncryptionService } from '@open-mercato/shared/lib/encryption/tenantDataEncryptionService'
 import { decryptIndexDocForSearch } from '@open-mercato/shared/lib/encryption/indexDoc'
+import { createLogger } from '@open-mercato/shared/lib/logger'
 import { extractFallbackPresenter } from './fallback-presenter'
 import { needsSearchResultEnrichment } from './search-result-enrichment'
 
 /** Maximum number of record IDs per batch query to avoid hitting DB parameter limits */
 const BATCH_SIZE = 500
 
-/** Logger for debugging - uses console.warn to surface issues without breaking flow */
+/** Diagnostic logger - surfaces issues without breaking flow, gated by OM_LOG_LEVEL=debug */
+const enricherLogger = createLogger('search').child({ component: 'presenter-enricher' })
 const logWarning = (message: string, context?: Record<string, unknown>) => {
-  if (process.env.NODE_ENV === 'development' || process.env.DEBUG_SEARCH_ENRICHER) {
-    console.warn(`[search:presenter-enricher] ${message}`, context ?? '')
-  }
+  enricherLogger.debug(message, context)
 }
 
 /**
@@ -104,6 +104,95 @@ type EnrichmentResult = {
   links?: SearchResultLink[]
 }
 
+function primaryNavigationHref(result: SearchResult): string | null {
+  if (typeof result.url === 'string' && result.url.trim().length > 0) {
+    return result.url.trim()
+  }
+  const primaryLink = result.links?.find((link) => link.kind === 'primary' && link.href.trim().length > 0)
+  return primaryLink?.href.trim() ?? null
+}
+
+function directNavigationRecordId(href: string): string | null {
+  try {
+    const url = new URL(href, 'http://search.local')
+    if (url.search || url.hash) return null
+    const segments = url.pathname.split('/').filter(Boolean)
+    const lastSegment = segments.at(-1)
+    return lastSegment ? decodeURIComponent(lastSegment) : null
+  } catch {
+    return null
+  }
+}
+
+function presenterTitle(result: SearchResult): string | null {
+  const title = result.presenter?.title?.trim()
+  return title?.length ? title : null
+}
+
+function resultScopeKey(result: SearchResult, recordId: string): string {
+  return `${result.organizationId ?? ''}:${recordId}`
+}
+
+function mergeResultMetadata(
+  targetMetadata: SearchResult['metadata'],
+  linkedMetadata: SearchResult['metadata'],
+): SearchResult['metadata'] {
+  if (!targetMetadata && !linkedMetadata) return undefined
+  return {
+    ...targetMetadata,
+    ...linkedMetadata,
+  }
+}
+
+function mergeLinkedDuplicateResults(results: SearchResult[]): SearchResult[] {
+  const indexesByRecord = new Map<string, number[]>()
+  for (let index = 0; index < results.length; index += 1) {
+    const result = results[index]
+    const key = resultScopeKey(result, result.recordId)
+    const indexes = indexesByRecord.get(key) ?? []
+    indexes.push(index)
+    indexesByRecord.set(key, indexes)
+  }
+
+  const replacements = new Map<number, SearchResult>()
+  const removedIndexes = new Set<number>()
+
+  for (let index = 0; index < results.length; index += 1) {
+    const linkedResult = results[index]
+    const href = primaryNavigationHref(linkedResult)
+    const targetRecordId = href ? directNavigationRecordId(href) : null
+    if (!targetRecordId || targetRecordId === linkedResult.recordId) continue
+
+    const targetIndexes = (indexesByRecord.get(resultScopeKey(linkedResult, targetRecordId)) ?? [])
+      .filter((candidateIndex) => candidateIndex !== index && !removedIndexes.has(candidateIndex))
+    if (targetIndexes.length !== 1) continue
+
+    const targetIndex = targetIndexes[0]
+    const targetResult = replacements.get(targetIndex) ?? results[targetIndex]
+    if (primaryNavigationHref(targetResult)) continue
+
+    const linkedTitle = presenterTitle(linkedResult)
+    const targetTitle = presenterTitle(targetResult)
+    if (!linkedTitle || linkedTitle !== targetTitle) continue
+
+    replacements.set(targetIndex, {
+      ...targetResult,
+      score: Math.max(targetResult.score, linkedResult.score),
+      source: linkedResult.score > targetResult.score ? linkedResult.source : targetResult.source,
+      presenter: linkedResult.presenter ?? targetResult.presenter,
+      url: linkedResult.url ?? targetResult.url,
+      links: linkedResult.links ?? targetResult.links,
+      metadata: mergeResultMetadata(targetResult.metadata, linkedResult.metadata),
+    })
+    removedIndexes.add(index)
+  }
+
+  return results
+    .map((result, index) => replacements.get(index) ?? result)
+    .filter((_, index) => !removedIndexes.has(index))
+    .sort((left, right) => right.score - left.score)
+}
+
 /**
  * Compute presenter, URL, and links for a single doc using config or fallback.
  * Returns presenter (null if cannot be computed), and optionally URL/links from config.
@@ -137,23 +226,22 @@ async function computePresenterAndLinks(
     queryEngine,
   }
 
-  // If search.ts config exists, use formatResult/buildSource for presenter
   if (config?.formatResult || config?.buildSource) {
-    if (config.buildSource) {
+    if (config.formatResult) {
+      try {
+        presenter = (await config.formatResult(buildContext)) ?? null
+      } catch (err) {
+        logWarning('formatResult failed', { entityId, recordId, err })
+      }
+    }
+
+    if (!presenter && config.buildSource) {
       try {
         const source = await config.buildSource(buildContext)
         if (source?.presenter) presenter = source.presenter
         if (source?.links) links = source.links
       } catch (err) {
-        logWarning(`buildSource failed for ${entityId}:${recordId}`, { error: String(err) })
-      }
-    }
-
-    if (!presenter && config.formatResult) {
-      try {
-        presenter = (await config.formatResult(buildContext)) ?? null
-      } catch (err) {
-        logWarning(`formatResult failed for ${entityId}:${recordId}`, { error: String(err) })
+        logWarning('buildSource failed', { entityId, recordId, err })
       }
     }
   }
@@ -203,8 +291,10 @@ export function createPresenterEnricher(
   encryptionService?: TenantDataEncryptionService | null,
 ): PresenterEnricherFn {
   return async (results, tenantId, organizationId) => {
-    // Find results missing presenter OR with encrypted presenter
-    const missingResults = results.filter(needsSearchResultEnrichment)
+    const shouldEnrich = (result: SearchResult): boolean =>
+      needsSearchResultEnrichment(result) || entityConfigMap.has(result.entityId as EntityId)
+
+    const missingResults = results.filter(shouldEnrich)
     if (missingResults.length === 0) return results
 
     // Group by entity type for config lookup
@@ -239,7 +329,7 @@ export function createPresenterEnricher(
           )
           return { ...row, doc: decryptedDoc }
         } catch (err) {
-          logWarning(`Failed to decrypt doc for ${row.entity_type}:${row.entity_id}`, { error: String(err) })
+          logWarning('Failed to decrypt doc', { entityId: row.entity_type, recordId: row.entity_id, err })
           return row // Return original doc if decryption fails
         }
       }),
@@ -257,7 +347,7 @@ export function createPresenterEnricher(
       const doc = docMap.get(key)
 
       if (!doc) {
-        logWarning(`Doc not found in entity_indexes`, { entityId: result.entityId, recordId: result.recordId })
+        logWarning('Doc not found in entity_indexes', { entityId: result.entityId, recordId: result.recordId })
         return { key, presenter: null, url: undefined, links: undefined }
       }
 
@@ -284,18 +374,19 @@ export function createPresenterEnricher(
     }
 
     // Enrich results with computed presenter, URL, and links
-    return results.map((result) => {
-      if (!needsSearchResultEnrichment(result)) return result
+    const enrichedResults = results.map((result) => {
+      if (!shouldEnrich(result)) return result
       const key = `${result.entityId}:${result.recordId}`
       const enriched = enrichmentMap.get(key)
       if (!enriched) return result
-      const hasExistingLinks = Array.isArray(result.links) && result.links.length > 0
       return {
         ...result,
         presenter: enriched.presenter ?? result.presenter,
         url: result.url ?? enriched.url,
-        links: hasExistingLinks ? result.links : (enriched.links ?? result.links),
+        links: enriched.links ?? result.links,
       }
     })
+
+    return mergeLinkedDuplicateResults(enrichedResults)
   }
 }

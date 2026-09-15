@@ -7,7 +7,7 @@ import { setCustomFieldsIfAny } from '@open-mercato/shared/lib/commands/helpers'
 import { resolveRedoSnapshot } from '@open-mercato/shared/lib/commands/redo'
 import { loadCustomFieldValues } from '@open-mercato/shared/lib/crud/custom-fields'
 import { CrudHttpError } from '@open-mercato/shared/lib/crud/errors'
-import { enforceCommandOptimisticLock } from '@open-mercato/shared/lib/crud/optimistic-lock-command'
+import { enforceCommandOptimisticLockWithGuards } from '@open-mercato/shared/lib/crud/optimistic-lock-command'
 import { findOneWithDecryption } from '@open-mercato/shared/lib/encryption/find'
 import { resolveTranslations } from '@open-mercato/shared/lib/i18n/server'
 import { CheckoutLink, CheckoutLinkTemplate, CheckoutTransaction } from '../data/entities'
@@ -289,7 +289,7 @@ const updateLinkCommand: CommandHandler<Record<string, unknown>, { ok: true; slu
       deletedAt: null,
     }, undefined, scope)
     if (!link) throw new CrudHttpError(404, { error: 'Link not found' })
-    enforceCommandOptimisticLock({
+    await enforceCommandOptimisticLockWithGuards(ctx.container, {
       resourceKind: 'checkout.link',
       resourceId: link.id,
       current: link.updatedAt ?? null,
@@ -441,7 +441,7 @@ const deleteLinkCommand: CommandHandler<Record<string, unknown>, { ok: true }> =
       deletedAt: null,
     }, undefined, scope)
     if (!link) throw new CrudHttpError(404, { error: 'Link not found' })
-    enforceCommandOptimisticLock({
+    await enforceCommandOptimisticLockWithGuards(ctx.container, {
       resourceKind: 'checkout.link',
       resourceId: link.id,
       current: link.updatedAt ?? null,
@@ -520,5 +520,9 @@ registerCommand(updateLinkCommand)
 registerCommand(deleteLinkCommand)
 
 export function serializeLinkRecord(record: CheckoutLink) {
-  return serializeTemplateOrLink(record)
+  // completionCount is link-only state (templates have no completions), so it is
+  // added here rather than in the shared template/link serializer. It is the
+  // observable proof that a terminal transaction was applied exactly once, which
+  // TC-CHKT-043 asserts and could not previously read from any API.
+  return { ...serializeTemplateOrLink(record), completionCount: record.completionCount ?? 0 }
 }

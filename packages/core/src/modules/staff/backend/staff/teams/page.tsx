@@ -3,7 +3,8 @@
 import * as React from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import type { ColumnDef, SortingState } from '@tanstack/react-table'
+import type { LegacyColumnDef as ColumnDef } from '@tanstack/react-table/legacy'
+import type { SortingState } from '@tanstack/react-table'
 import { Page, PageBody } from '@open-mercato/ui/backend/Page'
 import { DataTable, withDataTableNamespaces } from '@open-mercato/ui/backend/DataTable'
 import { RowActions } from '@open-mercato/ui/backend/RowActions'
@@ -21,6 +22,9 @@ import { useOrganizationScopeVersion } from '@open-mercato/shared/lib/frontend/u
 import { useT } from '@open-mercato/shared/lib/i18n/context'
 import { Users } from 'lucide-react'
 import { formatDateTime } from '@open-mercato/shared/lib/time'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+
+const logger = createLogger('staff')
 
 const PAGE_SIZE = 50
 
@@ -37,6 +41,7 @@ type TeamsResponse = {
   items?: Array<Record<string, unknown>>
   total?: number
   totalPages?: number
+  totalIsCapped?: boolean
 }
 
 export default function StaffTeamsPage() {
@@ -48,6 +53,7 @@ export default function StaffTeamsPage() {
   const [page, setPage] = React.useState(1)
   const [total, setTotal] = React.useState(0)
   const [totalPages, setTotalPages] = React.useState(1)
+  const [totalIsCapped, setTotalIsCapped] = React.useState(false)
   const [sorting, setSorting] = React.useState<SortingState>([{ id: 'name', desc: false }])
   const [search, setSearch] = React.useState('')
   const [isLoading, setIsLoading] = React.useState(true)
@@ -172,8 +178,9 @@ export default function StaffTeamsPage() {
       setRows(items.map(mapApiTeam))
       setTotal(typeof payload.total === 'number' ? payload.total : items.length)
       setTotalPages(typeof payload.totalPages === 'number' ? payload.totalPages : Math.max(1, Math.ceil(items.length / PAGE_SIZE)))
+      setTotalIsCapped(payload?.totalIsCapped === true)
     } catch (error) {
-      console.error('staff.teams.list', error)
+      logger.error('staff.teams.list', { err: error })
       flash(labels.errors.load, 'error')
     } finally {
       setIsLoading(false)
@@ -214,7 +221,7 @@ export default function StaffTeamsPage() {
       handleRefresh()
     } catch (error) {
       if (surfaceRecordConflict(error, t)) { handleRefresh(); return }
-      console.error('staff.teams.delete', error)
+      logger.error('staff.teams.delete', { err: error })
       flash(labels.errors.delete, 'error')
     }
   }, [confirm, handleRefresh, labels.actions.deleteConfirm, labels.actions.delete, labels.errors.delete, labels.errors.deleteAssigned, labels.messages.deleted, t])
@@ -223,7 +230,8 @@ export default function StaffTeamsPage() {
     <Page>
       <PageBody>
         <DataTable<TeamRow>
-          title={labels.title}
+        title={labels.title}
+        titleHeadingLevel={1}
           data={rows}
           columns={columns}
           isLoading={isLoading}
@@ -257,6 +265,7 @@ export default function StaffTeamsPage() {
             pageSize: PAGE_SIZE,
             total,
             totalPages,
+            totalIsCapped,
             onPageChange: setPage,
           }}
           rowActions={(row) => (

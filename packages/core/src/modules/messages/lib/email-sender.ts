@@ -12,9 +12,11 @@ import MessageEmail from '../emails/MessageEmail'
 import { resolveAttachmentAbsolutePath } from '../../attachments/lib/storage'
 import { generateAuthToken, hashAuthToken } from '../../auth/lib/tokenHash'
 import type { MessageEmailAttachment } from './attachments'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+
+const logger = createLogger('messages').child({ component: 'email-sender' })
 
 const ACCESS_TOKEN_EXPIRY_HOURS = 24 * 7
-const DEBUG = process.env.MESSAGES_EMAIL_DEBUG === 'true'
 const MAX_EMAIL_ATTACHMENTS = 10
 const MAX_TOTAL_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
@@ -24,12 +26,7 @@ export type SenderIdentity = {
 }
 
 function logDebug(message: string, details?: Record<string, unknown>) {
-  if (!DEBUG) return
-  if (details) {
-    console.log(`[messages:email-sender] ${message}`, details)
-    return
-  }
-  console.log(`[messages:email-sender] ${message}`)
+  logger.debug(message, details)
 }
 
 function resolveAppUrl(): string | null {
@@ -50,7 +47,7 @@ function resolveObjectLabels(objects: MessageObject[]): string[] {
   return objects.map((item) => `${item.entityModule}.${item.entityType} (${item.entityId})`)
 }
 
-type ResendAttachment = {
+type EmailAttachment = {
   filename: string
   content: string
   contentType?: string
@@ -59,8 +56,8 @@ type ResendAttachment = {
 async function mapAttachmentsForEmail(
   messageId: string,
   attachments: MessageEmailAttachment[],
-): Promise<ResendAttachment[]> {
-  const resendAttachments: ResendAttachment[] = []
+): Promise<EmailAttachment[]> {
+  const emailAttachments: EmailAttachment[] = []
   let totalBytes = 0
 
   for (const attachment of attachments.slice(0, MAX_EMAIL_ATTACHMENTS)) {
@@ -92,14 +89,14 @@ async function mapAttachmentsForEmail(
     }
 
     totalBytes += buffer.length
-    resendAttachments.push({
+    emailAttachments.push({
       filename: attachment.fileName,
       content: buffer.toString('base64'),
       contentType: attachment.mimeType || undefined,
     })
   }
 
-  return resendAttachments
+  return emailAttachments
 }
 
 async function renderMarkdownEmailBody(body: string) {
@@ -181,14 +178,13 @@ export async function sendMessageEmailToRecipient(params: {
   }
   const copy = await buildEmailCopy(message.sentAt ?? new Date())
   const bodyHtml = await buildEmailBodyHtml(message)
-  const resendAttachments = await mapAttachmentsForEmail(message.id, attachments)
-  logDebug('Sending recipient email via Resend', {
+  const emailAttachments = await mapAttachmentsForEmail(message.id, attachments)
+  logDebug('Sending recipient email', {
     messageId: message.id,
     recipientUserId,
     recipientEmail,
     hasViewUrl: Boolean(viewUrl),
-    attachmentsCount: resendAttachments.length,
-    hasApiKey: Boolean(process.env.RESEND_API_KEY),
+    attachmentsCount: emailAttachments.length,
     from: resolveDefaultEmailFromAddress() ?? null,
   })
 
@@ -206,7 +202,9 @@ export async function sendMessageEmailToRecipient(params: {
       attachmentNames: attachments.map((item) => item.fileName),
       objectLabels: resolveObjectLabels(objects),
     }),
-    attachments: resendAttachments,
+    attachments: emailAttachments,
+    tenantId: message.tenantId,
+    organizationId: message.organizationId ?? null,
   })
 }
 
@@ -220,12 +218,11 @@ export async function sendMessageEmailToExternal(params: {
   const { message, email, sender, objects, attachments } = params
   const copy = await buildEmailCopy(message.sentAt ?? new Date())
   const bodyHtml = await buildEmailBodyHtml(message)
-  const resendAttachments = await mapAttachmentsForEmail(message.id, attachments)
-  logDebug('Sending external email via Resend', {
+  const emailAttachments = await mapAttachmentsForEmail(message.id, attachments)
+  logDebug('Sending external email', {
     messageId: message.id,
     email,
-    attachmentsCount: resendAttachments.length,
-    hasApiKey: Boolean(process.env.RESEND_API_KEY),
+    attachmentsCount: emailAttachments.length,
     from: resolveDefaultEmailFromAddress() ?? null,
   })
 
@@ -243,9 +240,11 @@ export async function sendMessageEmailToExternal(params: {
       attachmentNames: attachments.map((item) => item.fileName),
       objectLabels: resolveObjectLabels(objects),
     }),
-    attachments: resendAttachments,
+    attachments: emailAttachments,
+    tenantId: message.tenantId,
+    organizationId: message.organizationId ?? null,
   })
-  logDebug('External email sent via Resend', {
+  logDebug('External email sent', {
     messageId: message.id,
     email,
   })

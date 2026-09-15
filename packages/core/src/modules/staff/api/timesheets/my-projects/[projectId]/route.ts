@@ -12,10 +12,14 @@ import type { OpenApiRouteDoc } from '@open-mercato/shared/lib/openapi'
 import { StaffTimeProjectMember, StaffTeamMember } from '../../../../data/entities'
 import { staffMyProjectVisibilityUpdateSchema } from '../../../../data/validators'
 import {
-  resolveUserFeatures,
+  STAFF_TIME_TRACKING_RESOURCE_KINDS,
   runStaffMutationGuardAfterSuccess,
   runStaffMutationGuards,
 } from '../../../guards'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+import { runTimesheetInterceptors } from '../../_shared/withTimesheetInterceptors'
+
+const logger = createLogger('staff')
 
 export const metadata = {
   PATCH: { requireAuth: true, requireFeatures: ['staff.timesheets.manage_own'] },
@@ -66,8 +70,16 @@ export async function PATCH(req: Request) {
       })
     }
 
-    const rawBody = await readJsonSafe(req, {})
-    const parsed = staffMyProjectVisibilityUpdateSchema.safeParse(rawBody)
+    const interceptors = await runTimesheetInterceptors({
+      request: req,
+      method: 'PATCH',
+      scope: { container, userId: auth.sub, tenantId, organizationId },
+      body: await readJsonSafe<Record<string, unknown>>(req, {}),
+    })
+    if (!interceptors.ok) return interceptors.response
+    const { session } = interceptors
+
+    const parsed = staffMyProjectVisibilityUpdateSchema.safeParse(session.body)
     if (!parsed.success) {
       throw new CrudHttpError(400, {
         error: translate('staff.timesheets.errors.invalidBody', 'Invalid request body.'),
@@ -117,14 +129,13 @@ export async function PATCH(req: Request) {
         tenantId,
         organizationId,
         userId: auth.sub ?? '',
-        resourceKind: 'staff.timesheets.time_project_member',
+        resourceKind: STAFF_TIME_TRACKING_RESOURCE_KINDS.timeProjectMember,
         resourceId: membership.id,
         operation: 'update',
         requestMethod: req.method,
         requestHeaders: req.headers,
         mutationPayload: parsed.data as unknown as Record<string, unknown>,
       },
-      resolveUserFeatures(auth),
     )
     if (!guardResult.ok) {
       return NextResponse.json(
@@ -141,7 +152,7 @@ export async function PATCH(req: Request) {
         tenantId,
         organizationId,
         userId: auth.sub ?? '',
-        resourceKind: 'staff.timesheets.time_project_member',
+        resourceKind: STAFF_TIME_TRACKING_RESOURCE_KINDS.timeProjectMember,
         resourceId: membership.id,
         operation: 'update',
         requestMethod: req.method,
@@ -149,12 +160,12 @@ export async function PATCH(req: Request) {
       })
     }
 
-    return NextResponse.json({ ok: true, showInGrid: membership.showInGrid }, { status: 200 })
+    return session.respond(200, { ok: true, showInGrid: membership.showInGrid })
   } catch (err) {
     if (err instanceof CrudHttpError) {
       return NextResponse.json(err.body, { status: err.status })
     }
-    console.error('staff.timesheets.my-projects.patch failed', err)
+    logger.error('staff.timesheets.my-projects.patch failed', { err })
     const { translate } = await resolveTranslations()
     return NextResponse.json(
       { error: translate('staff.timesheets.errors.updateMyProject', 'Failed to update project visibility.') },
