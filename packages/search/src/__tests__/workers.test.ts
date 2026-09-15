@@ -1,8 +1,24 @@
+import { createLogger } from '@open-mercato/shared/lib/logger'
 import { QueuedJob, JobContext } from '@open-mercato/queue'
 import { VectorIndexJobPayload } from '../queue/vector-indexing'
 import { FulltextIndexJobPayload } from '../queue/fulltext-indexing'
 
 type HandlerContext = { resolve: <T = unknown>(name: string) => T }
+
+jest.mock('@open-mercato/shared/lib/logger', () => {
+  const mocked = {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    child: jest.fn(),
+  }
+  mocked.child.mockImplementation(() => mocked)
+  return { createLogger: jest.fn(() => mocked) }
+})
+
+
+const searchLoggerWarn = createLogger('search').warn as jest.Mock
 
 // Mock dependencies before importing workers
 jest.mock('@open-mercato/shared/lib/indexers/error-log', () => ({
@@ -221,7 +237,7 @@ describe('Vector Index Worker', () => {
   it('should skip a batch with one warning when the dimension mismatches (no per-record indexing)', async () => {
     mockTableDimension = 768
     mockEmbeddingService.dimension = 1536
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    searchLoggerWarn.mockClear()
     const job = createMockJob<VectorIndexJobPayload>({
       jobType: 'batch-index',
       tenantId: 'tenant-123',
@@ -236,9 +252,8 @@ describe('Vector Index Worker', () => {
 
     expect(mockSearchIndexer.indexRecordById).not.toHaveBeenCalled()
     expect(mockEmbeddingService.createEmbedding).not.toHaveBeenCalled()
-    expect(warnSpy).toHaveBeenCalledTimes(1)
-    expect(String(warnSpy.mock.calls[0][0])).toContain('Skipping vector batch')
-    warnSpy.mockRestore()
+    expect(searchLoggerWarn).toHaveBeenCalledTimes(1)
+    expect(String(searchLoggerWarn.mock.calls[0][0])).toContain('Skipping vector batch')
   })
 
   it('should skip a batch with one warning when the provider probe is unreachable', async () => {
@@ -247,7 +262,7 @@ describe('Vector Index Worker', () => {
     mockEmbeddingService.createEmbedding.mockRejectedValueOnce(
       new Error('fetch failed. Check OLLAMA_BASE_URL.'),
     )
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    searchLoggerWarn.mockClear()
     const job = createMockJob<VectorIndexJobPayload>({
       jobType: 'batch-index',
       tenantId: 'tenant-123',
@@ -259,15 +274,14 @@ describe('Vector Index Worker', () => {
 
     expect(mockSearchIndexer.indexRecordById).not.toHaveBeenCalled()
     expect(mockEmbeddingService.createEmbedding).toHaveBeenCalledTimes(1)
-    expect(warnSpy).toHaveBeenCalledTimes(1)
-    expect(String(warnSpy.mock.calls[0][0])).toContain('Skipping vector batch')
-    warnSpy.mockRestore()
+    expect(searchLoggerWarn).toHaveBeenCalledTimes(1)
+    expect(String(searchLoggerWarn.mock.calls[0][0])).toContain('Skipping vector batch')
   })
 
   it('should still advance reindex progress/lock when a batch is skipped (no stuck run)', async () => {
     mockTableDimension = 768
     mockEmbeddingService.dimension = 1536
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    searchLoggerWarn.mockClear()
     const mockDb = { kysely: true }
     const containerWithProgress: HandlerContext = {
       resolve: jest.fn((name: string) => {
@@ -298,7 +312,6 @@ describe('Vector Index Worker', () => {
       expect.objectContaining({ type: 'vector', tenantId: 'tenant-123', delta: 2 }),
     )
     expect(clearReindexLock).toHaveBeenCalledWith(mockDb, 'tenant-123', 'vector', 'org-456')
-    warnSpy.mockRestore()
   })
 
   it('counts handled-but-skipped batch records as processed so progress can complete', async () => {
@@ -373,7 +386,7 @@ describe('Vector Index Worker', () => {
   it('should skip a single-record index on dimension mismatch without indexing or embedding', async () => {
     mockTableDimension = 768
     mockEmbeddingService.dimension = 1536
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    searchLoggerWarn.mockClear()
     const job = createMockJob<VectorIndexJobPayload>({
       jobType: 'index',
       entityType: 'customers:customer_person_profile',
@@ -386,8 +399,7 @@ describe('Vector Index Worker', () => {
 
     expect(mockSearchIndexer.indexRecordById).not.toHaveBeenCalled()
     expect(mockEmbeddingService.createEmbedding).not.toHaveBeenCalled()
-    expect(warnSpy).toHaveBeenCalledTimes(1)
-    warnSpy.mockRestore()
+    expect(searchLoggerWarn).toHaveBeenCalledTimes(1)
   })
 
   it('should still delete a record even when the provider is misconfigured', async () => {
@@ -439,6 +451,7 @@ describe('Fulltext Index Worker', () => {
   const mockSearchIndexer = {
     getEntityConfig: jest.fn().mockReturnValue(null),
     indexRecordById: jest.fn().mockResolvedValue({ action: 'indexed', created: true }),
+    indexRecordsById: jest.fn().mockResolvedValue({ indexed: 0, skipped: 0 }),
   }
 
   const mockEm = {
@@ -459,6 +472,7 @@ describe('Fulltext Index Worker', () => {
     ;(hasActiveReindexProgress as jest.Mock).mockResolvedValue(true)
     mockFulltextStrategy.isAvailable.mockResolvedValue(true)
     mockSearchIndexer.indexRecordById.mockResolvedValue({ action: 'indexed', created: true })
+    mockSearchIndexer.indexRecordsById.mockResolvedValue({ indexed: 0, skipped: 0 })
   })
 
   it('should skip job with missing tenantId', async () => {
@@ -474,12 +488,13 @@ describe('Fulltext Index Worker', () => {
     expect(mockFulltextStrategy.bulkIndex).not.toHaveBeenCalled()
   })
 
-  it('should index records via searchIndexer when jobType is batch-index', async () => {
+  it('should index the whole batch in a single indexRecordsById call when jobType is batch-index', async () => {
     // Use minimal record format (just entityId + recordId)
     const records = [
       { entityId: 'test:entity', recordId: 'rec-1' },
       { entityId: 'test:entity', recordId: 'rec-2' },
     ]
+    mockSearchIndexer.indexRecordsById.mockResolvedValueOnce({ indexed: 2, skipped: 0 })
     const job = createMockJob<FulltextIndexJobPayload>({
       jobType: 'batch-index',
       tenantId: 'tenant-123',
@@ -489,26 +504,22 @@ describe('Fulltext Index Worker', () => {
 
     await handleFulltextIndexJob(job, ctx, mockContainer)
 
-    // Verify indexRecordById was called for each record
-    expect(mockSearchIndexer.indexRecordById).toHaveBeenCalledTimes(2)
-    expect(mockSearchIndexer.indexRecordById).toHaveBeenCalledWith({
-      entityId: 'test:entity',
-      recordId: 'rec-1',
+    // Verify the whole batch is written through exactly one indexRecordsById
+    // call, not one indexRecordById call per record.
+    expect(mockSearchIndexer.indexRecordsById).toHaveBeenCalledTimes(1)
+    expect(mockSearchIndexer.indexRecordsById).toHaveBeenCalledWith({
+      items: [
+        { entityId: 'test:entity', recordId: 'rec-1' },
+        { entityId: 'test:entity', recordId: 'rec-2' },
+      ],
       tenantId: 'tenant-123',
       organizationId: undefined,
     })
-    expect(mockSearchIndexer.indexRecordById).toHaveBeenCalledWith({
-      entityId: 'test:entity',
-      recordId: 'rec-2',
-      tenantId: 'tenant-123',
-      organizationId: undefined,
-    })
+    expect(mockSearchIndexer.indexRecordById).not.toHaveBeenCalled()
   })
 
   it('counts handled fulltext batch records as processed so progress can complete', async () => {
-    mockSearchIndexer.indexRecordById
-      .mockResolvedValueOnce({ action: 'skipped' })
-      .mockResolvedValueOnce({ action: 'skipped' })
+    mockSearchIndexer.indexRecordsById.mockResolvedValueOnce({ indexed: 0, skipped: 2 })
     const records = [
       { entityId: 'test:entity', recordId: 'rec-1' },
       { entityId: 'test:entity', recordId: 'rec-2' },
@@ -531,12 +542,42 @@ describe('Fulltext Index Worker', () => {
 
     await handleFulltextIndexJob(job, createMockJobContext(), containerWithProgress)
 
-    expect(mockSearchIndexer.indexRecordById).toHaveBeenCalledTimes(2)
+    expect(mockSearchIndexer.indexRecordsById).toHaveBeenCalledTimes(1)
     expect(updateReindexProgress).toHaveBeenCalledWith(mockDb, 'tenant-123', 'fulltext', 2, 'org-456')
     expect(incrementReindexProgress).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'fulltext', tenantId: 'tenant-123', delta: 2 }),
     )
     expect(clearReindexLock).toHaveBeenCalledWith(mockDb, 'tenant-123', 'fulltext', 'org-456')
+  })
+
+  it('re-throws a failed fulltext batch write without advancing reindex progress so the queue retries it', async () => {
+    mockSearchIndexer.indexRecordsById.mockRejectedValueOnce(new Error('meilisearch unavailable'))
+    const records = [
+      { entityId: 'test:entity', recordId: 'rec-1' },
+      { entityId: 'test:entity', recordId: 'rec-2' },
+    ]
+    const containerWithProgress: HandlerContext = {
+      resolve: jest.fn((name: string) => {
+        if (name === 'searchStrategies') return [mockFulltextStrategy]
+        if (name === 'em') return mockEm
+        if (name === 'searchIndexer') return mockSearchIndexer
+        if (name === 'progressService') return { id: 'progress' }
+        throw new Error(`Unknown service: ${name}`)
+      }) as HandlerContext['resolve'],
+    }
+    const job = createMockJob<FulltextIndexJobPayload>({
+      jobType: 'batch-index',
+      tenantId: 'tenant-123',
+      organizationId: 'org-456',
+      records,
+    })
+
+    await expect(
+      handleFulltextIndexJob(job, createMockJobContext(), containerWithProgress),
+    ).rejects.toThrow('meilisearch unavailable')
+
+    expect(updateReindexProgress).not.toHaveBeenCalled()
+    expect(incrementReindexProgress).not.toHaveBeenCalled()
   })
 
   it('clears an orphaned fulltext reindex lock instead of recreating it when no progress job is active', async () => {
@@ -560,7 +601,7 @@ describe('Fulltext Index Worker', () => {
 
     await handleFulltextIndexJob(job, createMockJobContext(), containerWithProgress)
 
-    expect(mockSearchIndexer.indexRecordById).toHaveBeenCalledTimes(1)
+    expect(mockSearchIndexer.indexRecordsById).toHaveBeenCalledTimes(1)
     expect(updateReindexProgress).not.toHaveBeenCalled()
     expect(incrementReindexProgress).not.toHaveBeenCalled()
     expect(clearReindexLock).toHaveBeenCalledWith(mockDb, 'tenant-123', 'fulltext', 'org-456')

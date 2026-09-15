@@ -14,7 +14,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import ts from 'typescript'
+import ts from 'typescript-js'
 import type { PackageResolver, ModuleEntry } from '../../resolver'
 import { generateModuleRegistry, generateModuleRegistryApp, generateModuleRegistryCli } from '../module-registry'
 import { generateModuleDi } from '../module-di'
@@ -186,6 +186,7 @@ function scaffoldFixture(): ModuleEntry[] {
   touchFile(pkgModulePath('orders', 'subscribers', 'on-created.ts'), "export const metadata = { event: 'orders.order.created', persistent: true }\nexport default async function handler() {}\n")
   touchFile(pkgModulePath('orders', 'subscribers', 'on-payment.ts'), "export const metadata = { event: 'payments.payment.completed', persistent: true }\nexport default async function handler() {}\n")
   touchFile(pkgModulePath('orders', 'workers', 'sync-job.ts'), "export const metadata = { queue: 'orders.sync', concurrency: 2 }\nexport default async function handler() {}\n")
+  touchFile(pkgModulePath('orders', 'workers', 'safe-job.ts'), "export const metadata = { queue: 'orders.safe', schedulerSafe: true }\nexport default async function handler() {}\n")
   touchFile(pkgModulePath('orders', 'widgets', 'dashboard', 'revenue', 'widget.tsx'), 'export default function RevenueWidget() { return null }\n')
   touchFile(pkgModulePath('orders', 'widgets', 'injection', 'sidebar', 'widget.tsx'), 'export default function SidebarWidget() { return null }\n')
   touchFile(pkgModulePath('orders', 'widgets', 'injection-table.ts'), `export const injectionTable = {\n  'crud-form:orders:sales_order:fields': [{ widgetId: 'orders.sidebar', kind: 'section', priority: 50 }],\n}\nexport default injectionTable\n`)
@@ -196,6 +197,8 @@ function scaffoldFixture(): ModuleEntry[] {
   touchFile(pkgModulePath('orders', 'data', 'guards.ts'), `export const guards = [\n  { id: 'orders.prevent-duplicate', entity: 'orders:sales_order', event: 'create', description: 'Prevents duplicate orders', async validate(input: any) { return { ok: true } } },\n]\n`)
   touchFile(pkgModulePath('orders', 'api', 'interceptors.ts'), `export const interceptors = [\n  { id: 'orders.validate-total', targetRoute: 'orders', methods: ['POST', 'PUT'], priority: 100, async before(request: any) { return { ok: true } } },\n]\n`)
   touchFile(pkgModulePath('orders', 'commands', 'interceptors.ts'), `export const interceptors = [\n  { id: 'orders.audit-log', commandId: 'orders.create', phase: 'after', async handler(command: any) { return { ok: true } } },\n]\n`)
+  touchFile(pkgModulePath('orders', 'commands', 'create.ts'), `import { registerCommand } from '@open-mercato/shared/lib/commands'\nexport const ORDERS_CREATE_COMMAND_ID = 'orders.create'\nconst createOrderCommand = {\n  id: ORDERS_CREATE_COMMAND_ID,\n  async execute() { return { id: 'order-1' } },\n}\nregisterCommand(createOrderCommand)\n`)
+  touchFile(pkgModulePath('orders', 'commands', 'archive.ts'), `import { registerCommand } from '@open-mercato/shared/lib/commands'\nconst commandId = 'orders.archive'\nregisterCommand({\n  id: commandId,\n  async execute() { return { ok: true } },\n})\n`)
   touchFile(pkgModulePath('orders', 'acl.ts'), "export const features = ['orders.view', 'orders.create', 'orders.edit', 'orders.delete']\n")
   touchFile(pkgModulePath('orders', 'setup.ts'), "export const setup = { defaultRoleFeatures: ['orders.view'] }\n")
   touchFile(pkgModulePath('orders', 'encryption.ts'), "export const defaultEncryptionMaps = [{ entityId: 'orders:sales_order', fields: [{ field: 'customer_email', hashField: 'customer_email_hash' }] }]\nexport default defaultEncryptionMaps\n")
@@ -505,8 +508,8 @@ describe('modules.generated.ts', () => {
   })
 
   it('modules include translation locale keys', () => {
-    expect(content).toContain("'en':")
-    expect(content).toContain("'pl':")
+    expect(content).toMatch(/['"]en['"]:/)
+    expect(content).toMatch(/['"]pl['"]:/)
   })
 
   it('modules include customFieldSets reference from ce.ts', () => {
@@ -570,7 +573,7 @@ describe('frontend-routes.generated.ts', () => {
 
   it('contains orders frontend route with correct pattern', () => {
     expect(content).toContain('moduleId: "orders"')
-    expect(content).toContain('pattern: "/"')
+    expect(content).toContain('resolvePageRouteMetadata("/",')
   })
 })
 
@@ -600,9 +603,14 @@ describe('backend-routes.generated.ts', () => {
   })
 
   it('each route entry has pattern, moduleId, and load function', () => {
-    expect(content).toContain('pattern:')
-    expect(content).toContain('requireAuth:')
+    expect(content).toContain('resolvePageRouteMetadata(')
     expect(content).toContain('load: async () =>')
+  })
+
+  it('keeps backend page imports lazy in route entries', () => {
+    expect(content).toContain('@open-mercato/core/modules/orders/backend')
+    expect(content).toContain('load: async () =>')
+    expect(content).toContain('import("@open-mercato/core/modules/orders/backend')
   })
 })
 
@@ -628,7 +636,12 @@ describe('api-routes.generated.ts', () => {
 
   it('products API route has all 4 methods', () => {
     expect(content).toContain('path: "/products"')
-    expect(content).toMatch(/methods:.*GET.*POST.*PUT.*DELETE/)
+    expect(content).toMatch(/methods:\s*\[\s*"GET",\s*"POST",\s*"PUT",\s*"DELETE",?\s*\]/)
+  })
+
+  it('keeps API handler imports lazy in route entries', () => {
+    expect(content).toContain('@open-mercato/core/modules/orders/api')
+    expect(content).toContain('load: async () => import(')
   })
 })
 
@@ -1091,6 +1104,10 @@ describe('injection-widgets.generated.ts', () => {
     expect(content).toContain('moduleId: "orders"')
     expect(content).toContain('key: "orders:sidebar:widget"')
   })
+
+  it('emits the injection table widgetId as an optional lookup hint', () => {
+    expect(content).toContain('widgetId: "orders.sidebar"')
+  })
 })
 
 describe('injection-tables.generated.ts', () => {
@@ -1174,6 +1191,27 @@ describe('search.generated.ts', () => {
 })
 
 // ---------------------------------------------------------------------------
+// command-loaders.generated.ts
+// ---------------------------------------------------------------------------
+
+describe('command-loaders.generated.ts', () => {
+  it('includes command ids declared through const variables', async () => {
+    const enabled = scaffoldFixture()
+    const resolver = createMockResolver(enabled)
+    await generateModuleRegistry({ resolver, quiet: true })
+    const content = readGenerated('command-loaders.generated.ts')
+
+    expectExports(content, ['commandLoaderEntries'], 'command-loaders.generated.ts')
+    expect(content).toContain('id: "orders.archive"')
+    expect(content).toContain('id: "orders.create"')
+    expect(content).toContain('key: "orders:commands:archive"')
+    expect(content).toContain('key: "orders:commands:create"')
+    expect(content).toContain('@open-mercato/core/modules/orders/commands/archive')
+    expect(content).toContain('@open-mercato/core/modules/orders/commands/create')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // modules.app.generated.ts
 // ---------------------------------------------------------------------------
 
@@ -1214,14 +1252,42 @@ describe('modules.app.generated.ts', () => {
   })
 })
 
+describe('modules.bootstrap.generated.ts', () => {
+  it('exports a bootstrap-only module manifest without route components', async () => {
+    const enabled = scaffoldFixture()
+    const resolver = createMockResolver(enabled)
+    await generateModuleRegistryApp({ resolver, quiet: true })
+    const content = readGenerated('modules.bootstrap.generated.ts')
+
+    expect(content).toContain('export const modules: Module[] = [')
+    expect(content).toContain('export default modules')
+    expect(content).toContain('id: "orders"')
+    expect(content).toContain('subscribers:')
+    expect(content).toContain('orders.order.created')
+    expect(content).toContain('setup:')
+    expect(content).toContain('features:')
+    // worker metadata flags must survive into the registry the server registers
+    expect(content).toContain("queue: \"orders.safe\"")
+    expect(content).toContain('schedulerSafe: true')
+
+    expect(content).not.toContain('frontendRoutes:')
+    expect(content).not.toContain('backendRoutes:')
+    expect(content).not.toContain('createElement')
+    expect(content).not.toContain('/page.meta')
+    expect(content).not.toContain('/frontend/')
+    expect(content).not.toContain('/backend/')
+    expect(content).not.toContain('cli:')
+  })
+})
+
 describe('bootstrap-modules.generated.ts', () => {
-  it('exports legacy bootstrapModules alias from modules.app.generated.ts', async () => {
+  it('exports legacy bootstrapModules alias from modules.bootstrap.generated.ts', async () => {
     const enabled = scaffoldFixture()
     const resolver = createMockResolver(enabled)
     await generateModuleRegistryApp({ resolver, quiet: true })
     const content = readGenerated('bootstrap-modules.generated.ts')
 
-    expect(content).toContain('modules.app.generated')
+    expect(content).toContain('modules.bootstrap.generated')
     expect(content).toContain('export const bootstrapModules: Module[] = modules')
   })
 })

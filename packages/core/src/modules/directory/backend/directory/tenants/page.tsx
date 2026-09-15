@@ -1,8 +1,10 @@
 "use client"
 import * as React from 'react'
+import { extensionPoints } from '@open-mercato/core/modules/directory/extension-points'
 import Link from 'next/link'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { ColumnDef, SortingState } from '@tanstack/react-table'
+import type { LegacyColumnDef as ColumnDef } from '@tanstack/react-table/legacy'
+import type { SortingState } from '@tanstack/react-table'
 import { Page, PageBody } from '@open-mercato/ui/backend/Page'
 import { DataTable } from '@open-mercato/ui/backend/DataTable'
 import { ListEmptyState } from '@open-mercato/ui/backend/filters/ListEmptyState'
@@ -10,10 +12,11 @@ import { RowActions } from '@open-mercato/ui/backend/RowActions'
 import { BooleanIcon } from '@open-mercato/ui/backend/ValueIcons'
 import type { FilterValues } from '@open-mercato/ui/backend/FilterBar'
 import { Button } from '@open-mercato/ui/primitives/button'
-import { apiCall, readApiResultOrThrow, withScopedApiRequestHeaders } from '@open-mercato/ui/backend/utils/apiCall'
+import { apiCall, apiCallOrThrow, readApiResultOrThrow, withScopedApiRequestHeaders } from '@open-mercato/ui/backend/utils/apiCall'
 import { buildOptimisticLockHeader } from '@open-mercato/ui/backend/utils/optimisticLock'
 import { flash } from '@open-mercato/ui/backend/FlashMessages'
-import { raiseCrudError } from '@open-mercato/ui/backend/utils/serverErrors'
+import { useGuardedMutation } from '@open-mercato/ui/backend/injection/useGuardedMutation'
+import { surfaceRecordConflict } from '@open-mercato/ui/backend/conflicts'
 import { useConfirmDialog } from '@open-mercato/ui/backend/confirm-dialog'
 import { useOrganizationScopeVersion } from '@open-mercato/shared/lib/frontend/useOrganizationScope'
 import { useT } from '@open-mercato/shared/lib/i18n/context'
@@ -32,6 +35,7 @@ type TenantsResponse = {
   page: number
   pageSize: number
   totalPages: number
+  totalIsCapped?: boolean
 }
 
 
@@ -116,6 +120,18 @@ export default function DirectoryTenantsPage() {
   const rows = data?.items ?? []
   const total = data?.total ?? 0
   const totalPages = data?.totalPages ?? 0
+  const totalIsCapped = data?.totalIsCapped === true
+
+  const deleteMutationContextId = 'directory-tenants-list:single-delete'
+  const { runMutation: runDeleteMutation, retryLastMutation: retryDeleteMutation } = useGuardedMutation<{
+    formId: string
+    resourceKind: string
+    resourceId: string
+    retryLastMutation: () => Promise<boolean>
+  }>({
+    contextId: deleteMutationContextId,
+    blockedMessage: t('ui.forms.flash.saveBlocked', 'Save blocked by validation'),
+  })
 
   const handleDelete = React.useCallback(async (tenant: TenantRow) => {
     const confirmMessage = t('directory.tenants.list.confirmDelete', 'Delete tenant "{{name}}"? This will archive it.').replace('{{name}}', tenant.name)
@@ -127,29 +143,42 @@ export default function DirectoryTenantsPage() {
     if (!confirmed) return
 
     try {
-      const call = await withScopedApiRequestHeaders(
-        buildOptimisticLockHeader(tenant.updatedAt),
-        () => apiCall(
-          `/api/directory/tenants?id=${encodeURIComponent(tenant.id)}`,
-          { method: 'DELETE' },
+      await runDeleteMutation({
+        operation: () => withScopedApiRequestHeaders(
+          buildOptimisticLockHeader(tenant.updatedAt),
+          () => apiCallOrThrow(
+            `/api/directory/tenants?id=${encodeURIComponent(tenant.id)}`,
+            { method: 'DELETE' },
+            { errorMessage: t('directory.tenants.list.error.delete', 'Failed to delete tenant') },
+          ),
         ),
-      )
-      if (!call.ok) {
-        await raiseCrudError(call.response, t('directory.tenants.list.error.delete', 'Failed to delete tenant'))
-      }
+        context: {
+          formId: deleteMutationContextId,
+          resourceKind: 'directory.tenant',
+          resourceId: tenant.id,
+          retryLastMutation: retryDeleteMutation,
+        },
+      })
       await queryClient.invalidateQueries({ queryKey: ['directory-tenants'] })
       flash(t('directory.tenants.list.success.delete', 'Tenant deleted'), 'success')
-    } catch (err: any) {
+    } catch (err: unknown) {
+      // A stale delete surfaces the unified conflict bar (via the guarded
+      // mutation) — skip the generic error flash to avoid a double message.
+      if (surfaceRecordConflict(err, t)) {
+        await queryClient.invalidateQueries({ queryKey: ['directory-tenants'] })
+        return
+      }
       const message = err instanceof Error ? err.message : t('directory.tenants.list.error.delete', 'Failed to delete tenant')
       flash(message, 'error')
     }
-  }, [confirm, queryClient, t])
+  }, [confirm, deleteMutationContextId, queryClient, retryDeleteMutation, runDeleteMutation, t])
 
   return (
     <Page>
       <PageBody>
         <DataTable
-          title={t('directory.tenants.list.title', 'Tenants')}
+        title={t('directory.tenants.list.title', 'Tenants')}
+        titleHeadingLevel={1}
           actions={canManage ? (
             <Button asChild>
               <Link href="/backend/directory/tenants/create">{t('directory.tenants.list.actions.create', 'Create')}</Link>
@@ -169,7 +198,7 @@ export default function DirectoryTenantsPage() {
           sortable
           sorting={sorting}
           onSortingChange={(state) => { setSorting(state); setPage(1) }}
-          perspective={{ tableId: 'directory.tenants.list' }}
+          perspective={{ tableId: extensionPoints.hosts.tenantsTable.tableId }}
           rowActions={(row) => (
             canManage ? (
               <RowActions
@@ -187,7 +216,7 @@ export default function DirectoryTenantsPage() {
               createLabel={t('directory.tenants.list.actions.create', 'Create')}
             />
           )}
-          pagination={{ page, pageSize: 20, total, totalPages, onPageChange: setPage }}
+          pagination={{ page, pageSize: 20, total, totalPages, totalIsCapped, onPageChange: setPage }}
           isLoading={isLoading}
         />
       </PageBody>

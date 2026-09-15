@@ -2,7 +2,7 @@
 
 import * as React from 'react'
 import Link from 'next/link'
-import { useRouter, useParams } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Page, PageBody } from '@open-mercato/ui/backend/Page'
 import { CrudForm } from '@open-mercato/ui/backend/CrudForm'
@@ -12,6 +12,7 @@ import { Button } from '@open-mercato/ui/primitives/button'
 import { apiFetch, withScopedApiHeaders } from '@open-mercato/ui/backend/utils/api'
 import { apiCall } from '@open-mercato/ui/backend/utils/apiCall'
 import { buildOptimisticLockHeader } from '@open-mercato/ui/backend/utils/optimisticLock'
+import { buildRecordInjectionContext, useSetCurrentRecordInjectionContext } from '@open-mercato/ui/backend/injection/recordContext'
 import { readJsonSafe } from '@open-mercato/ui/backend/utils/serverErrors'
 import { CrudHttpError } from '@open-mercato/shared/lib/crud/errors'
 import { flash } from '@open-mercato/ui/backend/FlashMessages'
@@ -52,17 +53,10 @@ type RuleSetDetail = {
   }>
 }
 
-export default function EditRuleSetPage() {
+export default function EditRuleSetPage({ params }: { params?: { id?: string } }) {
   const router = useRouter()
-  const params = useParams()
-
-  // Handle catch-all route: params.slug = ['sets', 'uuid']
-  let setId: string | undefined
-  if (params?.slug && Array.isArray(params.slug)) {
-    setId = params.slug[1] // Second element is the ID
-  } else if (params?.id) {
-    setId = Array.isArray(params.id) ? params.id[0] : params.id
-  }
+  const pathname = usePathname()
+  const setId = params?.id
 
   const t = useT()
   const { organizationId, tenantId } = useOrganizationScopeDetail()
@@ -237,6 +231,21 @@ export default function EditRuleSetPage() {
     ]
   }, [t, ruleSet, handleAddMember, handleUpdateMember, handleRemoveMember])
 
+  // Publish page-load record context to the AppShell-owned `backend:record:current`
+  // mount so the enterprise record_locks widget resolves the rule set + id
+  // explicitly. The resourceKind mirrors the route's `enforceCommandOptimisticLock`
+  // call (`business_rules.ruleSet`) so the held lock matches the save-time conflict
+  // surface for the same rule set.
+  useSetCurrentRecordInjectionContext(
+    buildRecordInjectionContext({
+      resourceKind: 'business_rules.ruleSet',
+      resourceId: setId ?? null,
+      updatedAt: ruleSet?.updatedAt ?? null,
+      data: (ruleSet ?? null) as Record<string, unknown> | null,
+      path: pathname,
+    }),
+  )
+
   if (isLoading) {
     return (
       <Page>
@@ -272,6 +281,7 @@ export default function EditRuleSetPage() {
       <PageBody>
         <CrudForm
           title={t('business_rules.sets.edit.title')}
+          titleHeadingLevel={1}
           backHref="/backend/sets"
           schema={ruleSetFormSchema}
           fields={fields}

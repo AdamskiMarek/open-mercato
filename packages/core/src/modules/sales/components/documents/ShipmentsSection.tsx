@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from 'react'
+import { formatDisplayDate, toUtcDateInputValue } from '@open-mercato/ui/primitives/date-format'
 import { Pencil, Plus, Trash2, Truck } from 'lucide-react'
 import { Button } from '@open-mercato/ui/primitives/button'
 import { Badge } from '@open-mercato/ui/primitives/badge'
@@ -10,7 +11,7 @@ import { apiCall, withScopedApiRequestHeaders } from '@open-mercato/ui/backend/u
 import { buildOptimisticLockHeader } from '@open-mercato/ui/backend/utils/optimisticLock'
 import { deleteCrud } from '@open-mercato/ui/backend/utils/crud'
 import { useOrganizationScopeDetail } from '@open-mercato/shared/lib/frontend/useOrganizationScope'
-import { useT } from '@open-mercato/shared/lib/i18n/context'
+import { useT, useLocale } from '@open-mercato/shared/lib/i18n/context'
 import { useConfirmDialog } from '@open-mercato/ui/backend/confirm-dialog'
 import {
   emitSalesDocumentTotalsRefresh,
@@ -20,9 +21,12 @@ import type { SectionAction } from '@open-mercato/core/modules/customers/compone
 import { generateTempId } from '@open-mercato/core/modules/customers/lib/detailHelpers'
 import { formatAddressString, type AddressValue } from '@open-mercato/core/modules/customers/utils/addressFormat'
 import { ShipmentDialog } from './ShipmentDialog'
-import { handleSectionMutationError, readRowUpdatedAt, rowOptimisticVersion } from './optimisticLock'
+import { handleSectionMutationError, readRowUpdatedAt } from './optimisticLock'
 import { extractCustomFieldValues } from './customFieldHelpers'
 import type { OrderLine, ShipmentRow, ShipmentItem } from './shipmentTypes'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+
+const logger = createLogger('sales')
 
 const ADDRESS_SNAPSHOT_KEY = 'shipmentAddressSnapshot'
 const ADDRESS_FORMAT: 'line_first' = 'line_first'
@@ -33,16 +37,13 @@ type SalesShipmentsSectionProps = {
   shippingAddressSnapshot?: Record<string, unknown> | null
   organizationId?: string | null
   tenantId?: string | null
+  documentUpdatedAt?: string | null
   onActionChange?: (action: SectionAction | null) => void
   onAddComment?: (body: string) => Promise<void>
 }
 
-function formatDisplayDate(value: string | null | undefined): string | null {
-  if (!value) return null
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return null
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(date)
-}
+// One date formatter for this page rather than three with incompatible semantics.
+export { formatDisplayDate }
 
 const formatShipmentAddress = (metadata?: Record<string, unknown> | null): string | null => {
   if (!metadata || typeof metadata !== 'object') return null
@@ -114,10 +115,12 @@ export function SalesShipmentsSection({
   shippingAddressSnapshot,
   organizationId: organizationIdProp,
   tenantId: tenantIdProp,
+  documentUpdatedAt,
   onActionChange,
   onAddComment,
 }: SalesShipmentsSectionProps) {
   const t = useT()
+  const locale = useLocale()
   const { organizationId, tenantId } = useOrganizationScopeDetail()
   const { confirm, ConfirmDialogElement } = useConfirmDialog()
   const resolvedOrganizationId = organizationIdProp ?? organizationId ?? null
@@ -351,7 +354,7 @@ export function SalesShipmentsSection({
         .filter((entry): entry is ShipmentRow => Boolean(entry))
       setShipments(mapped)
     } catch (err) {
-      console.error('sales.shipments.load', err)
+      logger.error('sales.shipments.load', { err })
       setError(t('sales.documents.shipments.errorLoad', 'Failed to load shipments.'))
     } finally {
       setLoading(false)
@@ -401,7 +404,9 @@ export function SalesShipmentsSection({
       if (!confirmed) return
       try {
         const result = await withScopedApiRequestHeaders(
-          buildOptimisticLockHeader(rowOptimisticVersion(shipment)),
+          // The server guards the PARENT order's aggregate version (Gap B), so
+          // send the order's `updated_at`, not the shipment row's.
+          buildOptimisticLockHeader(documentUpdatedAt ?? undefined),
           () =>
             deleteCrud('sales/shipments', {
               body: {
@@ -421,11 +426,11 @@ export function SalesShipmentsSection({
         if (handleSectionMutationError(err, t, () => void loadShipments())) {
           return
         }
-        console.error('sales.shipments.delete', err)
+        logger.error('sales.shipments.delete', { err })
         flash(t('sales.documents.shipments.errorDelete', 'Failed to delete shipment.'), 'error')
       }
     },
-    [confirm, loadShipments, orderId, resolvedOrganizationId, resolvedTenantId, t]
+    [confirm, documentUpdatedAt, loadShipments, orderId, resolvedOrganizationId, resolvedTenantId, t]
   )
 
   const renderItemList = (items: ShipmentItem[]) => (
@@ -479,8 +484,12 @@ export function SalesShipmentsSection({
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
           {shipments.map((shipment) => {
-            const shippedAt = formatDisplayDate(shipment.shippedAt)
-            const deliveredAt = formatDisplayDate(shipment.deliveredAt)
+            // `shippedAt` / `deliveredAt` are written from date inputs (`ShipmentDialog`), coerced
+            // by `z.coerce.date()` and stored as UTC midnight, and the dialog seeds itself back from
+            // `.slice(0, 10)` — the UTC day. Reading them locally names the previous day west of UTC
+            // and disagrees with that dialog on the same row.
+            const shippedAt = formatDisplayDate(toUtcDateInputValue(shipment.shippedAt), locale)
+            const deliveredAt = formatDisplayDate(toUtcDateInputValue(shipment.deliveredAt), locale)
             const addressSummary = formatShipmentAddress(shipment.metadata)
             const statusLabel =
               shipment.statusLabel ??
@@ -573,6 +582,7 @@ export function SalesShipmentsSection({
         currencyCode={currencyCode}
         organizationId={resolvedOrganizationId}
         tenantId={resolvedTenantId}
+        documentUpdatedAt={documentUpdatedAt ?? null}
         computeAvailable={computeAvailable}
         shippingAddressSnapshot={shippingAddressSnapshot}
         onClose={() => setDialogState(null)}

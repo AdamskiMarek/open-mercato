@@ -1,12 +1,15 @@
 import type { ModuleCli } from '@open-mercato/shared/modules/registry'
 import { createRequestContainer } from '@open-mercato/shared/lib/di/container'
+import { OM_LOG_LEVEL_ENV, resetLogLevelCache } from '@open-mercato/shared/lib/logger'
+import { resetServerLoggerCache } from '@open-mercato/shared/lib/logger'
 import { hash } from 'bcryptjs'
 import type { EntityManager } from '@mikro-orm/postgresql'
 import { User, Role, UserRole } from '@open-mercato/core/modules/auth/data/entities'
 import { Tenant, Organization } from '@open-mercato/core/modules/directory/data/entities'
 import { rebuildHierarchyForTenant } from '@open-mercato/core/modules/directory/lib/hierarchy'
-import { ensureRoles, setupInitialTenant, ensureDefaultRoleAcls, ensureCustomRoleAcls, OrgSlugExistsError } from './lib/setup-app'
+import { ensureRoles, setupInitialTenant, ensureDefaultRoleAcls, ensureCustomRoleAcls, OrgSlugExistsError, DerivedUserPasswordRequiredError } from './lib/setup-app'
 import { normalizeTenantId } from './lib/tenantAccess'
+import { parseCommaSeparatedList } from '@open-mercato/shared/lib/string'
 import { computeEmailHash, emailHashLookupValues } from './lib/emailHash'
 import { findWithDecryption, findOneWithDecryption } from '@open-mercato/shared/lib/encryption/find'
 import { isTenantDataEncryptionEnabled } from '@open-mercato/shared/lib/encryption/toggles'
@@ -18,7 +21,7 @@ import type { KmsService, TenantDek } from '@open-mercato/shared/lib/encryption/
 import crypto from 'node:crypto'
 import { formatPasswordRequirements, getPasswordPolicy, validatePassword } from '@open-mercato/shared/lib/auth/passwordPolicy'
 import { parseBooleanToken } from '@open-mercato/shared/lib/boolean'
-import { getCliModules } from '@open-mercato/shared/modules/registry'
+import { getCliModules, type Module } from '@open-mercato/shared/modules/registry'
 
 async function resolveTenantScopedRole(em: any, name: string, normalizedTenantId: string | null) {
   const existing = await em.findOne(Role, { name, tenantId: normalizedTenantId })
@@ -69,7 +72,7 @@ const addUser: ModuleCli = {
     })
     await em.persist(u).flush()
     if (rolesCsv) {
-      const names = rolesCsv.split(',').map(s => s.trim()).filter(Boolean)
+      const names = parseCommaSeparatedList(rolesCsv)
       for (const name of names) {
         const role = await resolveTenantScopedRole(em, name, normalizedTenantId)
         const link = em.create(UserRole, { user: u, role })
@@ -394,14 +397,14 @@ const addOrganization: ModuleCli = {
     // Create tenant implicitly for simplicity
     const tenant = em.create(Tenant, { name: `${name} Tenant` })
     await em.persist(tenant).flush()
-    const org = em.create(Organization, { name, tenant })
+    const org = em.create(Organization, { name, tenant, logoPreserveAspectRatio: false })
     await em.persist(org).flush()
     await rebuildHierarchyForTenant(em, String(tenant.id))
     console.log('Organization created with id', org.id, 'in tenant', tenant.id)
   },
 }
 
-const SETUP_USAGE = 'Usage: mercato auth setup --orgName <name> --email <email> --password <password> [--orgSlug <slug>] [--roles superadmin,admin,employee] [--skip-password-policy] [--with-examples] [--json]'
+const SETUP_USAGE = 'Usage: mercato auth setup --orgName <name> --email <email> --password <password> [--orgSlug <slug>] [--roles superadmin,admin,employee] [--skip-password-policy] [--include-demo-users] [--with-examples] [--json]'
 
 const setupApp: ModuleCli = {
   command: 'setup',
@@ -440,6 +443,10 @@ const setupApp: ModuleCli = {
     const withExamples = typeof withExamplesRaw === 'boolean'
       ? withExamplesRaw
       : parseBooleanToken(typeof withExamplesRaw === 'string' ? withExamplesRaw : null) ?? false
+    const includeDemoUsersRaw = args['include-demo-users'] ?? args.includeDemoUsers
+    const includeDemoUsers = typeof includeDemoUsersRaw === 'boolean'
+      ? includeDemoUsersRaw
+      : parseBooleanToken(typeof includeDemoUsersRaw === 'string' ? includeDemoUsersRaw : null) ?? false
     const jsonModeRaw = args.json
     const jsonMode = typeof jsonModeRaw === 'boolean'
       ? jsonModeRaw
@@ -471,15 +478,23 @@ const setupApp: ModuleCli = {
       const originalInfo = console.info
       console.log = () => undefined
       console.info = () => undefined
+      const originalLogLevel = process.env[OM_LOG_LEVEL_ENV]
+      process.env[OM_LOG_LEVEL_ENV] = 'error'
+      resetLogLevelCache()
+      resetServerLoggerCache()
       restoreConsole = () => {
         console.log = originalLog
         console.info = originalInfo
+        if (originalLogLevel === undefined) delete process.env[OM_LOG_LEVEL_ENV]
+        else process.env[OM_LOG_LEVEL_ENV] = originalLogLevel
+        resetLogLevelCache()
+        resetServerLoggerCache()
       }
     }
     const container = await createRequestContainer()
     const em = container.resolve<EntityManager>('em')
     const roleNames = rolesCsv
-      ? rolesCsv.split(',').map((s) => s.trim()).filter(Boolean)
+      ? parseCommaSeparatedList(rolesCsv)
       : undefined
 
     try {
@@ -489,7 +504,14 @@ const setupApp: ModuleCli = {
         orgSlug,
         roleNames,
         primaryUser: { email, password, confirm: true },
-        includeDerivedUsers: true,
+        // Derived admin/employee demo accounts only land when the operator
+        // explicitly opts in via --include-demo-users. Default-deny prevents
+        // production deployments from silently seeding well-known emails.
+        includeDerivedUsers: includeDemoUsers,
+        // When demo users are explicitly requested, the operator has consented
+        // to having admin@/employee@ accounts created with autogenerated
+        // passwords (surfaced in stdout) when no env override is provided.
+        allowDemoDerivedPasswords: includeDemoUsers,
         // When the caller passes an explicit slug, treat it as a "fresh tenant"
         // signal — silent reuse of an existing user's tenant defeats the point
         // of slugging the new tenant for downstream tooling.
@@ -537,7 +559,12 @@ const setupApp: ModuleCli = {
       if (env.NODE_ENV !== 'test') {
         for (const snapshot of result.users) {
           if (snapshot.created) {
-            console.log('🎉 Created user', snapshot.user.email)
+            if (snapshot.generatedPassword) {
+              console.log('⚠️  GENERATED password — copy now; it is not stored in plain text')
+              console.log('🎉 Created user', snapshot.user.email, 'password:', snapshot.generatedPassword)
+            } else {
+              console.log('🎉 Created user', snapshot.user.email)
+            }
           } else {
             console.log(`Updated user ${snapshot.user.email}`)
           }
@@ -550,6 +577,13 @@ const setupApp: ModuleCli = {
       if (err instanceof OrgSlugExistsError) {
         process.stderr.write(`${err.message}\n`)
         process.exitCode = 1
+        return
+      }
+      if (err instanceof DerivedUserPasswordRequiredError) {
+        process.stderr.write(
+          `Setup aborted: ${err.message}. In production, set OM_INIT_ADMIN_PASSWORD and OM_INIT_EMPLOYEE_PASSWORD before passing --include-demo-users, or omit --include-demo-users to skip derived demo accounts entirely.\n`,
+        )
+        process.exitCode = 2
         return
       }
       if (err instanceof Error && err.message === 'USER_EXISTS') {
@@ -750,6 +784,34 @@ const setPassword: ModuleCli = {
   },
 }
 
+/**
+ * The portal half of the same sync.
+ *
+ * Staff roles pick up a module's newly declared features here; customer roles used
+ * to pick theirs up only at tenant bootstrap, so a portal feature that shipped
+ * after a tenant existed never reached that tenant's `Buyer`/`Viewer` roles and the
+ * page stayed invisible to every real customer. `customer_accounts` owns those
+ * entities and is optional, so it is reached through a guarded dynamic import: a
+ * deployment without the module syncs its staff roles exactly as before.
+ */
+async function syncCustomerRoleAcls(
+  em: EntityManager,
+  tenantId: string,
+  modules: Module[],
+): Promise<{ updatedRoleSlugs: string[]; addedFeatures: string[] } | null> {
+  let ensure: typeof import('@open-mercato/core/modules/customer_accounts/lib/customerRoleAcls').ensureDefaultCustomerRoleAcls
+  try {
+    ;({ ensureDefaultCustomerRoleAcls: ensure } = await import(
+      '@open-mercato/core/modules/customer_accounts/lib/customerRoleAcls'
+    ))
+  } catch {
+    // The portal module is not part of this deployment; staff roles are still synced.
+    return null
+  }
+  // Deliberately outside the guard: a failure of the sync itself is a real error.
+  return ensure(em, tenantId, modules)
+}
+
 const syncRoleAcls: ModuleCli = {
   command: 'sync-role-acls',
   async run(rest) {
@@ -807,7 +869,13 @@ const syncRoleAcls: ModuleCli = {
     for (const tenantId of targetTenantIds) {
       await ensureDefaultRoleAcls(em, tenantId, modules, { includeSuperadminRole })
       await ensureCustomRoleAcls(em, tenantId, modules)
+      const portal = await syncCustomerRoleAcls(em, tenantId, modules)
       console.log(`✅ Synced role ACLs for tenant ${tenantId}`)
+      if (portal && portal.addedFeatures.length) {
+        console.log(
+          `   ↳ portal roles ${portal.updatedRoleSlugs.join(', ')} gained ${portal.addedFeatures.join(', ')}`,
+        )
+      }
     }
   },
 }

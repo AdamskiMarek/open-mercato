@@ -25,6 +25,10 @@ import {
   setDefaultEntryRequestSchema,
 } from '../../../openapi'
 import { resolveDictionaryActorId } from '../../../context'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+import { getCommandInterceptorHttpRejection } from '@open-mercato/shared/lib/commands/errors'
+
+const logger = createLogger('dictionaries').child({ component: 'entries-api' })
 
 const paramsSchema = z.object({ dictionaryId: z.string().uuid() })
 
@@ -127,7 +131,14 @@ export async function POST(req: Request, ctx: { params?: { dictionaryId?: string
     if (isCrudHttpError(err)) {
       return NextResponse.json(err.body, { status: err.status })
     }
-    console.error('[dictionaries/:id/entries/set-default.POST] Unexpected error', err)
+    const interceptorRejection = getCommandInterceptorHttpRejection(err)
+    if (interceptorRejection) {
+      return NextResponse.json(interceptorRejection.body, { status: interceptorRejection.status })
+    }
+    if (err instanceof z.ZodError) {
+      return NextResponse.json({ error: 'Invalid input', details: err.issues }, { status: 400 })
+    }
+    logger.error('Failed to set default entry', { err })
     return NextResponse.json({ error: 'Failed to set default entry' }, { status: 500 })
   }
 }

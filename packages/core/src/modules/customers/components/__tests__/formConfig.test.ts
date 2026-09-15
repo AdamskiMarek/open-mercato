@@ -7,6 +7,12 @@ jest.mock('../AddressTiles', () => ({
 jest.mock('../detail/RolesSection', () => ({
   RolesSection: () => null,
 }))
+jest.mock('@open-mercato/shared/lib/i18n/context', () => ({
+  useT: () => (_key: string, fallback?: string) => fallback ?? _key,
+}))
+
+import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 
 import {
   buildCompanyEditPayload,
@@ -15,7 +21,10 @@ import {
   buildPersonPayload,
   createCompanyDaneFiremyGroups,
   createCompanyEditSchema,
+  createCompanyFormFields,
+  createCompanyFormSchema,
   createPersonEditSchema,
+  createPersonFormFields,
   createPersonPersonalDataGroups,
   mapCompanyOverviewToFormValues,
   mapPersonOverviewToFormValues,
@@ -244,5 +253,110 @@ describe('clearing v2 URL & email edit fields (#2526)', () => {
     expect(payload.primaryEmail).toBe('hello@acme.com')
     expect(payload.primaryPhone).toBe('+1 212 555 0202')
     expect(payload.websiteUrl).toBe('https://acme.com')
+  })
+})
+
+describe('clearing v2 company plain-text & revenue edit fields (#3050)', () => {
+  it('transmits null when previously-set legal/brand/size/revenue/description are blanked', () => {
+    const parsed = createCompanyEditSchema().safeParse({
+      id: COMPANY_ID,
+      displayName: 'Acme',
+      legalName: '',
+      brandName: '',
+      sizeBucket: '',
+      annualRevenue: '',
+      description: '',
+    })
+    expect(parsed.success).toBe(true)
+    if (!parsed.success) return
+
+    const payload = buildCompanyEditPayload(parsed.data as any)
+    expect(payload.legalName).toBeNull()
+    expect(payload.brandName).toBeNull()
+    expect(payload.sizeBucket).toBeNull()
+    expect(payload.annualRevenue).toBeNull()
+    expect(payload.description).toBeNull()
+  })
+
+  it('keeps non-empty plain-text & revenue values on edit', () => {
+    const parsed = createCompanyEditSchema().safeParse({
+      id: COMPANY_ID,
+      displayName: 'Acme',
+      legalName: 'Acme Corp.',
+      brandName: 'Acme',
+      sizeBucket: '11-50',
+      annualRevenue: '1,500,000',
+      description: 'B2B widgets',
+    })
+    expect(parsed.success).toBe(true)
+    if (!parsed.success) return
+
+    const payload = buildCompanyEditPayload(parsed.data as any)
+    expect(payload.legalName).toBe('Acme Corp.')
+    expect(payload.brandName).toBe('Acme')
+    expect(payload.sizeBucket).toBe('11-50')
+    expect(payload.annualRevenue).toBe('1500000')
+    expect(payload.description).toBe('B2B widgets')
+  })
+
+  it('leaves create-mode blanks as omitted (no clear semantics on create)', () => {
+    const parsed = createCompanyFormSchema().safeParse({
+      displayName: 'Acme',
+      legalName: '',
+      brandName: '',
+      sizeBucket: '',
+      annualRevenue: '',
+    })
+    expect(parsed.success).toBe(true)
+    if (!parsed.success) return
+
+    const payload = buildCompanyPayload(parsed.data as any)
+    expect('legalName' in payload).toBe(false)
+    expect('brandName' in payload).toBe(false)
+    expect('sizeBucket' in payload).toBe(false)
+    expect('annualRevenue' in payload).toBe(false)
+    expect('description' in payload).toBe(false)
+  })
+})
+
+describe('PhoneNumberField defaultCountryIso2 forwarding', () => {
+  const mockRenderProps = {
+    value: null,
+    setValue: () => {},
+    error: undefined,
+    disabled: false,
+    autoFocus: false,
+    recordId: undefined,
+  }
+
+  it('renders phone input with +48 country code in person form when defaultCountryIso2: PL is provided', () => {
+    const fields = createPersonFormFields(t, { defaultCountryIso2: 'PL' })
+    const phoneField = fields.find((f) => f.id === 'primaryPhone')
+    expect(phoneField).toBeDefined()
+    expect(phoneField?.type).toBe('custom')
+    if (phoneField?.type === 'custom') expect(phoneField.rendersOwnError).toBe(true)
+
+    const html = renderToStaticMarkup(React.createElement(phoneField!.component as any, mockRenderProps))
+    expect(html).toContain('+48')
+  })
+
+  it('renders phone input with +48 country code in company form when defaultCountryIso2: PL is provided', () => {
+    const fields = createCompanyFormFields(t, { defaultCountryIso2: 'PL' })
+    const phoneField = fields.find((f) => f.id === 'primaryPhone')
+    expect(phoneField).toBeDefined()
+    expect(phoneField?.type).toBe('custom')
+    if (phoneField?.type === 'custom') expect(phoneField.rendersOwnError).toBe(true)
+
+    const html = renderToStaticMarkup(React.createElement(phoneField!.component as any, mockRenderProps))
+    expect(html).toContain('+48')
+  })
+
+  it('renders phone input with default +1 country code when options are omitted', () => {
+    const fields = createPersonFormFields(t)
+    const phoneField = fields.find((f) => f.id === 'primaryPhone')
+    expect(phoneField).toBeDefined()
+
+    const html = renderToStaticMarkup(React.createElement(phoneField!.component as any, mockRenderProps))
+    expect(html).toContain('+1')
   })
 })

@@ -6,6 +6,7 @@ import { checkRateLimit, getClientIp, RATE_LIMIT_ERROR_FALLBACK } from '@open-me
 import type { RateLimiterService } from '@open-mercato/shared/lib/ratelimit/service'
 import type { EntityManager } from '@mikro-orm/postgresql'
 import { getWebhookHandler } from '@open-mercato/shared/modules/payment_gateways/types'
+import { markQueueJobOrigin } from '@open-mercato/shared/lib/queue/dispatchOrigin'
 import type { IntegrationLogService } from '../../../../integrations/lib/log-service'
 import type { PaymentGatewayService } from '../../../lib/gateway-service'
 import type { CredentialsService } from '../../../../integrations/lib/credentials-service'
@@ -13,6 +14,10 @@ import { GatewayTransaction } from '../../../data/entities'
 import { getPaymentGatewayQueue } from '../../../lib/queue'
 import { processPaymentGatewayWebhookJob } from '../../../lib/webhook-processor'
 import { paymentGatewaysTag } from '../../openapi'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+import { readBoundedRequestBody, WebhookBodyTooLargeError } from '@open-mercato/shared/lib/webhooks'
+
+const logger = createLogger('payment_gateways').child({ component: 'webhook' })
 
 export const metadata = {
   path: '/payment_gateways/webhook/[provider]',
@@ -39,7 +44,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ provide
   const rateLimitResponse = await checkProviderWebhookRateLimit(container, req, providerKey)
   if (rateLimitResponse) return rateLimitResponse
 
-  const rawBody = await req.text()
+  let rawBody: string
+  try {
+    rawBody = registration.maxBodyBytes === undefined
+      ? await req.text()
+      : await readBoundedRequestBody(req, { maxBytes: registration.maxBodyBytes })
+  } catch (error) {
+    if (error instanceof WebhookBodyTooLargeError) {
+      return NextResponse.json({ error: 'Webhook payload too large' }, { status: 413 })
+    }
+    throw error
+  }
   const headers: Record<string, string> = {}
   req.headers.forEach((value, key) => {
     headers[key] = value
@@ -97,18 +112,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ provide
 
     const scope = matchedScope
 
-    const jobPayload = {
+    const jobPayload = markQueueJobOrigin({
       providerKey,
       event,
       transactionId: transaction.id,
       scope,
-    }
+    }, 'inbound-webhook')
 
     if (process.env.QUEUE_STRATEGY === 'async') {
-      await queue.enqueue({
-        name: 'payment-gateway-webhook',
-        payload: jobPayload,
-      })
+      await queue.enqueue(jobPayload)
     } else {
       await processPaymentGatewayWebhookJob(
         {
@@ -122,7 +134,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ provide
 
     return NextResponse.json({ received: true, queued: true }, { status: 202 })
   } catch (err: unknown) {
-    console.warn(`[payment_gateways] Webhook verification failed for provider "${providerKey}"`, err)
+    logger.warn('Webhook verification failed', { providerKey, err })
     return NextResponse.json({ error: WEBHOOK_VERIFICATION_FAILED }, { status: 401 })
   }
 }
@@ -161,6 +173,7 @@ export const openApi = {
       responses: [
         { status: 202, description: 'Webhook accepted for async processing' },
         { status: 401, description: 'Signature verification failed' },
+        { status: 413, description: 'Webhook payload too large' },
         { status: 404, description: 'Unknown provider' },
       ],
     },

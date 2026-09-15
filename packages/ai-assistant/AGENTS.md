@@ -166,7 +166,7 @@ const listPeopleTool = defineAiTool({
 MUST rules:
 - MUST set `requiredFeatures` for any tool that reads or writes tenant data. The wildcard-aware ACL matcher is applied before the handler runs.
 - MUST use Zod for `inputSchema` — never raw JSON Schema.
-- MUST set `isMutation: true` on write tools. The policy gate strips these from read-only agents and from read-only tenant overrides.
+- MUST set `isMutation: true` on write tools. It gates read-only agents/overrides and drives the MCP `readOnlyHint` in `tools/list`.
 - MUST route every mutation tool through `prepareMutation(...)` (see the Mutation Approvals guide at `/framework/ai-assistant/mutation-approvals`). Writing directly inside the handler bypasses the approval gate — the runtime fails closed and refuses to return a result to the operator.
 - Mutation preview resolvers SHOULD return a normalized `after` snapshot and display hints when tool inputs contain dictionary IDs or other opaque values. Use `display.fieldLabels`, `display.before`, and `display.after` so `field-diff-card` shows operator-friendly names while `field`, `before`, and `after` keep the raw execution values.
 - MUST expose tools to an agent by listing the tool name in the agent's `allowedTools`. Tools not on the whitelist never reach the model.
@@ -353,7 +353,7 @@ The unified AI runtime picks the first configured provider from `llmProviderRegi
 | `GROQ_API_KEY` | Groq | `llama-3.3-70b-versatile` | `GROQ_BASE_URL` |
 | `TOGETHER_API_KEY` | Together AI | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | `TOGETHER_BASE_URL` |
 | `FIREWORKS_API_KEY` | Fireworks AI | `accounts/fireworks/models/llama-v3p3-70b-instruct` | `FIREWORKS_BASE_URL` |
-| `AZURE_OPENAI_API_KEY` | Azure OpenAI | `gpt-5-mini` | `AZURE_OPENAI_BASE_URL` (required) |
+| `AZURE_OPENAI_API_KEY` | Azure OpenAI / Foundry | `gpt-5-mini` | `AZURE_OPENAI_RESOURCE_NAME` (preferred) or `AZURE_OPENAI_BASE_URL` — one is required |
 | `LITELLM_API_KEY` | LiteLLM | `gpt-4o-mini` | `LITELLM_BASE_URL` |
 | `OLLAMA_API_KEY` | Ollama (local) | `llama3.3` | `OLLAMA_BASE_URL` |
 | `OPENROUTER_API_KEY` | OpenRouter | `meta-llama/llama-3.3-70b-instruct` | `OPENROUTER_BASE_URL` |
@@ -385,6 +385,8 @@ Per-module overrides (Phase 1 of the same spec — agent-default provider + per-
 | `OM_AI_<MODULE>_MODEL` | Optional. Per-module model override, uppercased from the agent's `moduleId`. Examples: `OM_AI_CATALOG_MODEL=claude-opus-4-20250514`, `OM_AI_INBOX_OPS_MODEL=gpt-4o`. The legacy `<MODULE>_AI_MODEL` form (e.g. `INBOX_OPS_AI_MODEL`) is read as a backward-compatibility fallback. Accepts a slash-qualified `<provider>/<model>` shorthand. |
 | `OM_AI_<MODULE>_PROVIDER` | Optional. Per-module provider override, uppercased from the agent's `moduleId`. Examples: `OM_AI_CATALOG_PROVIDER=openai`, `OM_AI_INBOX_OPS_PROVIDER=anthropic`. The legacy `<MODULE>_AI_PROVIDER` form (e.g. `INBOX_OPS_AI_PROVIDER`) is read as a backward-compatibility fallback. Provider-only preferences can fall through when unconfigured; paired provider/model overrides fail closed. |
 
+Azure is a **native** Responses-API adapter, not an OpenAI-compatible preset: [`.ai/docs/opencode-runtime.md`](../../.ai/docs/opencode-runtime.md).
+
 All new callers MUST use `createModelFactory(container)` from `@open-mercato/ai-assistant/modules/ai_assistant/lib/model-factory` — never inline provider SDK calls (`createAnthropic`, `createOpenAI`, `createGoogleGenerativeAI`). The factory enforces the resolution order (caller override → `OM_AI_<MODULE>_MODEL` → `agentDefaultModel` → `OM_AI_MODEL` → provider default) and throws the documented `AiModelFactoryError` codes when misconfigured. See **Model Resolution** below.
 
 Operator-defined allowlist (Phase 1780-5) — the ULTIMATE constraint that clips every other source. When set, the settings UI is clipped to the allowed subset, the chat-UI `<ModelPicker>` only offers these values, the dispatcher rejects out-of-allowlist `?provider=` / `?model=` query params with typed 400 errors, and the model-factory swaps to a safe pair (emitting `console.warn` and an `allowlistFallback` field on the resolution) whenever an agent default, tenant override, or higher-priority source resolves to something blocked.
@@ -413,7 +415,7 @@ Per-agent provider/model overrides are edited from `/backend/config/ai-assistant
 | `PUT /api/ai_assistant/settings/allowlist` | Persists the tenant snapshot. Body validates against env first — out-of-env entries are rejected with `provider_not_in_env_allowlist` / `model_not_in_env_allowlist` 400 codes. Tenant allowlist may NEVER widen the env allowlist. |
 | `DELETE /api/ai_assistant/settings/allowlist` | Soft-deletes the row; runtime falls back to env-only enforcement. Idempotent — `{ cleared: false }` when no active row exists. |
 | `PUT /api/ai_assistant/settings` (runtime override) | Re-validates against the **effective** allowlist when an `org_id`/tenant snapshot is available, so admins can't store an override that the tenant allowlist would later reject. |
-| `GET /api/ai_assistant/ai/agents/:id/models` | Picker response is clipped to the effective allowlist. The `<ModelPicker>` therefore only offers tenant-permitted values out of the box. |
+| `GET /api/ai_assistant/ai/agents/:id/models` | Picker response is clipped to the effective allowlist. The `<ModelPicker>` therefore only offers tenant-permitted values out of the box. A failed tenant-scoped lookup returns 200 with a non-authoritative `degraded` list. |
 | `POST /api/ai_assistant/ai/chat?provider=&model=` | Chat dispatcher rejects out-of-effective-allowlist query params with the same `provider_not_allowlisted` / `model_not_allowlisted` codes. The error message names "the effective allowlist (env ∩ tenant)" when the tenant snapshot contributes a narrowing. |
 | `createModelFactory(...).resolveModel({ tenantAllowlist })` | The factory accepts an optional snapshot and intersects it with env at resolution time, so a stale tenant override or higher-priority source can never escape the effective set. Falls back via `allowlist_fallback` (same telemetry shape as Phase 1780-5). |
 
@@ -494,7 +496,7 @@ packages/ai-assistant/
 │   ├── modules/ai_assistant/
 │   │   ├── index.ts                # Module exports
 │   │   ├── acl.ts                  # Permission definitions
-│   │   ├── cli.ts                  # CLI commands (mcp:serve, mcp:serve-http)
+│   │   ├── cli.ts                  # CLI commands (mcp:serve, mcp:serve-http, mcp:ensure-api-key)
 │   │   ├── di.ts                   # Module DI container
 │   │   │
 │   │   ├── lib/
@@ -623,6 +625,8 @@ The provider axis is resolved through `llmProviderRegistry.resolveFirstConfigure
 8. `OM_AI_PROVIDER` (legacy `OPENCODE_PROVIDER`) env (Phase 0).
 
 Provider-only preferences can fall through when the named provider is registered but unconfigured. Provider/model pairs are atomic: slash-qualified model ids and same-source provider/model settings fail closed when their provider is unconfigured, instead of sending a provider-specific model id to a different provider.
+
+**Vendor-prefix gateways (OpenRouter, Requesty, LiteLLM).** These OpenAI-compatible gateways use `vendor/model` model ids (e.g. `anthropic/claude-sonnet-4.5`), which collide with the slash-shorthand provider pin. Each such preset sets `usesVendorPrefixedModelIds: true` (surfaced on the `LlmProvider` port). Rule: **within a single resolution tier**, when that tier's explicit provider hint selects a *configured* vendor-prefix gateway, the tier's model token is NOT slash-split — the leading `vendor/` is part of the gateway model id (at most one leading `${gateway}/` is stripped, so the legacy `openrouter/anthropic/…` form still resolves without doubling). So `OM_AI_PROVIDER=openrouter` + `OM_AI_MODEL=anthropic/claude-sonnet-4.5` routes the full id to OpenRouter. The suppression is **intra-tier and gateway-configured only**: a higher-tier slash pin (e.g. a caller `openai/gpt-5-mini`) still wins, an *unconfigured* gateway hint still falls through to the native split, and a native provider hint (`OM_AI_PROVIDER=anthropic`) still pins natively. A caller-tier `modelOverride: 'anthropic/…'` under a *global* `OM_AI_PROVIDER=openrouter` still pins native anthropic — the caller tier carries no gateway provider hint. The persisted `provider/model` label is composed with `joinProviderModel(...)` (`@open-mercato/shared/lib/ai/model-id`), which never doubles an existing prefix.
 
 The factory throws `AiModelFactoryError` with `code: 'no_provider_configured'`
 when the registry has no configured provider and `code: 'api_key_missing'`
@@ -771,6 +775,8 @@ interface CommandPaletteContextValue {
 
 ## Running the Stack
 
+Dev modes (**hybrid** default): [`.ai/docs/opencode-runtime.md`](../../.ai/docs/opencode-runtime.md).
+
 ### Choose an MCP Server Mode
 
 | Feature | Dev (`mcp:dev`) — when to use | Production (`mcp:serve`) — when to use |
@@ -809,7 +815,9 @@ Configure via `.mcp.json`:
 Use for web-based AI chat. Requires two-tier auth: server API key + user session tokens.
 
 ```bash
-# Requires MCP_SERVER_API_KEY in .env
+# Host mode: requires a valid omk_ key in MCP_SERVER_API_KEY (.env).
+# The containerized fullapp stacks skip this entirely — their mcp service
+# self-provisions a key via `mercato ai_assistant mcp:ensure-api-key`.
 yarn mcp:serve
 ```
 
@@ -826,8 +834,8 @@ yarn mcp:serve
 
 2. Start OpenCode (Docker):
    ```bash
-   docker start opencode-mvp
-   # Or: docker-compose up opencode
+   docker start mercato-opencode
+   # Or: docker compose --project-directory . -f starters/docker/compose.infra.yml up -d opencode
    ```
 
 3. Verify connectivity:
@@ -875,6 +883,16 @@ yarn mcp:serve
 ## Events
 
 Typed pending-action lifecycle events live in `src/modules/ai_assistant/events.ts` and are emitted via the shared `emitAiAssistantEvent` helper (`createModuleEvents`). The three ids are FROZEN per `BACKWARD_COMPATIBILITY.md` §5 and MUST NOT be renamed; payload fields are additive-only. `ai.action.confirmed` fires from `executePendingActionConfirm` with `{ pendingActionId, agentId, toolName, status, tenantId, organizationId, userId, resolvedByUserId, resolvedAt, executionResult, failedRecords? }`; `ai.action.cancelled` fires from `executePendingActionCancel` with the same shape plus an optional `reason`; `ai.action.expired` fires from the cancel helper's TTL short-circuit (and the Step 5.12 cleanup worker) with `resolvedByUserId: null` and additional `expiresAt` / `expiredAt` timestamps. All three use `category: 'system'` and `entity: 'ai_pending_action'`.
+
+`ai_assistant.moderation_flag.created` (`entity: 'ai_moderation_flag'`) fires best-effort from the input-moderation gate; payload carries flagged category names only, never prompt content.
+
+## Input moderation & safety identifiers
+
+Guide: [`moderation.mdx`](../../apps/docs/docs/framework/ai-assistant/moderation.mdx) + spec `.ai/specs/2026-06-04-ai-input-moderation-and-safety-identifiers.md`. Envs: `OM_AI_INPUT_MODERATION`, `OM_AI_MODERATION_MODEL`.
+
+- Enforced surfaces (`untrustedInput`) fail **closed**; opt-in surfaces fail **open**.
+- Flagged categories are audit-only — never send them to the client.
+- The audit write is best-effort and MUST NOT block the rejection.
 
 ## Rules for the OpenCode Client
 
@@ -948,45 +966,9 @@ The module deliberately **does not** call `searchService.bulkIndex(...)` on boot
 
 ## Docker Configuration
 
-### Rules for the OpenCode Container
+MUST keep port 4096 for OpenCode, MUST mount `opencode.json` at `/root/.opencode/opencode.json`, and MUST use `host.docker.internal` (not `localhost`) for Docker→host calls. File-defined agents generate into `docker/opencode/{agents,skills}/`; after editing any `agents/<id>/` file run `yarn generate` and **restart** OpenCode.
 
-When modifying the Docker setup, follow this structure:
-
-```yaml
-# docker-compose.yml
-services:
-  opencode:
-    build: ./docker/opencode
-    container_name: opencode-mvp
-    ports:
-      - "4096:4096"
-    environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-    volumes:
-      - ./docker/opencode/opencode.json:/root/.opencode/opencode.json
-```
-
-MUST keep port 4096 for OpenCode. MUST mount `opencode.json` to `/root/.opencode/opencode.json`.
-
-### OpenCode Config
-
-```json
-{
-  "provider": "anthropic",
-  "model": "claude-sonnet-4-20250514",
-  "mcp": {
-    "open-mercato": {
-      "type": "sse",
-      "url": "http://host.docker.internal:3001/mcp",
-      "headers": {
-        "x-api-key": "omk_..."
-      }
-    }
-  }
-}
-```
-
-MUST use `host.docker.internal` (not `localhost`) for Docker-to-host communication.
+Compose structure, the `opencode.json` MCP block, container paths, propose-only: [`.ai/docs/opencode-runtime.md`](../../.ai/docs/opencode-runtime.md).
 
 ## Rules for the Debug Panel
 
@@ -1156,16 +1138,17 @@ console.log('[AI Chat] DIAGNOSTIC - Request received:', {
 Use this tier to validate that requests come from an authorized AI agent (e.g., OpenCode).
 
 ```
-Request → Check x-api-key header → Compare with MCP_SERVER_API_KEY env var
+Request → Check x-api-key header → Validate against the api_keys table (findApiKeyBySecret)
 ```
 
 | Aspect | MUST rules |
 |--------|------------|
 | **Header** | MUST use `x-api-key` — no other header name |
-| **Value** | MUST match `MCP_SERVER_API_KEY` environment variable exactly |
-| **Configured In** | MUST set in `opencode.json` or `opencode.jsonc` |
-| **Validation** | MUST use constant-time string comparison |
-| **Result** | Grants access to call MCP endpoints (but no user permissions) |
+| **Value** | MUST be a valid, non-expired `omk_` API-key secret from the `api_keys` table |
+| **Delivery to OpenCode** | `MCP_SERVER_API_KEY` env var when set (wins); otherwise the file at `MCP_SERVER_API_KEY_FILE` — the containerized stacks' `mcp` service provisions it idempotently via `mercato ai_assistant mcp:ensure-api-key` into the shared `mcp_shared` volume |
+| **Configured In** | Generated into `opencode.jsonc` by `docker/opencode/entrypoint.sh` |
+| **Validation** | Prefix-indexed lookup + bcrypt verification (`findApiKeyBySecret`) |
+| **Result** | Grants access to call MCP endpoints; header-only calls resolve ACL context via the key's `createdBy` user |
 
 **Code reference**: `packages/ai-assistant/src/modules/ai_assistant/lib/http-server.ts:370-391`
 
@@ -1464,6 +1447,64 @@ Agents that need multi-step tool loops configure the `loop` block on `AiAgentDef
 
 ## Changelog
 
+### 2026-07-07 - Containerized MCP server + file-based key delivery
+
+**What changed**:
+- New CLI command `mercato ai_assistant mcp:ensure-api-key --file <path> [--name] [--email] [--rotate]` (`cli.ts` + `lib/mcp-ensure-api-key.ts`): idempotently ensures a valid `__mcp_server__` API key exists (anchored on the plaintext secret file — the DB stores only bcrypt hashes) and rotates it when the file secret no longer resolves. The key is created with `createdBy` = the superadmin user (resolved via the encrypted-email-aware `$or` emailHash lookup) so header-only MCP calls get an ACL context; stale-key cleanup is scoped to the owner's tenant. The secret is never printed or logged.
+- The fullapp compose stacks gain a dedicated `mcp` service (port 3001) that reuses the app image, waits for the app over HTTP, provisions the key into the shared `mcp_shared` volume (world-readable inside the volume — the OpenCode container reads it as a non-root user; the volume boundary is the security boundary), then runs `mcp:serve-http`.
+- `docker/opencode/entrypoint.sh` gains a file fallback: when `MCP_SERVER_API_KEY` is empty and `MCP_SERVER_API_KEY_FILE` is set, it waits for MCP `/health` before reading the file; on timeout or read failure it starts headerless (old degraded behavior) with loud warnings instead of crash-looping.
+- `GET /api/ai_assistant/settings` `mcpKeyConfigured` now also validates a file-delivered key against the `api_keys` table (existence alone would go stale across DB resets).
+
+**Backward compatibility**: additive. With `MCP_SERVER_API_KEY_FILE` unset the OpenCode entrypoint behaves byte-for-byte as before; host-MCP mode (`yarn mcp:serve` + `MCP_SERVER_API_KEY`) is unchanged. Spec: `.ai/specs/2026-07-07-windows-one-command-agentic-dev-environment.md`.
+
+### 2026-08-05 - @app module entries are compiled, not raw TS
+
+`compileAndImportGenerated` (`lib/generated-registry-loader.ts`) compiles every `@app` module entry a generated registry references into `<appRoot>/.mercato/generated/app-modules/`, via the new `compileAppSourceFile` in `shared/lib/bootstrap/dynamicLoader` (reuses `loadBootstrapData`'s esbuild bundle and dep cache; packages stay external). The 2026-06-24 fix below only rewrote the specifier to an absolute `.ts` path, which holds while the target's graph stays inside Node's type stripping — a real module's does not (`./di` is extensionless, `./data/entities` has decorators), so the first app-local `ai-tools.ts` killed the registry. Uncompilable modules log and fall back to the raw path. Additive: the artifact map is an optional third `rewriteGeneratedAliasImports` arg.
+
+### 2026-06-24 - MCP dev server loads ai-tools for @app local modules (#3524)
+
+**What changed** (`lib/generated-registry-loader.ts`):
+- `rewriteGeneratedAliasImports` now also rewrites the `../../src/...` relative imports the generator emits for `@app` local modules (e.g. `from "../../src/modules/<id>/ai-tools"`), resolving them against the generated file's directory (`<appRoot>/.mercato/generated`) to absolute `file://` URLs with the same `.ts`-suffix probe used for `@/` aliases. Previously only `@/` aliases were rewritten, so the `../../src/...` specifier passed through `esbuild.transform` (transpile-only) into the compiled `.mjs` and Node ESM threw `ERR_MODULE_NOT_FOUND` resolving the extensionless `.ts`-only target. Package-backed modules (`@open-mercato/*`) were never affected — their bare specifiers resolve through `node_modules` to compiled `.js`.
+
+**Files**: `lib/generated-registry-loader.ts`. Regression test: `lib/__tests__/generated-registry-loader.test.ts` (3 cases covering static import, dynamic `import()`, and `.ts`-suffix resolution for the `../../src/...` shape).
+
+**Backward compatibility**: Strictly additive — the `rewriteGeneratedAliasImports(source, appRoot)` signature is unchanged, and `@/` aliases, bare package imports, and sibling `./` imports keep their prior behavior. Only previously-broken `../../src/...` specifiers change (from unresolved to resolved).
+
+### 2026-06-11 - Rate-limit AI chat dispatch routes (#2975)
+
+**What changed**:
+- Both AI chat dispatch handlers — `POST /api/ai_assistant/ai/chat` (`api/ai/chat/route.ts`) and the legacy `POST /api/chat` (`api/chat/route.ts`) — now consult a per-user/per-tenant rate limit before running the LLM agent loop, per-turn DB reads/writes, and (legacy) the ephemeral `api_keys` insert.
+- Added `lib/rate-limit.ts` exporting `checkAiChatRateLimit({ req, container, userId, tenantId })`. It resolves the already-registered `rateLimiterService` from the request DI container (NOT a static `@open-mercato/core` import — core is not a dependency of this package), builds an additive `RATE_LIMIT_AI_CHAT_*` bucket via `readEndpointRateLimitConfig`, keys on `userId:tenantId`, and returns a typed 429 on breach.
+- **Fail-open**, mirroring auth's `checkAuthRateLimit`: when the limiter service is unavailable (unregistered, null, throws) the request proceeds unthrottled. No response shape, DI key, route, or event-id change.
+
+**New environment variables** (all optional, additive):
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `RATE_LIMIT_AI_CHAT_POINTS` | `30` | Max chat turns per window per user/tenant. |
+| `RATE_LIMIT_AI_CHAT_DURATION` | `60` | Window length (seconds). |
+| `RATE_LIMIT_AI_CHAT_BLOCK_DURATION` | unset | Optional block window (seconds) after breach. |
+| `OM_TEST_AI_CHAT_RATE_LIMIT_MODE` | unset | Set to `opt-in` (with `OM_TEST_MODE=1`) so the bucket is only exercised when a request sends `x-om-test-rate-limit: on`, mirroring auth's test opt-in. |
+
+The global `RATE_LIMIT_ENABLED` kill switch (auto-off under `OM_INTEGRATION_TEST`) still disables the bucket wholesale.
+
+**Files**:
+- Added `lib/rate-limit.ts` + `lib/__tests__/rate-limit.test.ts`.
+- `api/ai/chat/route.ts`, `api/chat/route.ts` — call the gate near the top of the POST handler (legacy route reuses the request container resolved for the answerQuestion ownership re-check).
+
+### 2026-06-11 - Harden latent MCP server-config module (#2672)
+
+**What changed** (`lib/mcp-server-config.ts`, currently dead code — no callers):
+- Added `validateMcpServerUrl()` (exported): restricts external MCP server URLs to `http:`/`https:` (blocks `file:`/`gopher:`/`data:` local-file disclosure) and rejects literal loopback, link-local (`169.254.0.0/16`, `fe80::/10`), and RFC1918 private hosts plus `localhost`/`0.0.0.0`/IPv4-mapped IPv6 — reducing SSRF exposure if a management route is ever wired up. `validateMcpServerConfig` now uses it for HTTP configs.
+- `saveMcpServerConfig` / `updateMcpServerConfig` now call `validateMcpServerConfig` and throw on invalid input, so persistence is **fail-closed**.
+- `generateId()` now uses `randomUUID()` (CSPRNG) instead of `Date.now()` + `Math.random()`.
+
+Note: the guard is intentionally NOT added to `mcp-client.ts` `connectHttp`, which legitimately connects to the app's own loopback MCP server (`localhost:3001`). DNS-rebinding (resolution-time checks) is out of scope for this dead-code hardening.
+
+**Files**: `lib/mcp-server-config.ts`. Regression test: `lib/__tests__/mcp-server-config-hardening.test.ts`.
+
+**Backward compatibility**: `validateMcpServerUrl` is additive. The module has no callers, so the tightened HTTP validation + fail-closed persistence change no live behavior.
+
 ### 2026-06-11 - MCP stdio server fails closed without auth (#2673)
 
 **What changed**:
@@ -1526,20 +1567,9 @@ Agents that need multi-step tool loops configure the `loop` block on `AiAgentDef
 - Removed auto-discovered module AI tools from `ai-tools.generated.ts`
 - Token savings: from ~10+ tool schemas to exactly 2, with fixed footprint regardless of API surface growth
 
-**Files created**:
-- `lib/codemode-tools.ts` — `search` and `execute` tool definitions
-- `lib/sandbox.ts` — `node:vm` sandbox executor with security restrictions
-- `lib/truncate.ts` — Response size limiter (40K chars / ~10K tokens)
+**Files created**: `lib/codemode-tools.ts` (the two tool definitions), `lib/sandbox.ts` (`node:vm` executor), `lib/truncate.ts` (40K-char response limiter) — all three described under "Rules for Code Mode Internals" above.
 
-**Files modified**:
-- `lib/api-endpoint-index.ts` — Added `getRawOpenApiSpec()` for raw spec caching
-- `lib/tool-loader.ts` — Loads Code Mode tools instead of legacy tools + module tools
-- `lib/http-server.ts` — Pre-caches raw OpenAPI spec at startup
-- `lib/mcp-server.ts` — Generates entity graph and caches spec for stdio mode
-
-**Files kept but unused**:
-- `lib/api-discovery-tools.ts` — Old find_api/call_api (no longer imported, deleted in #1876)
-- `lib/entity-graph-tools.ts` — Old discover_schema (no longer imported, deleted in #1876)
+**Files modified**: `lib/api-endpoint-index.ts` (raw spec caching), `lib/tool-loader.ts`, `lib/http-server.ts`, `lib/mcp-server.ts`. The superseded `lib/api-discovery-tools.ts` and `lib/entity-graph-tools.ts` were later deleted in #1876.
 
 ### 2026-01-17 - Session Persistence Fix
 
@@ -1554,62 +1584,18 @@ Agents that need multi-step tool loops configure the `loop` block on `AiAgentDef
 2. **React stale closure**: `handleSubmit` callback captured initial `null` sessionId value.
 
 **Fixes applied**:
-- `opencode-handlers.ts`: Removed Promise.race, await only SSE eventPromise
-- `useCommandPalette.ts`: Added `opencodeSessionIdRef` (ref) alongside state to avoid stale closures
-
-**Files modified**:
-- `src/modules/ai_assistant/lib/opencode-handlers.ts` - Fixed Promise.race completion bug
-- `src/frontend/hooks/useCommandPalette.ts` - Added ref pattern for sessionId
-
-**Diagnostic logging added** (can be removed after verification):
-- `[handleSubmit] DIAGNOSTIC` - Session check before routing
-- `[sendAgenticMessage] DIAGNOSTIC` - Request payload before fetch
-- `[startAgenticChat] DIAGNOSTIC` - Done event handling
-- `[AI Chat] DIAGNOSTIC` - Backend request received
+- `lib/opencode-handlers.ts`: removed `Promise.race`, await only the SSE eventPromise
+- `src/frontend/hooks/useCommandPalette.ts`: added `opencodeSessionIdRef` alongside state to avoid stale closures
 
 ### 2026-01 - OpenCode Integration
 
 **Lesson learned:** When replacing an AI backend, preserve the session management contract — the frontend depends on `sessionId` in `done` events regardless of the underlying AI engine.
 
-**Major change**: Replaced Vercel AI SDK with OpenCode as the AI backend.
+Replaced the Vercel AI SDK with OpenCode: the chat API routes to OpenCode, session management carries conversation context, and OpenCode reaches tools through the MCP server. Current shape: "Rules for the Chat Flow" and "Rules for Session Management" above; see git history for per-file detail.
 
-**What changed**:
-- Chat API now routes all requests to OpenCode
-- Added session management for conversation context
-- Added "Agent is working..." indicator
-- OpenCode connects to MCP server for tools
-- Removed direct AI provider integration
+### 2026-01 - API Discovery Tools / Hybrid Tool Discovery (superseded)
 
-**Files modified**:
-- `src/modules/ai_assistant/api/chat/route.ts` - Complete rewrite to use OpenCode
-- `src/frontend/hooks/useCommandPalette.ts` - Added session state, thinking indicator
-- `src/frontend/components/CommandPalette/ToolChatPage.tsx` - Added thinking UI
-- `src/frontend/types.ts` - Added ChatSSEEvent, isThinking
-
-### 2026-01 - API Discovery Tools
-
-**Lesson learned:** Exposing hundreds of individual tools overwhelms the AI context. Use meta-tools (discover, schema, execute) to let the agent dynamically find what it needs.
-
-**Major change**: Replaced 600+ individual tools with 3 meta-tools.
-
-**What changed**:
-- Added `api_discover`, `api_execute`, `api_schema` tools
-- Created `ApiEndpointIndex` for OpenAPI introspection
-- Hybrid discovery: search + OpenAPI
-- 405 endpoints available via discovery
-
-**Files created**:
-- `lib/api-discovery-tools.ts`
-- `lib/api-endpoint-index.ts`
-
-### 2026-01 - Hybrid Tool Discovery
-
-**Lesson learned:** Neither search-based nor OpenAPI-based discovery alone covers all tools — combine both for comprehensive results.
-
-**What changed**:
-- Combined semantic search with OpenAPI introspection
-- Tools indexed for fulltext search
-- API endpoints indexed from OpenAPI spec
+**Lesson learned:** Exposing hundreds of individual tools overwhelms the AI context — use meta-tools the agent can search. Superseded by Code Mode (2026-02-22); the tools and files these entries described (`api_discover`, `api_schema`, `lib/api-discovery-tools.ts`, `lib/entity-graph-tools.ts`) were deleted in #1876. See git history for the detail.
 
 ### Previous Changes
 

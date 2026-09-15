@@ -24,12 +24,17 @@ import {
   getCurrentOrganizationScope,
   subscribeOrganizationScopeChanged,
 } from '@open-mercato/shared/lib/frontend/organizationEvents'
+import { readVersionedPreference, writeVersionedPreference } from '@open-mercato/shared/lib/browser/versionedPreference'
+import { createLogger } from '@open-mercato/shared/lib/logger'
 import {
   createAiServerConversation,
   listAiServerConversations,
   updateAiServerConversation,
   type AiServerConversation,
 } from './conversation-store'
+import { useAiAssistantAvailable } from './useAiAssistantAvailable'
+
+const logger = createLogger('ui').child({ component: 'AiChatSessions' })
 
 /**
  * Legacy app-global storage key used before tenant/org scoping.
@@ -108,57 +113,62 @@ function makeId(): string {
   return `${Date.now().toString(16)}-${rand()}-${rand()}`
 }
 
-function readPersisted(storageKey: string): AiChatSessionsState {
-  if (typeof window === 'undefined') return { sessions: [], activeByAgent: {} }
-  try {
-    const raw = window.localStorage.getItem(storageKey)
-    if (!raw) return { sessions: [], activeByAgent: {} }
-    const parsed = JSON.parse(raw) as Partial<AiChatSessionsState> | null
-    const sessions = Array.isArray(parsed?.sessions)
-      ? (parsed!.sessions as unknown[])
-          .filter((entry): entry is AiChatSession => {
-            if (!entry || typeof entry !== 'object') return false
-            const value = entry as Record<string, unknown>
-            return (
-              typeof value.id === 'string' &&
-              typeof value.agentId === 'string' &&
-              typeof value.conversationId === 'string' &&
-              typeof value.createdAt === 'number' &&
-              typeof value.lastUsedAt === 'number' &&
-              (value.status === 'open' || value.status === 'closed')
-            )
-          })
-          .map((entry) => {
-            const value = entry as unknown as Record<string, unknown>
-            const candidate = value.name
-            return {
-              ...entry,
-              name: typeof candidate === 'string' ? candidate : undefined,
-            }
-          })
-      : []
-    const activeByAgent =
-      parsed?.activeByAgent && typeof parsed.activeByAgent === 'object'
-        ? Object.fromEntries(
-            Object.entries(parsed.activeByAgent as Record<string, unknown>).filter(
-              (entry): entry is [string, string] =>
-                typeof entry[0] === 'string' && typeof entry[1] === 'string',
-            ),
-          )
-        : {}
-    return { sessions, activeByAgent }
-  } catch {
-    return { sessions: [], activeByAgent: {} }
-  }
+// Versioned-envelope discriminator for the persisted sessions cache. Bump when
+// the stored shape changes incompatibly; legacy bare `{ sessions, activeByAgent }`
+// values are migrated forward on the next write. See
+// `@open-mercato/shared/lib/browser/versionedPreference`.
+const AI_CHAT_SESSIONS_VERSION = 1
+
+function isPersistedSessionsShape(value: unknown): value is Partial<AiChatSessionsState> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
-function writePersisted(storageKey: string, state: AiChatSessionsState): void {
-  if (typeof window === 'undefined') return
-  try {
-    window.localStorage.setItem(storageKey, JSON.stringify(state))
-  } catch {
-    /* quota / privacy mode — drop silently */
-  }
+export function readPersisted(storageKey: string): AiChatSessionsState {
+  const parsed = readVersionedPreference<Partial<AiChatSessionsState> | null>(
+    storageKey,
+    AI_CHAT_SESSIONS_VERSION,
+    (value): value is Partial<AiChatSessionsState> | null => isPersistedSessionsShape(value),
+    null,
+    { legacyIsValid: (value): value is Partial<AiChatSessionsState> | null => isPersistedSessionsShape(value) },
+  )
+  if (!parsed) return { sessions: [], activeByAgent: {} }
+  const sessions = Array.isArray(parsed.sessions)
+    ? (parsed.sessions as unknown[])
+        .filter((entry): entry is AiChatSession => {
+          if (!entry || typeof entry !== 'object') return false
+          const value = entry as Record<string, unknown>
+          return (
+            typeof value.id === 'string' &&
+            typeof value.agentId === 'string' &&
+            typeof value.conversationId === 'string' &&
+            typeof value.createdAt === 'number' &&
+            typeof value.lastUsedAt === 'number' &&
+            (value.status === 'open' || value.status === 'closed')
+          )
+        })
+        .map((entry) => {
+          const value = entry as unknown as Record<string, unknown>
+          const candidate = value.name
+          return {
+            ...entry,
+            name: typeof candidate === 'string' ? candidate : undefined,
+          }
+        })
+    : []
+  const activeByAgent =
+    parsed.activeByAgent && typeof parsed.activeByAgent === 'object'
+      ? Object.fromEntries(
+          Object.entries(parsed.activeByAgent as Record<string, unknown>).filter(
+            (entry): entry is [string, string] =>
+              typeof entry[0] === 'string' && typeof entry[1] === 'string',
+          ),
+        )
+      : {}
+  return { sessions, activeByAgent }
+}
+
+export function writePersisted(storageKey: string, state: AiChatSessionsState): void {
+  writeVersionedPreference(storageKey, AI_CHAT_SESSIONS_VERSION, state)
 }
 
 function serverConversationToSession(
@@ -205,6 +215,7 @@ function mergeServerConversations(
 }
 
 export function AiChatSessionsProvider({ children }: { children: React.ReactNode }) {
+  const aiAvailable = useAiAssistantAvailable()
   // Hydrate synchronously via a lazy initializer. The previous "empty
   // state + post-mount load effect" pattern had a window where the
   // persistence effect ran with the empty closure value (because the
@@ -245,16 +256,31 @@ export function AiChatSessionsProvider({ children }: { children: React.ReactNode
     writePersisted(storageKey, state)
   }, [storageKey, state])
 
+  // The provider wraps the whole backend shell, so it also mounts on
+  // installations without the `ai_assistant` module and for users without
+  // `ai_assistant.view`. Syncing there only produces a 404 / 403 and a warning
+  // on every page load, so skip it — `aiAvailable` is in the dependency list
+  // so the sync still runs once the backend chrome payload arrives.
   React.useEffect(() => {
+    if (!aiAvailable) return
     let cancelled = false
-    void listAiServerConversations({ limit: 100 }).then((conversations) => {
-      if (cancelled || !conversations) return
-      setState((prev) => mergeServerConversations(prev, conversations))
-    })
+    listAiServerConversations({ limit: 100 })
+      .then((conversations) => {
+        if (cancelled) return
+        if (!conversations) {
+          logger.warn('Could not load server conversations; keeping the locally persisted sessions')
+          return
+        }
+        setState((prev) => mergeServerConversations(prev, conversations))
+      })
+      .catch((err) => {
+        if (cancelled) return
+        logger.error('Failed to load server conversations', { err })
+      })
     return () => {
       cancelled = true
     }
-  }, [storageKey])
+  }, [aiAvailable, storageKey])
 
   const update = React.useCallback(
     (mutator: (prev: AiChatSessionsState) => AiChatSessionsState) => {

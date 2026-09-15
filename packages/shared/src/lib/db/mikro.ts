@@ -4,6 +4,14 @@ import { MikroORM } from '@mikro-orm/core'
 import { ReflectMetadataProvider } from '@mikro-orm/decorators/legacy'
 import { PostgreSqlDriver, type EntityManager as PostgreSqlEntityManager } from '@mikro-orm/postgresql'
 import { getSslConfig } from './ssl'
+import { createLogger } from '../logger'
+import { findDuplicateRegisteredEntityClassNames } from './duplicateEntities'
+import {
+  toDuplicateEntityClassNameFields,
+  type DuplicateEntityClassNameGroup,
+} from './duplicateEntityClassNames'
+
+const logger = createLogger('shared').child({ component: 'orm' })
 
 export type AppMikroORM = MikroORM<PostgreSqlDriver, PostgreSqlEntityManager<PostgreSqlDriver>>
 
@@ -11,6 +19,30 @@ let ormInstance: AppMikroORM | null = null
 
 // Use globalThis so standalone apps survive duplicated shared package module instances.
 const GLOBAL_ENTITIES_KEY = '__openMercatoOrmEntities__'
+// Same reason, plus HMR: a module-level map would reset on the very reloads it exists to
+// deduplicate across.
+const GLOBAL_REPORTED_DUPLICATE_ENTITY_NAMES_KEY = '__openMercatoReportedDuplicateEntityClassNames__'
+
+function getReportedDuplicateEntityClassNames(): Map<string, string> {
+  const globals = globalThis as Record<string, unknown>
+  const existing = globals[GLOBAL_REPORTED_DUPLICATE_ENTITY_NAMES_KEY]
+  if (existing instanceof Map) return existing as Map<string, string>
+  const created = new Map<string, string>()
+  globals[GLOBAL_REPORTED_DUPLICATE_ENTITY_NAMES_KEY] = created
+  return created
+}
+
+/**
+ * Identifies a collision by the modules and files that contribute to it, so a
+ * re-registration reporting the same name from a different pair of modules is a new
+ * collision rather than a repeat.
+ */
+function fingerprintCollision(group: DuplicateEntityClassNameGroup): string {
+  return group.sources
+    .map((source) => `${source.moduleId ?? ''}|${source.sourcePath ?? ''}`)
+    .sort((left, right) => left.localeCompare(right))
+    .join(',')
+}
 
 function getRegisteredEntities(): any[] | null {
   return (globalThis as Record<string, unknown>)[GLOBAL_ENTITIES_KEY] as any[] | null ?? null
@@ -20,9 +52,35 @@ function setRegisteredEntities(entities: any[]): void {
   (globalThis as Record<string, unknown>)[GLOBAL_ENTITIES_KEY] = entities
 }
 
+/**
+ * A duplicate entity class name across modules corrupts entity resolution silently, and
+ * no build step catches it. Report it here — the one point every registration path goes
+ * through — so the logs name the cause instead of only its distant symptoms.
+ */
+function warnOnDuplicateEntityClassNames(entities: readonly unknown[]): void {
+  try {
+    const duplicates = findDuplicateRegisteredEntityClassNames(entities)
+    // Development re-runs registration on every HMR reload, so report a collision only
+    // when it appears or its contributing modules change. Reprinting the same warning on
+    // every reload buries it, while tracking the previous registration rather than every
+    // name ever seen keeps a collision that was fixed and reintroduced reportable.
+    const reported = getReportedDuplicateEntityClassNames()
+    const current = new Map(duplicates.map((group) => [group.className, fingerprintCollision(group)]))
+    const fresh = duplicates.filter((group) => reported.get(group.className) !== current.get(group.className))
+    reported.clear()
+    for (const [className, fingerprint] of current) reported.set(className, fingerprint)
+    if (fresh.length === 0) return
+    logger.warn('Duplicate entity class names across enabled modules', toDuplicateEntityClassNameFields(fresh))
+  } catch (err) {
+    // This check is a diagnostic. It must never be the reason a bootstrap fails.
+    logger.debug('Duplicate entity class name check skipped', { err })
+  }
+}
+
 export function registerOrmEntities(entities: any[]) {
+  warnOnDuplicateEntityClassNames(entities)
   if (getRegisteredEntities() !== null && process.env.NODE_ENV === 'development') {
-    console.debug('[Bootstrap] ORM entities re-registered (this may occur during HMR)')
+    logger.debug('ORM entities re-registered (this may occur during HMR)')
   }
   setRegisteredEntities(entities)
 }
@@ -76,6 +134,42 @@ export function resolvePoolConfig(env: NodeJS.ProcessEnv = process.env): Resolve
   }
 }
 
+type PoolLike = {
+  on(event: 'error', listener: (err: unknown) => void): unknown
+  on(event: 'connect', listener: (client: { on(event: 'error', listener: (err: unknown) => void): unknown }) => void): unknown
+  options?: Record<string, unknown>
+}
+
+// Postgres can terminate a connection at any moment (admin termination, network
+// drop, and — most relevantly for long-running daemons — the
+// `idle_in_transaction_session_timeout` configured above, FATAL 25P03). Where
+// node-postgres surfaces that depends on the client's state:
+// - IDLE (checked into the pool): pg-pool re-emits on the pool's 'error' event.
+// - CHECKED OUT (e.g. a connection pinned by an open transaction while the app
+//   awaits non-DB work): pg-pool removes its idle listener, so the FATAL emits
+//   on the Client itself.
+// Either way an unlistened 'error' event crashes the whole process ("Scheduler
+// polling engine exited unexpectedly with exit code 1"). Swallow both: the pool
+// discards the dead client, and any in-flight transaction still fails normally
+// on its next query/commit against the dead connection.
+// The per-client listener is deliberately attached once on 'connect' and never
+// removed: it is a last-resort sink whose only job is to guarantee the 'error'
+// event always has a listener, in every client state. It is not error handling
+// and must not be "cleaned up" — removing it reintroduces the process crash.
+// A reaped IDLE client therefore logs twice (once here, once via the pool-level
+// handler that pg-pool's own idle listener re-emits); the pool-level line is the
+// one that identifies the client as idle.
+export function attachPoolErrorHandlers(pool: PoolLike): void {
+  pool.on('error', (err: unknown) => {
+    logger.warn('Idle pg pool client error (connection reaped/terminated)', { err })
+  })
+  pool.on('connect', (client) => {
+    client.on('error', (err: unknown) => {
+      logger.warn('pg client error (connection reaped/terminated)', { err })
+    })
+  })
+}
+
 export async function getOrm() {
   if (ormInstance) {
     return ormInstance
@@ -106,7 +200,7 @@ export async function getOrm() {
   const sslConfig = getSslConfig()
 
   if (process.env.OM_DB_POOL_DEBUG === '1' || process.env.OM_INTEGRATION_TEST === 'true') {
-    console.log('[orm] pool config', {
+    logger.info('Pool config', {
       poolMin,
       poolMax,
       poolIdleTimeout,
@@ -148,9 +242,10 @@ export async function getOrm() {
       lock_timeout: lockTimeoutMs,
       options: connectionOptions,
       ssl: sslConfig,
-      onPoolCreated: (pool: any) => {
+      onPoolCreated: (pool: PoolLike) => {
+        attachPoolErrorHandlers(pool)
         if (process.env.OM_DB_POOL_DEBUG === '1' || process.env.OM_INTEGRATION_TEST === 'true') {
-          console.log('[orm] pg pool created with options', {
+          logger.info('pg pool created with options', {
             max: pool.options?.max,
             min: pool.options?.min,
             idleTimeoutMillis: pool.options?.idleTimeoutMillis,

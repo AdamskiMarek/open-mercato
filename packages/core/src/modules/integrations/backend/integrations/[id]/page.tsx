@@ -1,6 +1,7 @@
 "use client"
 import * as React from 'react'
-import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { extensionPoints } from '@open-mercato/core/modules/integrations/extension-points'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { z } from 'zod'
 import { Page, PageBody } from '@open-mercato/ui/backend/Page'
 import { CrudForm, type CrudField } from '@open-mercato/ui/backend/CrudForm'
@@ -24,13 +25,13 @@ import { PasswordInput } from '@open-mercato/ui/primitives/password-input'
 import { Spinner } from '@open-mercato/ui/primitives/spinner'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@open-mercato/ui/primitives/tabs'
 import { JsonDisplay } from '@open-mercato/ui/backend/JsonDisplay'
-import { apiCall } from '@open-mercato/ui/backend/utils/apiCall'
+import { apiCall, withScopedApiRequestHeaders } from '@open-mercato/ui/backend/utils/apiCall'
+import { buildOptimisticLockHeader } from '@open-mercato/ui/backend/utils/optimisticLock'
 import { flash } from '@open-mercato/ui/backend/FlashMessages'
-import { createCrudFormError } from '@open-mercato/ui/backend/utils/serverErrors'
+import { raiseCrudError } from '@open-mercato/ui/backend/utils/serverErrors'
 import { useT } from '@open-mercato/shared/lib/i18n/context'
 import { cn } from '@open-mercato/shared/lib/utils'
 import {
-  LEGACY_INTEGRATION_DETAIL_TABS_SPOT_ID,
   type CredentialFieldType,
   type IntegrationCredentialField,
   type IntegrationDetailBuiltInTab,
@@ -47,13 +48,28 @@ import {
   resolveIntegrationDetailWidgetSpotId,
   resolveRequestedIntegrationDetailTab,
 } from '../detail-page-widgets'
+import {
+  refreshIntegrationDetailPanels,
+  refreshIntegrationRunActivityPanels,
+} from '../detail-page-refresh'
+import {
+  buildCredentialEditValues,
+  buildIntegrationCredentialSavePayload,
+  type SecretFieldsConfigured,
+} from '../credential-secret-fields'
 import { isValidCredentialUrl } from '../../../lib/credentials-field-validation'
+import { useIntegrationCredentialsFeatureAccess } from '../useIntegrationCredentialsFeatureAccess'
 
 type CredentialField = IntegrationCredentialField
 type BuiltInIntegrationDetailTab = 'credentials' | 'version' | 'health' | 'logs' | 'data-sync-schedule'
 type IntegrationDetailTab = BuiltInIntegrationDetailTab | string
 
 const UNSUPPORTED_CREDENTIAL_FIELD_TYPES = new Set<CredentialFieldType>(['oauth', 'ssh_keypair'])
+
+// `/api/integrations/{id}/credentials` requires `integrations.credentials.manage`, so a viewer
+// without the grant gets an expected 403 that the permission notice already explains. Opting out
+// of the global forbidden handling keeps it from raising an "Access denied" flash and throwing.
+const credentialsRequestHeaders = { 'x-om-forbidden-redirect': '0' } as const
 
 function isEditableCredentialField(field: CredentialField): boolean {
   return !UNSUPPORTED_CREDENTIAL_FIELD_TYPES.has(field.type)
@@ -101,8 +117,10 @@ type IntegrationDetail = {
     lastHealthCheckedAt: string | null
     lastHealthLatencyMs: number | null
     enabledAt: string | null
+    updatedAt: string | null
   }
   hasCredentials: boolean
+  credentialsUpdatedAt?: string | null
   healthStatus: 'healthy' | 'degraded' | 'unhealthy' | 'unconfigured'
   analytics: IntegrationLogAnalytics
 }
@@ -121,7 +139,7 @@ type LogEntry = {
 
 type IntegrationDetailPageProps = {
   params?: {
-    id?: string | string[]
+    id?: string
   }
 }
 
@@ -271,31 +289,32 @@ const CATEGORY_ICONS: Record<string, React.ElementType> = {
   webhook: Webhook,
 }
 
-function resolveRouteId(value: string | string[] | undefined): string | undefined {
-  if (Array.isArray(value)) return value[0]
-  return value
-}
-
-function resolvePathnameId(pathname: string): string | undefined {
-  const parts = pathname.split('/').filter(Boolean)
-  const integrationId = parts.at(-1)
-  if (!integrationId || integrationId === 'integrations' || integrationId === 'bundle') return undefined
-  return decodeURIComponent(integrationId)
-}
-
-function buildCredentialFields(credFields: CredentialField[]): CrudField[] {
+function buildCredentialFields(
+  credFields: CredentialField[],
+  secretFieldsConfigured: SecretFieldsConfigured,
+  t: ReturnType<typeof useT>,
+): CrudField[] {
   return credFields.map((field) => {
+    const baseDescription = field.helpDetails ? (
+      <div className="space-y-1">
+        {field.helpText ? <div>{field.helpText}</div> : null}
+        <WebhookSetupGuide guide={field.helpDetails} />
+      </div>
+    ) : field.helpText
+    const description = field.type === 'secret' && secretFieldsConfigured[field.key] ? (
+      <div className="space-y-1">
+        {baseDescription ? <div>{baseDescription}</div> : null}
+        <p className="text-xs text-muted-foreground">
+          {t('integrations.detail.credentials.secretConfigured')}
+        </p>
+      </div>
+    ) : baseDescription
     const shared = {
       id: field.key,
       label: field.label,
-      description: field.helpDetails ? (
-        <div className="space-y-1">
-          {field.helpText ? <div>{field.helpText}</div> : null}
-          <WebhookSetupGuide guide={field.helpDetails} buttonLabel="Show details" />
-        </div>
-      ) : field.helpText,
+      description,
       placeholder: field.placeholder,
-      required: field.required,
+      required: field.required && !(field.type === 'secret' && secretFieldsConfigured[field.key]),
       visibleWhen: field.visibleWhen,
     }
 
@@ -310,6 +329,7 @@ function buildCredentialFields(credFields: CredentialField[]): CrudField[] {
             value={typeof value === 'string' ? value : ''}
             onChange={(event) => setValue(event.target.value)}
             disabled={disabled}
+            autoComplete="new-password"
           />
         ),
       }
@@ -407,10 +427,9 @@ function splitLogPayload(payload: Record<string, unknown> | null | undefined) {
 }
 
 export default function IntegrationDetailPage({ params }: IntegrationDetailPageProps) {
-  const pathname = usePathname()
   const router = useRouter()
   const searchParams = useSearchParams()
-  const integrationId = resolveRouteId(params?.id) ?? resolvePathnameId(pathname)
+  const integrationId = params?.id
   const t = useT()
 
   const [detail, setDetail] = React.useState<IntegrationDetail | null>(null)
@@ -419,6 +438,8 @@ export default function IntegrationDetailPage({ params }: IntegrationDetailPageP
   const [isNotFound, setIsNotFound] = React.useState(false)
 
   const [credValues, setCredValues] = React.useState<Record<string, unknown>>({})
+  const [secretFieldsConfigured, setSecretFieldsConfigured] = React.useState<SecretFieldsConfigured>({})
+  const [credentialsUpdatedAt, setCredentialsUpdatedAt] = React.useState<string | null>(null)
   const [credentialsFormKey, setCredentialsFormKey] = React.useState(0)
   const [isSavingCredentials, setIsSavingCredentials] = React.useState(false)
 
@@ -435,19 +456,14 @@ export default function IntegrationDetailPage({ params }: IntegrationDetailPageP
   const [activeTab, setActiveTab] = React.useState<IntegrationDetailTab>('credentials')
 
   const credentialsFormId = React.useId()
-
-  const resolveCurrentIntegrationId = React.useCallback(() => {
-    return integrationId ?? (
-      typeof window !== 'undefined'
-        ? resolvePathnameId(window.location.pathname)
-        : undefined
-    )
-  }, [integrationId])
+  const {
+    isLoading: isLoadingCredentialsAccess,
+    canManageCredentials,
+  } = useIntegrationCredentialsFeatureAccess()
 
   const loadDetail = React.useCallback(async (options?: { showLoading?: boolean }) => {
     const showLoading = options?.showLoading ?? true
-    const currentIntegrationId = resolveCurrentIntegrationId()
-    if (!currentIntegrationId) {
+    if (!integrationId) {
       if (showLoading) setIsLoading(false)
       if (showLoading) setError(t('integrations.detail.loadError', 'Failed to load integration'))
       return
@@ -457,7 +473,7 @@ export default function IntegrationDetailPage({ params }: IntegrationDetailPageP
     if (showLoading) setIsLoading(true)
     try {
       const call = await apiCall<IntegrationDetail>(
-        `/api/integrations/${encodeURIComponent(currentIntegrationId)}`,
+        `/api/integrations/${encodeURIComponent(integrationId)}`,
         undefined,
         { fallback: null },
       )
@@ -477,19 +493,26 @@ export default function IntegrationDetailPage({ params }: IntegrationDetailPageP
       if (showLoading) setError(t('integrations.detail.loadError', 'Failed to load integration'))
       if (showLoading) setIsLoading(false)
     }
-  }, [resolveCurrentIntegrationId, t])
+  }, [integrationId, t])
 
   const loadCredentials = React.useCallback(async () => {
-    const currentIntegrationId = resolveCurrentIntegrationId()
-    if (!currentIntegrationId) return
-    const call = await apiCall<{ credentials: Record<string, unknown> }>(
-      `/api/integrations/${encodeURIComponent(currentIntegrationId)}/credentials`,
-      undefined,
+    if (!integrationId) return
+    const call = await apiCall<{
+      credentials: Record<string, unknown>
+      secretFieldsConfigured?: SecretFieldsConfigured
+      updatedAt?: string | null
+    }>(
+      `/api/integrations/${encodeURIComponent(integrationId)}/credentials`,
+      { headers: credentialsRequestHeaders },
       { fallback: null },
     )
+    if (call.ok && call.result) {
+      setCredentialsUpdatedAt(call.result.updatedAt ?? null)
+      setSecretFieldsConfigured(call.result.secretFieldsConfigured ?? {})
+    }
     if (call.ok && call.result?.credentials) {
       const next = { ...call.result.credentials }
-      if (currentIntegrationId === 'storage_s3') {
+      if (integrationId === 'storage_s3') {
         const authMode = next.authMode
         if (authMode !== 'access_keys' && authMode !== 'ambient') {
           const hasKeys = Boolean(next.accessKeyId || next.secretAccessKey)
@@ -499,13 +522,12 @@ export default function IntegrationDetailPage({ params }: IntegrationDetailPageP
       setCredValues(next)
       setCredentialsFormKey((current) => current + 1)
     }
-  }, [resolveCurrentIntegrationId])
+  }, [integrationId])
 
   const loadLogs = React.useCallback(async () => {
-    const currentIntegrationId = resolveCurrentIntegrationId()
-    if (!currentIntegrationId) return
+    if (!integrationId) return
     setIsLoadingLogs(true)
-    const params = new URLSearchParams({ integrationId: currentIntegrationId, pageSize: '50' })
+    const params = new URLSearchParams({ integrationId, pageSize: '50' })
     if (logLevel) params.set('level', logLevel)
     const call = await apiCall<{ items: LogEntry[] }>(
       `/api/integrations/logs?${params.toString()}`,
@@ -516,10 +538,10 @@ export default function IntegrationDetailPage({ params }: IntegrationDetailPageP
       setLogs(call.result.items)
     }
     setIsLoadingLogs(false)
-  }, [logLevel, resolveCurrentIntegrationId])
+  }, [logLevel, integrationId])
 
   const detailWidgetSpotId = React.useMemo(
-    () => resolveIntegrationDetailWidgetSpotId(detail?.integration ?? null, LEGACY_INTEGRATION_DETAIL_TABS_SPOT_ID),
+    () => resolveIntegrationDetailWidgetSpotId(detail?.integration ?? null, extensionPoints.hosts.legacyDetailTabs.spotId),
     [detail?.integration],
   )
   const mutationContextId = React.useMemo(
@@ -531,8 +553,7 @@ export default function IntegrationDetailPage({ params }: IntegrationDetailPageP
     spotId: detailWidgetSpotId,
   })
   const refreshDetail = React.useCallback(async () => {
-    await loadDetail({ showLoading: false })
-    await loadCredentials()
+    await refreshIntegrationDetailPanels({ loadDetail, loadCredentials })
   }, [loadCredentials, loadDetail])
   const refreshLogs = React.useCallback(async () => {
     await loadLogs()
@@ -549,13 +570,14 @@ export default function IntegrationDetailPage({ params }: IntegrationDetailPageP
     }
     if (options?.showLoading) setIsRefreshingRunActivity(true)
     try {
-      const call = await apiCall<DataSyncRunDetail>(
-        `/api/data_sync/runs/${encodeURIComponent(runIdFromUrl)}`,
-        undefined,
-        { fallback: null },
-      )
-      await loadLogs()
-      await loadDetail({ showLoading: false })
+      const [call] = await Promise.all([
+        apiCall<DataSyncRunDetail>(
+          `/api/data_sync/runs/${encodeURIComponent(runIdFromUrl)}`,
+          undefined,
+          { fallback: null },
+        ),
+        refreshIntegrationRunActivityPanels({ loadLogs, loadDetail }),
+      ])
       if (call.ok && call.result) {
         setActiveRunDetail(call.result)
         setActiveRunRefreshedAt(new Date().toISOString())
@@ -660,18 +682,20 @@ export default function IntegrationDetailPage({ params }: IntegrationDetailPageP
   React.useEffect(() => { void loadLogs() }, [loadLogs])
 
   const handleToggleState = React.useCallback(async (enabled: boolean) => {
-    const currentIntegrationId = resolveCurrentIntegrationId()
-    if (!currentIntegrationId) return
+    if (!integrationId) return
     setIsTogglingState(true)
     try {
       const call = await runMutationWithContext({
         actionId: 'toggle-state',
-        mutationPayload: { integrationId: currentIntegrationId, isEnabled: enabled },
-        operation: () => apiCall(`/api/integrations/${encodeURIComponent(currentIntegrationId)}/state`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ isEnabled: enabled }),
-        }, { fallback: null }),
+        mutationPayload: { integrationId, isEnabled: enabled },
+        operation: () => withScopedApiRequestHeaders(
+          buildOptimisticLockHeader(detail?.state.updatedAt),
+          () => apiCall(`/api/integrations/${encodeURIComponent(integrationId)}/state`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ isEnabled: enabled }),
+          }, { fallback: null }),
+        ),
       })
       if (call.ok) {
         setDetail((prev) => prev ? {
@@ -683,6 +707,7 @@ export default function IntegrationDetailPage({ params }: IntegrationDetailPageP
           },
         } : prev)
         flash(t('integrations.detail.stateUpdated'), 'success')
+        void refreshDetail()
       } else {
         flash(t('integrations.detail.stateError'), 'error')
       }
@@ -691,94 +716,95 @@ export default function IntegrationDetailPage({ params }: IntegrationDetailPageP
     } finally {
       setIsTogglingState(false)
     }
-  }, [resolveCurrentIntegrationId, runMutationWithContext, t])
+  }, [detail?.state.updatedAt, refreshDetail, integrationId, runMutationWithContext, t])
 
   const handleSaveCredentials = React.useCallback(async (values: Record<string, unknown>) => {
-    const currentIntegrationId = resolveCurrentIntegrationId()
-    if (!currentIntegrationId) return
+    if (!integrationId) return
     setIsSavingCredentials(true)
     try {
-      const sanitizedValues = { ...values }
-      if (currentIntegrationId === 'storage_s3') {
-        const authMode = sanitizedValues.authMode
-        if (authMode !== 'access_keys' && authMode !== 'ambient') {
-          const hasKeys = Boolean(sanitizedValues.accessKeyId || sanitizedValues.secretAccessKey)
-          sanitizedValues.authMode = hasKeys ? 'access_keys' : 'ambient'
-        }
-        if (sanitizedValues.authMode === 'ambient') {
-          delete sanitizedValues.accessKeyId
-          delete sanitizedValues.secretAccessKey
-          delete sanitizedValues.sessionToken
-        }
-      }
+      const credentialFields = (
+        detail?.integration.credentials?.fields
+        ?? detail?.bundle?.credentials?.fields
+        ?? []
+      )
+      const savePayload = buildIntegrationCredentialSavePayload(
+        integrationId,
+        values,
+        credentialFields,
+        secretFieldsConfigured,
+      )
       const call = await runMutationWithContext({
         actionId: 'save-credentials',
         tabId: 'credentials',
-        mutationPayload: { integrationId: currentIntegrationId, credentials: sanitizedValues },
-        operation: () => apiCall(`/api/integrations/${encodeURIComponent(currentIntegrationId)}/credentials`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ credentials: sanitizedValues }),
-        }, { fallback: null }),
+        mutationPayload: { integrationId, ...savePayload },
+        operation: () => withScopedApiRequestHeaders(
+          buildOptimisticLockHeader(credentialsUpdatedAt),
+          () => apiCall(`/api/integrations/${encodeURIComponent(integrationId)}/credentials`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(savePayload),
+          }, { fallback: null }),
+        ),
       })
 
       if (call.ok) {
-        setCredValues(sanitizedValues)
         setCredentialsFormKey((current) => current + 1)
         flash(t('integrations.detail.credentials.saved'), 'success')
+        void loadCredentials()
         return
       }
 
-      const result = call.result as {
-        error?: string
-        details?: { fieldErrors?: Record<string, string>; formErrors?: string[] }
-      } | null
-      throw createCrudFormError(
-        result?.error ?? t('integrations.detail.credentials.saveError', 'Failed to save credentials'),
-        result?.details?.fieldErrors,
-        { details: result?.details },
+      // Re-raise with status + response body (not a bare message) so the host CrudForm
+      // recognizes optimistic-lock 409s and surfaces them on the unified conflict bar
+      // with a localized message instead of toasting the raw `record_modified` code.
+      // apiCall reads the body via response.clone(), so call.response is still readable.
+      await raiseCrudError(
+        call.response,
+        t('integrations.detail.credentials.saveError', 'Failed to save credentials'),
       )
     } finally {
       setIsSavingCredentials(false)
     }
-  }, [resolveCurrentIntegrationId, runMutationWithContext, t])
+  }, [credentialsUpdatedAt, detail, loadCredentials, integrationId, runMutationWithContext, secretFieldsConfigured, t])
 
   const handleVersionChange = React.useCallback(async (version: string) => {
-    const currentIntegrationId = resolveCurrentIntegrationId()
-    if (!currentIntegrationId) return
+    if (!integrationId) return
     try {
       const call = await runMutationWithContext({
         actionId: 'change-version',
         tabId: 'version',
-        mutationPayload: { integrationId: currentIntegrationId, apiVersion: version },
-        operation: () => apiCall(`/api/integrations/${encodeURIComponent(currentIntegrationId)}/version`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ apiVersion: version }),
-        }, { fallback: null }),
+        mutationPayload: { integrationId, apiVersion: version },
+        operation: () => withScopedApiRequestHeaders(
+          buildOptimisticLockHeader(detail?.state.updatedAt),
+          () => apiCall(`/api/integrations/${encodeURIComponent(integrationId)}/version`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ apiVersion: version }),
+          }, { fallback: null }),
+        ),
       })
       if (call.ok) {
         setDetail((prev) => prev ? { ...prev, state: { ...prev.state, apiVersion: version } } : prev)
         flash(t('integrations.detail.version.saved'), 'success')
+        void refreshDetail()
       } else {
         flash(t('integrations.detail.version.saveError'), 'error')
       }
     } catch {
       flash(t('integrations.detail.version.saveError'), 'error')
     }
-  }, [resolveCurrentIntegrationId, runMutationWithContext, t])
+  }, [detail?.state.updatedAt, refreshDetail, integrationId, runMutationWithContext, t])
 
   const handleHealthCheck = React.useCallback(async () => {
-    const currentIntegrationId = resolveCurrentIntegrationId()
-    if (!currentIntegrationId) return
+    if (!integrationId) return
     setIsCheckingHealth(true)
     try {
       const call = await runMutationWithContext({
         actionId: 'run-health-check',
         tabId: 'health',
-        mutationPayload: { integrationId: currentIntegrationId },
+        mutationPayload: { integrationId },
         operation: () => apiCall<HealthCheckResponse>(
-          `/api/integrations/${encodeURIComponent(currentIntegrationId)}/health`,
+          `/api/integrations/${encodeURIComponent(integrationId)}/health`,
           { method: 'POST' },
           { fallback: null },
         ),
@@ -805,7 +831,7 @@ export default function IntegrationDetailPage({ params }: IntegrationDetailPageP
     } finally {
       setIsCheckingHealth(false)
     }
-  }, [refreshLogs, resolveCurrentIntegrationId, runMutationWithContext, t])
+  }, [refreshLogs, integrationId, runMutationWithContext, t])
 
   const hasVersions = Boolean(detail?.integration.apiVersions?.length)
   const integration = detail?.integration ?? null
@@ -815,8 +841,12 @@ export default function IntegrationDetailPage({ params }: IntegrationDetailPageP
     [detail?.bundle?.credentials?.fields, detail?.integration.credentials?.fields],
   )
   const credentialFormFields = React.useMemo(
-    () => buildCredentialFields(editableCredentialFields),
-    [editableCredentialFields],
+    () => buildCredentialFields(editableCredentialFields, secretFieldsConfigured, t),
+    [editableCredentialFields, secretFieldsConfigured, t],
+  )
+  const credentialFormValues = React.useMemo(
+    () => buildCredentialEditValues(credValues, secretFieldsConfigured),
+    [credValues, secretFieldsConfigured],
   )
   const credentialSchema = React.useMemo(() => (
     z.object({}).passthrough().superRefine((rawValues, ctx) => {
@@ -858,7 +888,11 @@ export default function IntegrationDetailPage({ params }: IntegrationDetailPageP
 
         const normalizedValue = typeof value === 'string' ? value : ''
 
-        if (field.required && normalizedValue.trim().length === 0) {
+        if (
+          field.required
+          && normalizedValue.trim().length === 0
+          && !(field.type === 'secret' && secretFieldsConfigured[field.key])
+        ) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             path: [field.key],
@@ -900,7 +934,7 @@ export default function IntegrationDetailPage({ params }: IntegrationDetailPageP
         }
       })
     })
-  ) as z.ZodType<Record<string, unknown>>, [editableCredentialFields, t])
+  ) as z.ZodType<Record<string, unknown>>, [editableCredentialFields, secretFieldsConfigured, t])
   const latestHealthLog = React.useMemo(() => logs.find(isHealthLog) ?? null, [logs])
   const latestOperationalLog = React.useMemo(
     () => logs.find((log) => (
@@ -980,24 +1014,26 @@ export default function IntegrationDetailPage({ params }: IntegrationDetailPageP
     ? 'border-status-success-border bg-status-success-bg text-status-success-text'
     : 'border-status-neutral-border bg-status-neutral-bg text-status-neutral-text'
 
-  const showCredentialActions = showCredentialsTab && activeTab === 'credentials' && credentialFormFields.length > 0
+  const showCredentialActions = showCredentialsTab
+    && activeTab === 'credentials'
+    && credentialFormFields.length > 0
+    && canManageCredentials
 
   React.useEffect(() => {
     setActiveTab(resolveRequestedIntegrationDetailTab(searchParams?.get('tab'), visibleTabIds))
   }, [searchParams, visibleTabIds])
 
   const handleTabChange = React.useCallback((nextValue: string) => {
-    const currentIntegrationId = resolveCurrentIntegrationId()
     const nextTab = resolveRequestedIntegrationDetailTab(nextValue, visibleTabIds)
     setActiveTab(nextTab)
-    if (!currentIntegrationId) return
-    const basePath = `/backend/integrations/${encodeURIComponent(currentIntegrationId)}`
+    if (!integrationId) return
+    const basePath = `/backend/integrations/${encodeURIComponent(integrationId)}`
     const params = new URLSearchParams(searchParams?.toString() ?? '')
     if (nextTab === 'credentials') params.delete('tab')
     else params.set('tab', nextTab)
     const query = params.toString()
     router.replace(query ? `${basePath}?${query}` : basePath)
-  }, [resolveCurrentIntegrationId, router, searchParams, visibleTabIds])
+  }, [integrationId, router, searchParams, visibleTabIds])
 
   React.useEffect(() => {
     if (!runIdFromUrl) {
@@ -1053,7 +1089,8 @@ export default function IntegrationDetailPage({ params }: IntegrationDetailPageP
       <PageBody className="space-y-6">
         <FormHeader
           backHref="/backend/integrations"
-          title={resolvedIntegration.title}
+        title={resolvedIntegration.title}
+        titleHeadingLevel={1}
           actions={{
             cancelHref: showCredentialActions ? '/backend/integrations' : undefined,
             submit: showCredentialActions
@@ -1177,84 +1214,41 @@ export default function IntegrationDetailPage({ params }: IntegrationDetailPageP
           </section>
         ) : null}
 
-        <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-5">
-          <TabsList className="h-auto w-full justify-start overflow-x-auto rounded-none border-b border-border bg-transparent p-0">
+        <Tabs value={activeTab} onValueChange={handleTabChange} variant="underline" className="space-y-5">
+          <TabsList className="w-full overflow-x-auto">
             {showCredentialsTab ? (
-              <TabsTrigger
-                value="credentials"
-                className="mr-8 h-auto rounded-none border-b-2 border-transparent bg-transparent px-0 py-2.5 text-sm font-medium text-muted-foreground shadow-none transition-colors hover:bg-transparent hover:text-foreground aria-selected:border-accent-indigo aria-selected:bg-transparent aria-selected:text-foreground aria-selected:shadow-none last:mr-0"
-              >
-                <span className="inline-flex items-center gap-2">
-                  <Key className="h-4 w-4" />
-                  <span>{t('integrations.detail.tabs.credentials')}</span>
-                </span>
+              <TabsTrigger value="credentials" leading={<Key className="h-4 w-4" />}>
+                {t('integrations.detail.tabs.credentials')}
               </TabsTrigger>
             ) : null}
             {leadingInjectedTab ? (
-              <TabsTrigger
-                value={leadingInjectedTab.id}
-                className="mr-8 h-auto rounded-none border-b-2 border-transparent bg-transparent px-0 py-2.5 text-sm font-medium text-muted-foreground shadow-none transition-colors hover:bg-transparent hover:text-foreground aria-selected:border-accent-indigo aria-selected:bg-transparent aria-selected:text-foreground aria-selected:shadow-none last:mr-0"
-              >
-                <span className="inline-flex items-center gap-2">
-                  <Settings className="h-4 w-4" />
-                  <span>{leadingInjectedTab.label}</span>
-                </span>
+              <TabsTrigger value={leadingInjectedTab.id} leading={<Settings className="h-4 w-4" />}>
+                {leadingInjectedTab.label}
               </TabsTrigger>
             ) : null}
             {showVersionTab ? (
-              <TabsTrigger
-                value="version"
-                className="mr-8 h-auto rounded-none border-b-2 border-transparent bg-transparent px-0 py-2.5 text-sm font-medium text-muted-foreground shadow-none transition-colors hover:bg-transparent hover:text-foreground aria-selected:border-accent-indigo aria-selected:bg-transparent aria-selected:text-foreground aria-selected:shadow-none last:mr-0"
-              >
-                <span className="inline-flex items-center gap-2">
-                  <RefreshCw className="h-4 w-4" />
-                  <span>{t('integrations.detail.tabs.version')}</span>
-                </span>
+              <TabsTrigger value="version" leading={<RefreshCw className="h-4 w-4" />}>
+                {t('integrations.detail.tabs.version')}
               </TabsTrigger>
             ) : null}
             {showDataSyncScheduleTab ? (
-              <TabsTrigger
-                value="data-sync-schedule"
-                className="mr-8 h-auto rounded-none border-b-2 border-transparent bg-transparent px-0 py-2.5 text-sm font-medium text-muted-foreground shadow-none transition-colors hover:bg-transparent hover:text-foreground aria-selected:border-accent-indigo aria-selected:bg-transparent aria-selected:text-foreground aria-selected:shadow-none last:mr-0"
-              >
-                <span className="inline-flex items-center gap-2">
-                  <Calendar className="h-4 w-4" />
-                  <span>{t('data_sync.integrationTab.title', 'Sync schedules')}</span>
-                </span>
+              <TabsTrigger value="data-sync-schedule" leading={<Calendar className="h-4 w-4" />}>
+                {t('data_sync.integrationTab.title', 'Sync schedules')}
               </TabsTrigger>
             ) : null}
             {showHealthTab ? (
-              <TabsTrigger
-                value="health"
-                className="mr-8 h-auto rounded-none border-b-2 border-transparent bg-transparent px-0 py-2.5 text-sm font-medium text-muted-foreground shadow-none transition-colors hover:bg-transparent hover:text-foreground aria-selected:border-accent-indigo aria-selected:bg-transparent aria-selected:text-foreground aria-selected:shadow-none last:mr-0"
-              >
-                <span className="inline-flex items-center gap-2">
-                  <Activity className="h-4 w-4" />
-                  <span>{t('integrations.detail.tabs.health')}</span>
-                </span>
+              <TabsTrigger value="health" leading={<Activity className="h-4 w-4" />}>
+                {t('integrations.detail.tabs.health')}
               </TabsTrigger>
             ) : null}
             {showLogsTab ? (
-              <TabsTrigger
-                value="logs"
-                className="mr-8 h-auto rounded-none border-b-2 border-transparent bg-transparent px-0 py-2.5 text-sm font-medium text-muted-foreground shadow-none transition-colors hover:bg-transparent hover:text-foreground aria-selected:border-accent-indigo aria-selected:bg-transparent aria-selected:text-foreground aria-selected:shadow-none last:mr-0"
-              >
-                <span className="inline-flex items-center gap-2">
-                  <FileText className="h-4 w-4" />
-                  <span>{t('integrations.detail.tabs.logs')}</span>
-                </span>
+              <TabsTrigger value="logs" leading={<FileText className="h-4 w-4" />}>
+                {t('integrations.detail.tabs.logs')}
               </TabsTrigger>
             ) : null}
             {trailingInjectedTabs.map((tab) => (
-              <TabsTrigger
-                key={tab.id}
-                value={tab.id}
-                className="mr-8 h-auto rounded-none border-b-2 border-transparent bg-transparent px-0 py-2.5 text-sm font-medium text-muted-foreground shadow-none transition-colors hover:bg-transparent hover:text-foreground aria-selected:border-accent-indigo aria-selected:bg-transparent aria-selected:text-foreground aria-selected:shadow-none last:mr-0"
-              >
-                <span className="inline-flex items-center gap-2">
-                  <Settings className="h-4 w-4" />
-                  <span>{tab.label}</span>
-                </span>
+              <TabsTrigger key={tab.id} value={tab.id} leading={<Settings className="h-4 w-4" />}>
+                {tab.label}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -1271,6 +1265,14 @@ export default function IntegrationDetailPage({ params }: IntegrationDetailPageP
                   <p className="text-sm text-muted-foreground">
                     {t('integrations.detail.credentials.notConfigured')}
                   </p>
+                ) : isLoadingCredentialsAccess ? (
+                  <div className="flex justify-center py-8"><Spinner /></div>
+                ) : !canManageCredentials ? (
+                  <EmptyState
+                    size="sm"
+                    icon={<Key className="h-8 w-8" aria-hidden="true" />}
+                    title={t('integrations.detail.credentials.noPermission', 'You do not have permission to manage credentials for this integration.')}
+                  />
                 ) : (
                   <CrudForm<Record<string, unknown>>
                     key={`${resolvedIntegration.id}:${credentialsFormKey}`}
@@ -1278,7 +1280,7 @@ export default function IntegrationDetailPage({ params }: IntegrationDetailPageP
                     entityId="integrations.integration"
                     schema={credentialSchema}
                     fields={credentialFormFields}
-                    initialValues={credValues}
+                    initialValues={credentialFormValues}
                     onSubmit={handleSaveCredentials}
                     embedded
                     hideFooterActions

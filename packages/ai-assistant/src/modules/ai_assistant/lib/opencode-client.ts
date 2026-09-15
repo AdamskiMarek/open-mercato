@@ -4,8 +4,11 @@
  * Client for communicating with OpenCode server running in headless mode.
  * OpenCode is used as an AI agent that can execute MCP tools.
  */
+import { createLogger } from '@open-mercato/shared/lib/logger'
 import { readJsonSafe } from '@open-mercato/shared/lib/http/readJsonSafe'
 import { fetchWithTimeout, resolveTimeoutMs } from '@open-mercato/shared/lib/http/fetchWithTimeout'
+
+const logger = createLogger('ai_assistant')
 
 const DEFAULT_OPENCODE_REQUEST_TIMEOUT_MS = 30_000
 const DEFAULT_OPENCODE_SSE_CONNECT_TIMEOUT_MS = 15_000
@@ -193,8 +196,13 @@ export class OpenCodeClient {
               try {
                 const data = JSON.parse(line.slice(6))
                 onEvent(data)
-              } catch {
-                // Ignore parse errors
+              } catch (error) {
+                // Malformed SSE payload — surface it instead of dropping the
+                // event silently (a silent drop previously hid the tool-part
+                // capture regression).
+                logger.error('OpenCode SSE: failed to parse event payload', {
+                  error: (error as Error).message,
+                })
               }
             }
           }
@@ -303,6 +311,21 @@ export class OpenCodeClient {
     message: string,
     options?: {
       model?: { providerID: string; modelID: string }
+      /**
+       * Optional OpenCode agent (persona) id selecting which agent file
+       * processes this message (`POST /session/:id/message` accepts `agent?`).
+       * The file-agent runner passes the generated `openCodeAgentName` here.
+       * Additive / BC-safe: omitted for ordinary chat turns.
+       */
+      agent?: string
+      /**
+       * Override the send timeout (ms). `/session/:id/message` is synchronous —
+       * it holds until the agent loop finishes — so a multi-step agentic run can
+       * exceed the 30s chat default; aborting cancels the OpenCode run. The
+       * file-agent runner passes its long run deadline here (completion is then
+       * driven by SSE/the outcome store, not the HTTP response). Additive / BC-safe.
+       */
+      timeoutMs?: number
     }
   ): Promise<OpenCodeMessage> {
     const body: Record<string, unknown> = {
@@ -313,14 +336,20 @@ export class OpenCodeClient {
       body.model = options.model
     }
 
+    if (options?.agent) {
+      body.agent = options.agent
+    }
+
     const res = await fetchWithTimeout(`${this.baseUrl}/session/${sessionId}/message`, {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify(body),
-      timeoutMs: resolveOpencodeTimeoutMs(
-        'OPENCODE_SEND_MESSAGE_TIMEOUT_MS',
-        resolveOpencodeTimeoutMs('OPENCODE_REQUEST_TIMEOUT_MS', DEFAULT_OPENCODE_REQUEST_TIMEOUT_MS),
-      ),
+      timeoutMs:
+        options?.timeoutMs ??
+        resolveOpencodeTimeoutMs(
+          'OPENCODE_SEND_MESSAGE_TIMEOUT_MS',
+          resolveOpencodeTimeoutMs('OPENCODE_REQUEST_TIMEOUT_MS', DEFAULT_OPENCODE_REQUEST_TIMEOUT_MS),
+        ),
     })
 
     if (!res.ok) {
@@ -411,7 +440,7 @@ export class OpenCodeClient {
 
     const body = { answers }
 
-    console.log('[OpenCode Client] Answering question', questionId, 'with body:', JSON.stringify(body))
+    logger.debug('Answering question', { questionId, answersCount: answers.length })
 
     const res = await fetchWithTimeout(`${this.baseUrl}/question/${questionId}/reply`, {
       method: 'POST',
@@ -421,7 +450,7 @@ export class OpenCodeClient {
     })
 
     const responseText = await res.text()
-    console.log('[OpenCode Client] Answer response:', res.status, responseText.substring(0, 200))
+    logger.debug('Answer response received', { status: res.status, bytes: responseText.length })
 
     if (!res.ok) {
       throw new Error(`Failed to answer question: ${res.status} - ${responseText}`)
@@ -432,7 +461,7 @@ export class OpenCodeClient {
    * Reject a pending question.
    */
   async rejectQuestion(questionId: string): Promise<void> {
-    console.log('[OpenCode Client] Rejecting question', questionId)
+    logger.info('OpenCode Client — Rejecting question', { questionId: questionId })
 
     const res = await fetchWithTimeout(`${this.baseUrl}/question/${questionId}/reject`, {
       method: 'POST',

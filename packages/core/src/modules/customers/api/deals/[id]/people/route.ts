@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import type { EntityManager } from '@mikro-orm/postgresql'
-import { CrudHttpError, isCrudHttpError } from '@open-mercato/shared/lib/crud/errors'
+import { CrudHttpError, isCrudHttpError, notFound } from '@open-mercato/shared/lib/crud/errors'
 import { createRequestContainer } from '@open-mercato/shared/lib/di/container'
 import { getAuthFromRequest } from '@open-mercato/shared/lib/auth/server'
 import { resolveOrganizationScopeForRequest } from '@open-mercato/core/modules/directory/utils/organizationScope'
@@ -10,6 +10,9 @@ import type { OpenApiRouteDoc } from '@open-mercato/shared/lib/openapi'
 import { findOneWithDecryption, findWithDecryption } from '@open-mercato/shared/lib/encryption/find'
 import { isOrganizationReadAccessAllowed } from '@open-mercato/core/modules/directory/utils/organizationScopeGuard'
 import { CustomerDeal, CustomerDealPersonLink, CustomerEntity } from '../../../../data/entities'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+
+const logger = createLogger('customers')
 
 const paramsSchema = z.object({
   id: z.string().uuid(),
@@ -36,6 +39,7 @@ type DealPersonItem = {
   subtitle: string | null
   kind: 'person'
   linkedAt: string
+  isPrimary: boolean
 }
 
 function matchesSearch(item: DealPersonItem, query: string): boolean {
@@ -95,11 +99,14 @@ export async function GET(req: Request, ctx: { params?: { id?: string } }) {
       decryptionScope,
     )
     if (!deal) {
-      throw new CrudHttpError(404, { error: translate('customers.errors.deal_not_found', 'Deal not found') })
+      throw notFound(translate('customers.errors.deal_not_found', 'Deal not found'))
     }
 
+    // Existence oracle (#5504): deny a cross-org read as not-found — identical to
+    // the parent-not-found above — so it cannot reveal that a deal exists in an
+    // organization the caller cannot see.
     if (!isOrganizationReadAccessAllowed({ scope, auth, organizationId: deal.organizationId })) {
-      throw new CrudHttpError(403, { error: translate('customers.errors.access_denied', 'Access denied') })
+      throw notFound(translate('customers.errors.deal_not_found', 'Deal not found'))
     }
 
     const entityScope = { tenantId: deal.tenantId, organizationId: deal.organizationId }
@@ -121,6 +128,7 @@ export async function GET(req: Request, ctx: { params?: { id?: string } }) {
           subtitle: person.primaryEmail ?? person.primaryPhone ?? null,
           kind: 'person',
           linkedAt: link.createdAt.toISOString(),
+          isPrimary: link.isPrimary === true,
         } satisfies DealPersonItem
       })
       .filter((item): item is DealPersonItem => item !== null)
@@ -143,7 +151,7 @@ export async function GET(req: Request, ctx: { params?: { id?: string } }) {
     if (isCrudHttpError(error)) {
       return NextResponse.json(error.body, { status: error.status })
     }
-    console.error('[customers.deals.people.GET]', error)
+    logger.error('customers.deals.people.GET', { err: error })
     return NextResponse.json({ error: translate('customers.errors.deal_people_load_failed', 'Failed to load linked people') }, { status: 500 })
   }
 }
@@ -166,6 +174,7 @@ export const openApi: OpenApiRouteDoc = {
                 subtitle: z.string().nullable(),
                 kind: z.literal('person'),
                 linkedAt: z.string(),
+                isPrimary: z.boolean(),
               }),
             ),
             total: z.number().int().nonnegative(),

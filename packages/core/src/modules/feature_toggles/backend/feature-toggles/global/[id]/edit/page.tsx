@@ -57,12 +57,25 @@ export default function EditFeatureTogglePage({ params }: { params?: { id?: stri
     )
   }
 
+  // record_locks scope decision (Phase 6): the global feature toggle is a
+  // NON-TENANT, superadmin-only entity. record_locks enrichment (presence,
+  // acquire/heartbeat, conflict upgrade) is tenant-scoped — its decorator skips
+  // enrichment when no tenant/resource resolves — so a global (null-tenant) record
+  // cannot participate in record_locks. This surface therefore stays OSS-floor
+  // guarded ONLY: the CrudForm auto-derives the optimistic-lock header from
+  // `optimisticLockUpdatedAt`, the route enforces it via the OSS floor, and a stale
+  // save surfaces the unified conflict bar. No `backend:record:current` presence is
+  // mounted: it would never resolve a tenant-scoped lock, and this is a
+  // single-superadmin surface with no concurrent-editor expectation. Per-tenant
+  // override values (`api/global/[id]/override`) ARE tenant-scoped and are enabled
+  // in Phase 6b.
   return (
     <Page>
       <PageBody>
         <CrudForm
           key={initialValues ? 'ft-edit-loaded' : 'ft-edit-loading'}
           title={t('feature_toggles.form.title.edit', 'Edit Feature Toggle')}
+          titleHeadingLevel={1}
           backHref="/backend/feature-toggles/global"
           versionHistory={{ resourceKind: 'feature_toggles.global', resourceId: id ? String(id) : '' }}
           fields={fields}

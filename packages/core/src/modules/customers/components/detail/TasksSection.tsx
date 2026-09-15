@@ -5,7 +5,11 @@ import Link from 'next/link'
 import { Loader2, Pencil, Trash2 } from 'lucide-react'
 import { Button } from '@open-mercato/ui/primitives/button'
 import { IconButton } from '@open-mercato/ui/primitives/icon-button'
+import { StatusBadge, type StatusBadgeVariant } from '@open-mercato/ui/primitives/status-badge'
+import { mapDictionaryColorToTone } from '@open-mercato/shared/lib/query/advanced-filter'
+import { useOrganizationScopeVersion } from '@open-mercato/shared/lib/frontend/useOrganizationScope'
 import { flash } from '@open-mercato/ui/backend/FlashMessages'
+import { useConfirmDialog } from '@open-mercato/ui/backend/confirm-dialog'
 import { LoadingMessage, TabEmptyState } from '@open-mercato/ui/backend/detail'
 import { cn } from '@open-mercato/shared/lib/utils'
 import { useT } from '@open-mercato/shared/lib/i18n/context'
@@ -16,6 +20,7 @@ import { formatDateTime } from '@open-mercato/shared/lib/time'
 import { TimelineItemHeader } from './TimelineItemHeader'
 import { TaskDialog } from './TaskDialog'
 import { usePersonTasks, type TaskFormPayload } from './hooks/usePersonTasks'
+import { useCustomerDictionary } from './hooks/useCustomerDictionary'
 import { useInteractions, type InteractionCreatePayload } from './hooks/useInteractions'
 import { mapInteractionRecordToTodoSummary } from '../../lib/interactionCompatibility'
 
@@ -66,11 +71,18 @@ function sortTaskSummaries(tasks: TodoLinkSummary[]): TodoLinkSummary[] {
   })
 }
 
+const STATUS_BADGE_VARIANTS = new Set<StatusBadgeVariant>(['success', 'warning', 'error', 'info', 'neutral'])
+
+function coerceStatusBadgeVariant(tone: ReturnType<typeof mapDictionaryColorToTone>): StatusBadgeVariant {
+  return tone && STATUS_BADGE_VARIANTS.has(tone as StatusBadgeVariant) ? (tone as StatusBadgeVariant) : 'neutral'
+}
+
 function buildInitialFormValues(task: TodoLinkSummary | null): Record<string, unknown> | undefined {
   if (!task) return undefined
   const values: Record<string, unknown> = {
     title: task.title ?? '',
     is_done: task.isDone ?? false,
+    status: task.status ?? 'planned',
     description: task.description ?? '',
     priority: task.priority ?? '',
     scheduledAt: task.dueAt ?? '',
@@ -104,6 +116,7 @@ export function TasksSection({
   const tHook = useT()
   const fallbackTranslator = React.useMemo<Translator>(() => createTranslatorWithFallback(tHook), [tHook])
   const t: Translator = React.useMemo(() => translator ?? fallbackTranslator, [translator, fallbackTranslator])
+  const { confirm, ConfirmDialogElement } = useConfirmDialog()
   const runWriteMutation = React.useCallback(
     async <T,>(operation: () => Promise<T>, mutationPayload?: Record<string, unknown>): Promise<T> => {
       if (!runGuardedMutation) {
@@ -113,6 +126,10 @@ export function TasksSection({
     },
     [runGuardedMutation],
   )
+
+  const scopeVersion = useOrganizationScopeVersion()
+  const statusDictionary = useCustomerDictionary('interaction-statuses', scopeVersion)
+  const statusMap = statusDictionary.data?.map ?? null
 
   // Legacy path: usePersonTasks (default)
   const legacyResult = usePersonTasks({ entityId, initialTasks })
@@ -136,7 +153,7 @@ export function TasksSection({
         entityId,
         interactionType: 'task',
         title: payload.base.title,
-        status: payload.base.is_done ? 'done' : 'planned',
+        status: payload.base.status ?? (payload.base.is_done ? 'done' : 'planned'),
         priority: payload.base.priority ?? null,
         body: payload.base.description ?? null,
         scheduledAt: payload.base.scheduledAt ?? null,
@@ -151,7 +168,7 @@ export function TasksSection({
     async (task: TodoLinkSummary, payload: TaskFormPayload) => {
       await canonicalResult.updateInteraction(task.todoId, {
         title: payload.base.title,
-        status: payload.base.is_done ? 'done' : 'planned',
+        status: payload.base.status ?? (payload.base.is_done ? 'done' : 'planned'),
         priority: payload.base.priority ?? null,
         body: payload.base.description ?? null,
         scheduledAt: payload.base.scheduledAt ?? null,
@@ -339,6 +356,16 @@ export function TasksSection({
 
   const handleDelete = React.useCallback(
     async (task: TodoLinkSummary) => {
+      const approved = await confirm({
+        title: t('customers.people.detail.tasks.deleteConfirmTitle', 'Remove task?'),
+        description: t(
+          'customers.people.detail.tasks.deleteConfirmDescription',
+          'This task will be removed from every view it appears in. This action cannot be undone.',
+        ),
+        confirmText: t('customers.people.detail.tasks.deleteConfirmAction', 'Remove task'),
+        variant: 'destructive',
+      })
+      if (!approved) return
       try {
         await runWriteMutation(
           () => unlinkTask(task),
@@ -356,7 +383,7 @@ export function TasksSection({
         flash(message, 'error')
       }
     },
-    [onDataRefresh, refresh, runWriteMutation, t, unlinkTask],
+    [confirm, onDataRefresh, refresh, runWriteMutation, t, unlinkTask],
   )
 
   const handleCancel = React.useCallback(
@@ -482,6 +509,16 @@ export function TasksSection({
                           >
                             {title}
                           </span>
+                          {task.status ? (
+                            <StatusBadge
+                              variant={coerceStatusBadgeVariant(
+                                mapDictionaryColorToTone(statusMap?.[task.status]?.color ?? null),
+                              )}
+                              dot
+                            >
+                              {statusMap?.[task.status]?.label ?? task.status}
+                            </StatusBadge>
+                          ) : null}
                         </span>
                       }
                       timestamp={task.createdAt}
@@ -593,7 +630,10 @@ export function TasksSection({
         onSubmit={handleDialogSubmit}
         isSubmitting={isMutating}
         contextMessage={dialogContextMessage}
+        useCanonicalInteractions={useCanonicalInteractions}
       />
+
+      {ConfirmDialogElement}
     </div>
   )
 }

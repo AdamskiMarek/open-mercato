@@ -2,7 +2,7 @@
 
 import * as React from 'react'
 import Link from 'next/link'
-import { useRouter, useParams } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
 import { Page, PageBody } from '@open-mercato/ui/backend/Page'
 import { CrudForm } from '@open-mercato/ui/backend/CrudForm'
@@ -10,6 +10,7 @@ import { Spinner } from '@open-mercato/ui/primitives/spinner'
 import { Button } from '@open-mercato/ui/primitives/button'
 import { apiFetch, withScopedApiHeaders } from '@open-mercato/ui/backend/utils/api'
 import { buildOptimisticLockHeader } from '@open-mercato/ui/backend/utils/optimisticLock'
+import { buildRecordInjectionContext, useSetCurrentRecordInjectionContext } from '@open-mercato/ui/backend/injection/recordContext'
 import { readJsonSafe } from '@open-mercato/ui/backend/utils/serverErrors'
 import { CrudHttpError } from '@open-mercato/shared/lib/crud/errors'
 import { useT } from '@open-mercato/shared/lib/i18n/context'
@@ -24,17 +25,10 @@ import { ConditionBuilder } from '../../../components/ConditionBuilder'
 import { ActionBuilder } from '../../../components/ActionBuilder'
 import { buildRulePayload, parseRuleToFormValues } from '../../../components/utils/formHelpers'
 
-export default function EditBusinessRulePage() {
+export default function EditBusinessRulePage({ params }: { params?: { id?: string } }) {
   const router = useRouter()
-  const params = useParams()
-
-  // Handle catch-all route: params.slug = ['rules', 'uuid']
-  let ruleId: string | undefined
-  if (params?.slug && Array.isArray(params.slug)) {
-    ruleId = params.slug[1] // Second element is the ID
-  } else if (params?.id) {
-    ruleId = Array.isArray(params.id) ? params.id[0] : params.id
-  }
+  const pathname = usePathname()
+  const ruleId = params?.id
 
   const t = useT()
   const { organizationId, tenantId } = useOrganizationScopeDetail()
@@ -103,6 +97,20 @@ export default function EditBusinessRulePage() {
     [t]
   )
 
+  // Publish page-load record context to the AppShell-owned `backend:record:current`
+  // mount so the enterprise record_locks widget resolves `business_rules.rule` + id
+  // explicitly. The resourceKind mirrors the route's `enforceCommandOptimisticLock`
+  // call so the held lock matches the save-time conflict surface for the same rule.
+  useSetCurrentRecordInjectionContext(
+    buildRecordInjectionContext({
+      resourceKind: 'business_rules.rule',
+      resourceId: ruleId ?? null,
+      updatedAt: rule?.updatedAt ?? rule?.updated_at ?? null,
+      data: (rule ?? null) as Record<string, unknown> | null,
+      path: pathname,
+    }),
+  )
+
   if (isLoading) {
     return (
       <Page>
@@ -141,6 +149,7 @@ export default function EditBusinessRulePage() {
         <CrudForm
           key={ruleId}
           title={t('business_rules.rules.edit.title')}
+          titleHeadingLevel={1}
           backHref="/backend/rules"
           schema={businessRuleFormSchema}
           fields={fields}

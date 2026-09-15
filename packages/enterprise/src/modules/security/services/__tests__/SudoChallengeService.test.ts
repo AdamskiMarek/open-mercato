@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto'
 import type { EntityManager } from '@mikro-orm/postgresql'
 import { findOneWithDecryption } from '@open-mercato/shared/lib/encryption/find'
-import { ChallengeMethod, SudoChallengeConfig } from '../../data/entities'
+import { ChallengeMethod, SudoChallengeConfig, SudoSession } from '../../data/entities'
 import { registerSecuritySudoTargetEntries } from '../../lib/module-security-registry'
 import {
   defaultSecurityModuleConfig,
@@ -12,6 +12,10 @@ import { SudoChallengeService } from '../SudoChallengeService'
 jest.mock('@open-mercato/shared/lib/encryption/find', () => ({
   findOneWithDecryption: jest.fn(),
 }))
+
+import * as securityConfig from '../../lib/security-config'
+
+const mockEmitBypassWarning = jest.spyOn(securityConfig, 'emitMfaEmergencyBypassActiveWarning').mockImplementation(() => {})
 
 type ConfigRecord = {
   id: string
@@ -33,9 +37,15 @@ type SessionRecord = {
   id: string
   userId: string
   tenantId: string
+  scopeTenantId?: string | null
+  scopeOrganizationId?: string | null
+  targetIdentifier?: string | null
+  sudoConfigId?: string | null
+  sudoConfigUpdatedAt?: Date | null
   sessionToken: string
   challengeMethod: string
   expiresAt: Date
+  verifiedAt?: Date | null
   createdAt: Date
 }
 
@@ -61,11 +71,13 @@ function createServiceContext(
 ) {
   const configs: ConfigRecord[] = []
   const sessions: SessionRecord[] = []
+  const connectionExecute = jest.fn(async () => [])
+  const transactional = jest.fn()
 
   const em = {
     create: jest.fn((entity: unknown, data: Record<string, unknown>) => {
       if (entity === expect.anything()) return data
-      if ('targetIdentifier' in data) {
+      if (entity === SudoChallengeConfig) {
         return {
           id: data.id ?? `config-${configs.length + 1}`,
           tenantId: (data.tenantId as string | null | undefined) ?? null,
@@ -87,14 +99,20 @@ function createServiceContext(
         id: `session-${sessions.length + 1}`,
         userId: String(data.userId),
         tenantId: String(data.tenantId),
+        scopeTenantId: (data.scopeTenantId as string | null | undefined) ?? null,
+        scopeOrganizationId: (data.scopeOrganizationId as string | null | undefined) ?? null,
+        targetIdentifier: (data.targetIdentifier as string | null | undefined) ?? null,
+        sudoConfigId: (data.sudoConfigId as string | null | undefined) ?? null,
+        sudoConfigUpdatedAt: (data.sudoConfigUpdatedAt as Date | null | undefined) ?? null,
         sessionToken: String(data.sessionToken),
         challengeMethod: String(data.challengeMethod),
         expiresAt: data.expiresAt as Date,
+        verifiedAt: (data.verifiedAt as Date | null | undefined) ?? null,
         createdAt: (data.createdAt as Date | undefined) ?? new Date(),
       }
     }),
     persist: jest.fn((record: ConfigRecord | SessionRecord) => {
-      if ('targetIdentifier' in record) configs.push(record)
+      if ('isDeveloperDefault' in record) configs.push(record)
       else sessions.push(record)
     }),
     flush: jest.fn().mockResolvedValue(undefined),
@@ -134,13 +152,41 @@ function createServiceContext(
           if (query.id !== undefined && session.id !== query.id) return false
           if (query.userId !== undefined && session.userId !== query.userId) return false
           if (query.sessionToken !== undefined && session.sessionToken !== query.sessionToken) return false
+          if ('targetIdentifier' in query && session.targetIdentifier !== query.targetIdentifier) return false
+          if ('scopeTenantId' in query && session.scopeTenantId !== query.scopeTenantId) return false
+          if ('scopeOrganizationId' in query && session.scopeOrganizationId !== query.scopeOrganizationId) return false
+          const verifiedAt = query.verifiedAt as { $ne?: Date | null } | Date | null | undefined
+          if (verifiedAt && typeof verifiedAt === 'object' && '$ne' in verifiedAt) {
+            if (verifiedAt.$ne === null && session.verifiedAt == null) return false
+          } else if ('verifiedAt' in query && session.verifiedAt !== verifiedAt) {
+            return false
+          }
           return true
         }) ?? null
       }
       return null
     }),
+    nativeUpdate: jest.fn(async (entity: unknown, query: Record<string, unknown>, updates: Record<string, unknown>) => {
+      if (entity !== SudoSession) return 0
+      const session = sessions.find((candidate) => {
+        if (query.id !== undefined && candidate.id !== query.id) return false
+        if (query.sessionToken !== undefined && candidate.sessionToken !== query.sessionToken) return false
+        if (query.verifiedAt !== undefined && candidate.verifiedAt !== query.verifiedAt) return false
+        const expiresAt = query.expiresAt as { $gt?: Date } | undefined
+        if (expiresAt?.$gt && candidate.expiresAt.getTime() <= expiresAt.$gt.getTime()) return false
+        return true
+      })
+      if (!session) return 0
+      Object.assign(session, updates)
+      return 1
+    }),
     nativeDelete: jest.fn(async () => 0),
+    execute: connectionExecute,
+    transactional,
   }
+  transactional.mockImplementation(async (callback: (transactionalEm: EntityManager) => Promise<unknown>) => (
+    callback(em as unknown as EntityManager)
+  ))
 
   const passwordService = {
     verifyPassword: jest.fn(async () => true),
@@ -167,12 +213,29 @@ function createServiceContext(
     securityConfig,
   )
 
-  return { service, configs, sessions, passwordService, mfaService, mfaVerificationService }
+  return {
+    service,
+    configs,
+    sessions,
+    passwordService,
+    mfaService,
+    mfaVerificationService,
+    connectionExecute,
+  }
 }
 
 describe('SudoChallengeService', () => {
+  const ORIGINAL_SUDO_SECRET = process.env.OM_SECURITY_SUDO_SECRET
+  const ORIGINAL_AUTH_JWT_SECRET = process.env.AUTH_JWT_SECRET
+  const ORIGINAL_AUTH_SECRET = process.env.AUTH_SECRET
+  const ORIGINAL_JWT_SECRET = process.env.JWT_SECRET
+
   beforeEach(() => {
     jest.clearAllMocks()
+    process.env.OM_SECURITY_SUDO_SECRET = 'unit-test-sudo-secret'
+    delete process.env.AUTH_JWT_SECRET
+    delete process.env.AUTH_SECRET
+    delete process.env.JWT_SECRET
     mockedFindOneWithDecryption.mockResolvedValue({
       id: 'user-1',
       tenantId: 'tenant-1',
@@ -215,6 +278,194 @@ describe('SudoChallengeService', () => {
     expect(result.required).toBe(true)
     expect(result.method).toBe('password')
     expect(sessions).toHaveLength(1)
+  })
+
+  test('rejects target substitution before verifying a weaker password challenge', async () => {
+    const { service, passwordService } = createServiceContext()
+    await service.createConfig({
+      tenantId: 'tenant-1',
+      organizationId: 'org-1',
+      targetIdentifier: 'security.password.target',
+      isEnabled: true,
+      ttlSeconds: 300,
+      challengeMethod: ChallengeMethod.PASSWORD,
+    }, 'admin-1')
+    await service.createConfig({
+      tenantId: 'tenant-1',
+      organizationId: 'org-1',
+      targetIdentifier: 'security.mfa.target',
+      isEnabled: true,
+      ttlSeconds: 300,
+      challengeMethod: ChallengeMethod.MFA,
+    }, 'admin-1')
+
+    const initiated = await service.initiate('user-1', 'security.password.target', {
+      tenantId: 'tenant-1',
+      organizationId: 'org-1',
+    })
+
+    await expect(service.verify(
+      initiated.sessionId!,
+      'password',
+      { password: 'Valid1!Pass' },
+      {
+        expectedUserId: 'user-1',
+        tenantId: 'tenant-1',
+        organizationId: 'org-1',
+        targetIdentifier: 'security.mfa.target',
+      },
+    )).rejects.toMatchObject({ statusCode: 403 })
+    expect(passwordService.verifyPassword).not.toHaveBeenCalled()
+  })
+
+  test.each([
+    [{ tenantId: 'tenant-2', organizationId: 'org-1' }],
+    [{ tenantId: 'tenant-1', organizationId: 'org-2' }],
+  ])('rejects verification outside the initiated scope', async (scope) => {
+    const { service, passwordService } = createServiceContext()
+    const initiated = await service.initiate('user-1', 'security.sudo.manage', {
+      tenantId: 'tenant-1',
+      organizationId: 'org-1',
+    })
+
+    await expect(service.verify(
+      initiated.sessionId!,
+      'password',
+      { password: 'Valid1!Pass' },
+      {
+        expectedUserId: 'user-1',
+        ...scope,
+        targetIdentifier: 'security.sudo.manage',
+      },
+    )).rejects.toMatchObject({ statusCode: 403 })
+    expect(passwordService.verifyPassword).not.toHaveBeenCalled()
+  })
+
+  test('rejects a challenge after its selected sudo configuration changes', async () => {
+    const { service, configs, passwordService } = createServiceContext()
+    const config = await service.createConfig({
+      tenantId: 'tenant-1',
+      organizationId: 'org-1',
+      targetIdentifier: 'security.versioned.target',
+      isEnabled: true,
+      ttlSeconds: 300,
+      challengeMethod: ChallengeMethod.PASSWORD,
+    }, 'admin-1')
+    const initiated = await service.initiate('user-1', config.targetIdentifier, {
+      tenantId: 'tenant-1',
+      organizationId: 'org-1',
+    })
+    const storedConfig = configs.find((candidate) => candidate.id === config.id)!
+    storedConfig.ttlSeconds = 600
+    storedConfig.updatedAt = new Date(storedConfig.updatedAt.getTime() + 1000)
+
+    await expect(service.verify(
+      initiated.sessionId!,
+      'password',
+      { password: 'Valid1!Pass' },
+      {
+        expectedUserId: 'user-1',
+        tenantId: 'tenant-1',
+        organizationId: 'org-1',
+        targetIdentifier: config.targetIdentifier,
+      },
+    )).rejects.toMatchObject({ statusCode: 403 })
+    expect(passwordService.verifyPassword).not.toHaveBeenCalled()
+  })
+
+  test('rejects legacy pending sessions without target and configuration bindings', async () => {
+    const { service, sessions, passwordService } = createServiceContext()
+    sessions.push({
+      id: 'legacy-session',
+      userId: 'user-1',
+      tenantId: 'tenant-1',
+      sessionToken: 'legacy-pending-token',
+      challengeMethod: 'password',
+      expiresAt: new Date(Date.now() + 60_000),
+      createdAt: new Date(),
+    })
+
+    await expect(service.verify(
+      'legacy-session',
+      'password',
+      { password: 'Valid1!Pass' },
+      {
+        expectedUserId: 'user-1',
+        tenantId: 'tenant-1',
+        organizationId: 'org-1',
+        targetIdentifier: 'security.sudo.manage',
+      },
+    )).rejects.toMatchObject({ statusCode: 404 })
+    expect(passwordService.verifyPassword).not.toHaveBeenCalled()
+  })
+
+  test('allows exactly one winner when two verifiers consume the same password challenge', async () => {
+    const { service, passwordService } = createServiceContext()
+    const initiated = await service.initiate('user-1', 'security.sudo.manage', {
+      tenantId: 'tenant-1',
+      organizationId: 'org-1',
+    })
+    const verification = {
+      expectedUserId: 'user-1',
+      tenantId: 'tenant-1',
+      organizationId: 'org-1',
+      targetIdentifier: 'security.sudo.manage',
+    }
+
+    const results = await Promise.allSettled([
+      service.verify(
+        initiated.sessionId!,
+        'password',
+        { password: 'Valid1!Pass' },
+        verification,
+      ),
+      service.verify(
+        initiated.sessionId!,
+        'password',
+        { password: 'Valid1!Pass' },
+        verification,
+      ),
+    ])
+
+    const fulfilled = results.filter((result) => result.status === 'fulfilled')
+    const rejected = results.filter((result) => result.status === 'rejected')
+    expect(fulfilled).toHaveLength(1)
+    expect(rejected).toHaveLength(1)
+    expect(rejected[0]).toMatchObject({ reason: { statusCode: 400 } })
+    expect(passwordService.verifyPassword).toHaveBeenCalledTimes(2)
+  })
+
+  test('rejects a higher-priority policy installed while credentials are being verified', async () => {
+    const { service, configs, passwordService, connectionExecute } = createServiceContext()
+    const initiated = await service.initiate('user-1', 'security.sudo.manage', {
+      tenantId: 'tenant-1',
+      organizationId: 'org-1',
+    })
+    passwordService.verifyPassword.mockImplementationOnce(async () => {
+      configs.push({
+        ...configs[0],
+        id: 'replacement-config',
+        tenantId: 'tenant-1',
+        organizationId: 'org-1',
+        isDeveloperDefault: false,
+        challengeMethod: ChallengeMethod.MFA,
+        updatedAt: new Date(configs[0].updatedAt.getTime() + 1000),
+      })
+      return true
+    })
+
+    await expect(service.verify(
+      initiated.sessionId!,
+      'password',
+      { password: 'Valid1!Pass' },
+      {
+        expectedUserId: 'user-1',
+        tenantId: 'tenant-1',
+        organizationId: 'org-1',
+        targetIdentifier: 'security.sudo.manage',
+      },
+    )).rejects.toMatchObject({ statusCode: 403 })
+    expect(connectionExecute).toHaveBeenCalledWith('lock table "sudo_challenge_configs" in share mode')
   })
 
   test('verifies an MFA sudo challenge and validates the signed token', async () => {
@@ -330,6 +581,52 @@ describe('SudoChallengeService', () => {
 
     expect(result.method).toBe('password')
     expect(mfaVerificationService.createChallenge).not.toHaveBeenCalled()
+    expect(mockEmitBypassWarning).toHaveBeenCalledWith(
+      'sudo challenge downgraded to password',
+      expect.objectContaining({
+        availableMfaMethodCount: 1,
+        userId: 'user-1',
+        targetIdentifier: 'security.sudo.manage',
+      }),
+    )
+  })
+
+  test('does not warn when no MFA methods are available so password was already the outcome', async () => {
+    const { service, mfaService, mfaVerificationService } = createServiceContext({
+      ...defaultSecurityModuleConfig,
+      mfa: {
+        ...defaultSecurityModuleConfig.mfa,
+        emergencyBypass: true,
+      },
+    })
+    mfaService.getUserMethods.mockResolvedValueOnce([])
+
+    const result = await service.initiate('user-1', 'security.sudo.manage', {
+      tenantId: 'tenant-1',
+      organizationId: 'org-1',
+    })
+
+    expect(result.method).toBe('password')
+    expect(mockEmitBypassWarning).not.toHaveBeenCalled()
+  })
+
+  test('does not warn when bypass is disabled even though MFA would be used', async () => {
+    const { service, mfaService } = createServiceContext({
+      ...defaultSecurityModuleConfig,
+      mfa: {
+        ...defaultSecurityModuleConfig.mfa,
+        emergencyBypass: false,
+      },
+    })
+    mfaService.getUserMethods.mockResolvedValueOnce([{ id: 'method-1' }])
+
+    const result = await service.initiate('user-1', 'security.sudo.manage', {
+      tenantId: 'tenant-1',
+      organizationId: 'org-1',
+    })
+
+    expect(result.method).toBe('mfa')
+    expect(mockEmitBypassWarning).not.toHaveBeenCalled()
   })
 
   describe('tenant isolation for sudo configs', () => {
@@ -466,15 +763,26 @@ describe('SudoChallengeService', () => {
       exp: Date.now() + 60_000,
     }
 
-    function seedMatchingSession(sessions: SessionRecord[], token: string) {
+    function seedMatchingSession(
+      sessions: SessionRecord[],
+      token: string,
+      overrides: Partial<SessionRecord> = {},
+    ) {
       sessions.push({
         id: validPayload.sid,
         userId: validPayload.sub,
         tenantId: 'tenant-1',
+        scopeTenantId: validPayload.tid,
+        scopeOrganizationId: validPayload.oid,
+        targetIdentifier: validPayload.tgt,
+        sudoConfigId: 'config-1',
+        sudoConfigUpdatedAt: new Date(),
         sessionToken: token,
         challengeMethod: 'password',
         expiresAt: new Date(Date.now() + 60_000),
+        verifiedAt: new Date(),
         createdAt: new Date(),
+        ...overrides,
       })
     }
 
@@ -541,6 +849,200 @@ describe('SudoChallengeService', () => {
 
       await expect(
         service.validateToken(token, 'security.sudo.manage', {
+          expectedUserId: 'user-1',
+          tenantId: 'tenant-1',
+          organizationId: 'org-1',
+        }),
+      ).resolves.toBe(true)
+    })
+
+    test.each([
+      ['target', { targetIdentifier: 'security.other.target' }],
+      ['tenant scope', { scopeTenantId: 'tenant-2' }],
+      ['organization scope', { scopeOrganizationId: 'org-2' }],
+      ['verification state', { verifiedAt: null }],
+    ])('rejects a well-formed token when the durable %s binding differs', async (_label, overrides) => {
+      const { service, sessions } = createServiceContext()
+      const token = signSudoTokenWithPayload(validPayload)
+      seedMatchingSession(sessions, token, overrides)
+
+      await expect(
+        service.validateToken(token, 'security.sudo.manage', {
+          expectedUserId: 'user-1',
+          tenantId: 'tenant-1',
+          organizationId: 'org-1',
+        }),
+      ).resolves.toBe(false)
+    })
+  })
+
+  describe('sudo secret resolution', () => {
+    afterAll(() => {
+      if (ORIGINAL_SUDO_SECRET === undefined) delete process.env.OM_SECURITY_SUDO_SECRET
+      else process.env.OM_SECURITY_SUDO_SECRET = ORIGINAL_SUDO_SECRET
+      if (ORIGINAL_AUTH_JWT_SECRET === undefined) delete process.env.AUTH_JWT_SECRET
+      else process.env.AUTH_JWT_SECRET = ORIGINAL_AUTH_JWT_SECRET
+      if (ORIGINAL_AUTH_SECRET === undefined) delete process.env.AUTH_SECRET
+      else process.env.AUTH_SECRET = ORIGINAL_AUTH_SECRET
+      if (ORIGINAL_JWT_SECRET === undefined) delete process.env.JWT_SECRET
+      else process.env.JWT_SECRET = ORIGINAL_JWT_SECRET
+    })
+
+    async function initiateMfaChallenge(service: SudoChallengeService, mfaService: { getUserMethods: jest.Mock }) {
+      mfaService.getUserMethods.mockResolvedValueOnce([{ id: 'method-1' }])
+      return service.initiate('user-1', 'security.sudo.manage', {
+        tenantId: 'tenant-1',
+        organizationId: 'org-1',
+      })
+    }
+
+    test('verify throws a descriptive error when no sudo secret env var is set', async () => {
+      delete process.env.OM_SECURITY_SUDO_SECRET
+      delete process.env.AUTH_JWT_SECRET
+      delete process.env.AUTH_SECRET
+      delete process.env.JWT_SECRET
+
+      const { service, mfaService } = createServiceContext()
+      const initiated = await initiateMfaChallenge(service, mfaService)
+
+      await expect(
+        service.verify(
+          initiated.sessionId!,
+          'totp',
+          { code: '123456' },
+          { targetIdentifier: 'security.sudo.manage' },
+        ),
+      ).rejects.toThrow(/OM_SECURITY_SUDO_SECRET, AUTH_JWT_SECRET, AUTH_SECRET, or JWT_SECRET/)
+    })
+
+    test('validateToken throws when no sudo secret env var is set', async () => {
+      delete process.env.OM_SECURITY_SUDO_SECRET
+      delete process.env.AUTH_JWT_SECRET
+      delete process.env.AUTH_SECRET
+      delete process.env.JWT_SECRET
+
+      const { service } = createServiceContext()
+
+      await expect(
+        service.validateToken('fabricated.token', 'security.sudo.manage', {
+          expectedUserId: 'user-1',
+          tenantId: 'tenant-1',
+          organizationId: 'org-1',
+        }),
+      ).rejects.toThrow(/OM_SECURITY_SUDO_SECRET, AUTH_JWT_SECRET, AUTH_SECRET, or JWT_SECRET/)
+    })
+
+    test('empty-string env vars are treated as unset and throw', async () => {
+      process.env.OM_SECURITY_SUDO_SECRET = ''
+      process.env.AUTH_JWT_SECRET = '   '
+      process.env.AUTH_SECRET = '\t'
+      process.env.JWT_SECRET = ''
+
+      const { service, mfaService } = createServiceContext()
+      const initiated = await initiateMfaChallenge(service, mfaService)
+
+      await expect(
+        service.verify(
+          initiated.sessionId!,
+          'totp',
+          { code: '123456' },
+          { targetIdentifier: 'security.sudo.manage' },
+        ),
+      ).rejects.toThrow(/OM_SECURITY_SUDO_SECRET, AUTH_JWT_SECRET, AUTH_SECRET, or JWT_SECRET/)
+    })
+
+    test('OM_SECURITY_SUDO_SECRET wins over the other fallbacks', async () => {
+      process.env.OM_SECURITY_SUDO_SECRET = 'primary-secret'
+      process.env.AUTH_JWT_SECRET = 'auth-jwt-secret'
+      process.env.AUTH_SECRET = 'auth-secret'
+      process.env.JWT_SECRET = 'legacy-secret'
+
+      const { service, mfaService } = createServiceContext()
+      const initiated = await initiateMfaChallenge(service, mfaService)
+      const verified = await service.verify(
+        initiated.sessionId!,
+        'totp',
+        { code: '123456' },
+        { targetIdentifier: 'security.sudo.manage' },
+      )
+
+      process.env.OM_SECURITY_SUDO_SECRET = 'rotated-primary-secret'
+      await expect(
+        service.validateToken(verified.sudoToken, 'security.sudo.manage', {
+          expectedUserId: 'user-1',
+          tenantId: 'tenant-1',
+          organizationId: 'org-1',
+        }),
+      ).resolves.toBe(false)
+    })
+
+    test('AUTH_JWT_SECRET wins over AUTH_SECRET and JWT_SECRET when OM_SECURITY_SUDO_SECRET is unset', async () => {
+      delete process.env.OM_SECURITY_SUDO_SECRET
+      process.env.AUTH_JWT_SECRET = 'auth-jwt-secret'
+      process.env.AUTH_SECRET = 'auth-secret'
+      process.env.JWT_SECRET = 'legacy-secret'
+
+      const { service, mfaService } = createServiceContext()
+      const initiated = await initiateMfaChallenge(service, mfaService)
+      const verified = await service.verify(
+        initiated.sessionId!,
+        'totp',
+        { code: '123456' },
+        { targetIdentifier: 'security.sudo.manage' },
+      )
+
+      process.env.AUTH_JWT_SECRET = 'rotated-auth-jwt-secret'
+      await expect(
+        service.validateToken(verified.sudoToken, 'security.sudo.manage', {
+          expectedUserId: 'user-1',
+          tenantId: 'tenant-1',
+          organizationId: 'org-1',
+        }),
+      ).resolves.toBe(false)
+    })
+
+    test('AUTH_SECRET wins over JWT_SECRET when neither OM_SECURITY_SUDO_SECRET nor AUTH_JWT_SECRET is set', async () => {
+      delete process.env.OM_SECURITY_SUDO_SECRET
+      delete process.env.AUTH_JWT_SECRET
+      process.env.AUTH_SECRET = 'auth-secret'
+      process.env.JWT_SECRET = 'legacy-secret'
+
+      const { service, mfaService } = createServiceContext()
+      const initiated = await initiateMfaChallenge(service, mfaService)
+      const verified = await service.verify(
+        initiated.sessionId!,
+        'totp',
+        { code: '123456' },
+        { targetIdentifier: 'security.sudo.manage' },
+      )
+
+      process.env.AUTH_SECRET = 'rotated-auth-secret'
+      await expect(
+        service.validateToken(verified.sudoToken, 'security.sudo.manage', {
+          expectedUserId: 'user-1',
+          tenantId: 'tenant-1',
+          organizationId: 'org-1',
+        }),
+      ).resolves.toBe(false)
+    })
+
+    test('JWT_SECRET-only deployment can round-trip a sudo token', async () => {
+      delete process.env.OM_SECURITY_SUDO_SECRET
+      delete process.env.AUTH_JWT_SECRET
+      delete process.env.AUTH_SECRET
+      process.env.JWT_SECRET = 'legacy-only-secret'
+
+      const { service, mfaService } = createServiceContext()
+      const initiated = await initiateMfaChallenge(service, mfaService)
+      const verified = await service.verify(
+        initiated.sessionId!,
+        'totp',
+        { code: '123456' },
+        { targetIdentifier: 'security.sudo.manage' },
+      )
+
+      await expect(
+        service.validateToken(verified.sudoToken, 'security.sudo.manage', {
           expectedUserId: 'user-1',
           tenantId: 'tenant-1',
           organizationId: 'org-1',

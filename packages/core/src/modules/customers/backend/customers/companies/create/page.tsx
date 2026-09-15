@@ -34,6 +34,7 @@ export default function CreateCompanyPage() {
       <PageBody>
         <CrudForm<CompanyFormValues>
           title={t('customers.companies.create.title')}
+          titleHeadingLevel={1}
           backHref={returnTo ?? '/backend/customers/companies'}
           fields={fields}
           groups={groups}
@@ -103,6 +104,8 @@ export default function CreateCompanyPage() {
                 if (postalCode !== undefined) body.postalCode = postalCode
                 const country = normalize(entry.country)
                 if (country !== undefined) body.country = country.toUpperCase()
+                if (typeof entry.latitude === 'number') body.latitude = entry.latitude
+                if (typeof entry.longitude === 'number') body.longitude = entry.longitude
                 try {
                   await createCrud('customers/addresses', body)
                 } catch (addressErr) {

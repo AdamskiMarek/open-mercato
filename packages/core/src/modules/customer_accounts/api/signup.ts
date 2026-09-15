@@ -26,6 +26,9 @@ import {
   TenantResolutionError,
 } from '@open-mercato/core/modules/customer_accounts/lib/resolveTenantContext'
 import { urlForCustomerOrg } from '@open-mercato/core/modules/customer_accounts/lib/customerUrl'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+
+const logger = createLogger('customer_accounts').child({ component: 'signup' })
 
 export const metadata: { path?: string; requireAuth?: boolean } = { requireAuth: false }
 
@@ -137,12 +140,14 @@ export async function POST(req: Request) {
       ),
     }
 
-    void sendEmail({
+    await sendEmail({
       to: existing.email,
       subject,
       react: CustomerExistingAccountEmail({ loginUrl, copy }),
+      tenantId,
+      organizationId,
     }).catch((error) => {
-      console.error('[customer_accounts.signup] existing-account email failed', error)
+      logger.error('Existing-account email failed', { err: error })
     })
 
     return NextResponse.json({ ok: true }, { status: 202 })
@@ -190,12 +195,14 @@ export async function POST(req: Request) {
     ),
   }
 
-  void sendEmail({
+  await sendEmail({
     to: user.email,
     subject,
     react: CustomerSignupVerificationEmail({ verifyUrl, copy }),
+    tenantId,
+    organizationId,
   }).catch((error) => {
-    console.error('[customer_accounts.signup] verification email failed', error)
+    logger.error('Verification email failed', { err: error })
   })
 
   void emitCustomerAccountsEvent('customer_accounts.user.created', {

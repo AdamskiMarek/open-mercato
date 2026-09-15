@@ -9,6 +9,8 @@ import { normalizeCustomFieldResponse } from '@open-mercato/shared/lib/custom-fi
 import { applyResponseEnrichers } from '@open-mercato/shared/lib/crud/enricher-runner'
 import type { EnricherContext } from '@open-mercato/shared/lib/crud/response-enricher'
 import { findWithDecryption } from '@open-mercato/shared/lib/encryption/find'
+import { resolveTenantEncryptionService } from '@open-mercato/shared/lib/encryption/customFieldValues'
+import { resolveEncryptedSortFields, resolveEncryptedSortMaxRows } from '@open-mercato/shared/lib/query/encrypted-sort'
 import { escapeLikePattern } from '@open-mercato/shared/lib/db/escapeLikePattern'
 import { createRequestContainer } from '@open-mercato/shared/lib/di/container'
 import { getAuthFromRequest } from '@open-mercato/shared/lib/auth/server'
@@ -24,8 +26,13 @@ import {
 } from '../openapi'
 import { CUSTOMER_INTERACTION_ENTITY_ID } from '../../lib/interactionCompatibility'
 import { applyEmailVisibilityFilter } from '../../lib/visibilityFilter'
+import { resolveEncryptedSortPage } from './encryptedSortPage'
+import { applyDecryptedFields } from './decryptedFields'
 import { resolveCanonicalActivityTargetId } from '../../lib/legacyActivityBridge'
 import type { CommandBus, CommandRuntimeContext } from '@open-mercato/shared/lib/commands'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+
+const logger = createLogger('customers')
 
 const rawBodySchema = z.object({}).passthrough()
 
@@ -53,6 +60,7 @@ export const listSchema = z
     search: z.string().trim().min(1).optional(),
     from: z.coerce.date().optional(),
     to: z.coerce.date().optional(),
+    recurrenceMasters: z.enum(['true', 'false']).optional(),
     pinned: z.enum(['true', 'false']).optional(),
     sortField: interactionSortFieldSchema.optional(),
     sortDir: z.enum(['asc', 'desc']).optional(),
@@ -119,7 +127,7 @@ const crud = makeCrudRoute({
           } catch (err) {
             // Bridging is best-effort; downstream lookup will surface a 404
             // when neither canonical nor legacy rows exist.
-            console.warn('[customers.interactions.put] legacy bridge failed', { id: parsed.id, error: err })
+            logger.warn('Legacy interaction bridge failed', { component: 'interactions.put', id: parsed.id, err })
           }
         }
         return parsed
@@ -165,6 +173,7 @@ type InteractionListRow = {
   priority: number | null
   author_user_id: string | null
   owner_user_id: string | null
+  external_message_id: string | null
   appearance_icon: string | null
   appearance_color: string | null
   source: string | null
@@ -173,7 +182,7 @@ type InteractionListRow = {
   all_day: boolean | null
   recurrence_rule: string | null
   recurrence_end: Date | null
-  participants: Array<{ userId: string; name?: string; email?: string; status?: string }> | null
+  participants: Array<{ userId?: string; name?: string; email?: string; status?: string }> | null
   reminder_minutes: number | null
   visibility: string | null
   linked_entities: Array<{ id: string; type: string; label: string }> | null
@@ -284,6 +293,96 @@ function buildSortSql(
   return `coalesce(${config.column}, ${sentinel})`
 }
 
+const INTERACTION_LIST_COLUMNS = [
+  'id',
+  'entity_id',
+  'deal_id',
+  'interaction_type',
+  'title',
+  'body',
+  'status',
+  'scheduled_at',
+  'occurred_at',
+  'priority',
+  'author_user_id',
+  'owner_user_id',
+  'external_message_id',
+  'appearance_icon',
+  'appearance_color',
+  'source',
+  'duration_minutes',
+  'location',
+  'all_day',
+  'recurrence_rule',
+  'recurrence_end',
+  'participants',
+  'reminder_minutes',
+  'visibility',
+  'linked_entities',
+  'guest_permissions',
+  'pinned',
+  'organization_id',
+  'tenant_id',
+  'created_at',
+  'updated_at',
+] as const
+
+// Shared by both the SQL keyset path and the encrypted-sort candidate scan
+// so the two paths never drift on which rows are in scope.
+function applyInteractionListFilters(
+  baseQuery: any,
+  params: {
+    tenantId: string
+    organizationIds: string[]
+    query: z.infer<typeof listSchema>
+  },
+): any {
+  let q = baseQuery.where('deleted_at', 'is', null).where('tenant_id', '=', params.tenantId)
+  if (params.organizationIds.length > 0) q = q.where('organization_id', 'in', params.organizationIds)
+  const { query } = params
+  if (query.entityId) q = q.where('entity_id', '=', query.entityId)
+  if (query.dealId) q = q.where('deal_id', '=', query.dealId)
+  if (query.status) q = q.where('status', '=', query.status)
+  if (query.interactionType) q = q.where('interaction_type', '=', query.interactionType)
+  if (query.type) {
+    const types = query.type.split(',').map((t) => t.trim()).filter(Boolean)
+    if (types.length > 0) q = q.where('interaction_type', 'in', types)
+  }
+  if (query.pinned === 'true') {
+    q = q.where('pinned', '=', true)
+  } else if (query.pinned === 'false') {
+    q = q.where('pinned', '=', false)
+  }
+  if (query.excludeInteractionType) q = q.where('interaction_type', '!=', query.excludeInteractionType)
+  if (query.search) {
+    // NOTE: for tenants with data encryption enabled, `title`/`body` are
+    // ciphertext at rest (see encryption.ts), so this ILIKE matches encrypted
+    // bytes and returns no rows — substring search over encrypted free-text
+    // columns is unsupported, the same documented limitation as
+    // customer_activity / customer_comment. The returned page's title/body are
+    // still decrypted for display further below.
+    const searchTerm = `%${escapeLikePattern(query.search)}%`
+    q = q.where(sql<boolean>`coalesce(title, '') ilike ${searchTerm} or coalesce(body, '') ilike ${searchTerm}`)
+  }
+  if (query.recurrenceMasters === 'true') {
+    q = q.where('recurrence_rule', 'is not', null)
+    if (query.from) {
+      q = q.where(sql<boolean>`recurrence_end is null or recurrence_end >= ${query.from}`)
+    }
+    if (query.to) {
+      q = q.where(sql<boolean>`coalesce(occurred_at, scheduled_at, created_at) <= ${query.to}`)
+    }
+  } else {
+    if (query.from) {
+      q = q.where(sql<boolean>`coalesce(occurred_at, scheduled_at, created_at) >= ${query.from}`)
+    }
+    if (query.to) {
+      q = q.where(sql<boolean>`coalesce(occurred_at, scheduled_at, created_at) <= ${query.to}`)
+    }
+  }
+  return q
+}
+
 async function resolveUserFeatures(
   container: { resolve: (name: string) => unknown },
   userId: string,
@@ -366,94 +465,6 @@ export async function GET(req: Request) {
       })
     }
 
-    let rowsQuery = db
-      .selectFrom('customer_interactions')
-      .select([
-        'id',
-        'entity_id',
-        'deal_id',
-        'interaction_type',
-        'title',
-        'body',
-        'status',
-        'scheduled_at',
-        'occurred_at',
-        'priority',
-        'author_user_id',
-        'owner_user_id',
-        'appearance_icon',
-        'appearance_color',
-        'source',
-        'duration_minutes',
-        'location',
-        'all_day',
-        'recurrence_rule',
-        'recurrence_end',
-        'participants',
-        'reminder_minutes',
-        'visibility',
-        'linked_entities',
-        'guest_permissions',
-        'pinned',
-        'organization_id',
-        'tenant_id',
-        'created_at',
-        'updated_at',
-        sql`${sql.raw(sortSql)}`.as('__sort_value'),
-      ])
-      .where('deleted_at', 'is', null)
-      .where('tenant_id', '=', auth.tenantId)
-      .limit(query.limit + 1)
-
-    if (organizationIds.length > 0) {
-      rowsQuery = rowsQuery.where('organization_id', 'in', organizationIds)
-    }
-    if (query.entityId) rowsQuery = rowsQuery.where('entity_id', '=', query.entityId)
-    if (query.dealId) rowsQuery = rowsQuery.where('deal_id', '=', query.dealId)
-    if (query.status) rowsQuery = rowsQuery.where('status', '=', query.status)
-    if (query.interactionType) rowsQuery = rowsQuery.where('interaction_type', '=', query.interactionType)
-    if (query.type) {
-      const types = query.type.split(',').map((t) => t.trim()).filter(Boolean)
-      if (types.length > 0) {
-        rowsQuery = rowsQuery.where('interaction_type', 'in', types)
-      }
-    }
-    if (query.pinned === 'true') {
-      rowsQuery = rowsQuery.where('pinned', '=', true)
-    } else if (query.pinned === 'false') {
-      rowsQuery = rowsQuery.where('pinned', '=', false)
-    }
-    if (query.excludeInteractionType) rowsQuery = rowsQuery.where('interaction_type', '!=', query.excludeInteractionType)
-    if (query.search) {
-      // NOTE: for tenants with data encryption enabled, `title`/`body` are
-      // ciphertext at rest (see encryption.ts), so this ILIKE matches encrypted
-      // bytes and returns no rows — substring search over encrypted free-text
-      // columns is unsupported, the same documented limitation as
-      // customer_activity / customer_comment. The returned page's title/body are
-      // still decrypted for display further below.
-      const searchTerm = `%${escapeLikePattern(query.search)}%`
-      rowsQuery = rowsQuery.where(sql<boolean>`coalesce(title, '') ilike ${searchTerm} or coalesce(body, '') ilike ${searchTerm}`)
-    }
-    if (query.from) {
-      rowsQuery = rowsQuery.where(sql<boolean>`coalesce(occurred_at, scheduled_at, created_at) >= ${query.from}`)
-    }
-    if (query.to) {
-      rowsQuery = rowsQuery.where(sql<boolean>`coalesce(occurred_at, scheduled_at, created_at) <= ${query.to}`)
-    }
-
-    if (cursor) {
-      const op = sortDir === 'asc' ? '>' : '<'
-      const opRaw = sql.raw(op)
-      const sortRaw = sql.raw(sortSql)
-      rowsQuery = rowsQuery.where((eb: any) => eb.or([
-        sql<boolean>`${sortRaw} ${opRaw} ${cursor.sortValue}`,
-        eb.and([
-          sql<boolean>`${sortRaw} = ${cursor.sortValue}`,
-          eb('id', op, cursor.id),
-        ]),
-      ]))
-    }
-
     // ── Email visibility filter (2026-05-27) ──────────────────────────────
     // Non-email interactions pass through; email rows with visibility='private'
     // are filtered out unless the caller is the author or has admin bypass.
@@ -461,19 +472,122 @@ export async function GET(req: Request) {
     // viewer to null so they never gain the author bypass and only see shared
     // emails (fail-closed). Mirrors counts/people/activities routes.
     const viewerUserId = auth.isApiKey ? null : (auth.sub ?? null)
-    const callerUserFeatures = viewerUserId
-      ? await resolveUserFeatures(container, viewerUserId, auth.tenantId ?? null, selectedOrganizationId)
-      : undefined
-    rowsQuery = applyEmailVisibilityFilter(rowsQuery as any, {
-      currentUserId: viewerUserId,
-      userFeatures: callerUserFeatures,
-    })
+    const encryptionService = resolveTenantEncryptionService(em)
+    // Encrypted sort columns can't use SQL keyset ordering on ciphertext, so an
+    // encrypted sort field takes a bounded candidate-scan + in-memory-sort path
+    // instead of the SQL path below. Resolved alongside the independent
+    // visibility-feature lookup rather than after it.
+    const [callerUserFeatures, encryptedSortFields] = await Promise.all([
+      viewerUserId
+        ? resolveUserFeatures(container, viewerUserId, auth.tenantId ?? null, selectedOrganizationId)
+        : Promise.resolve(undefined),
+      resolveEncryptedSortFields(
+        encryptionService,
+        CUSTOMER_INTERACTION_ENTITY_ID,
+        [sortConfig.column],
+        auth.tenantId,
+        selectedOrganizationId,
+      ),
+    ])
+    const sortFieldIsEncrypted = encryptedSortFields.has(sortConfig.column)
 
-    rowsQuery = rowsQuery.orderBy(sql`${sql.raw(sortSql)} ${sql.raw(sortDir)}`).orderBy('id', sortDir)
+    let pageRows: InteractionListRow[]
+    let hasMore: boolean
 
-    const rows = await rowsQuery.execute() as InteractionListRow[]
-    const pageRows = rows.slice(0, query.limit)
-    const hasMore = rows.length > query.limit
+    if (sortFieldIsEncrypted) {
+      let candidateQuery = applyInteractionListFilters(
+        db.selectFrom('customer_interactions').select(['id', sortConfig.column]),
+        { tenantId: auth.tenantId, organizationIds, query },
+      )
+      candidateQuery = applyEmailVisibilityFilter(candidateQuery as any, {
+        currentUserId: viewerUserId,
+        userFeatures: callerUserFeatures,
+      })
+      const cap = resolveEncryptedSortMaxRows()
+      if (cap !== null) {
+        candidateQuery = candidateQuery.limit(cap).orderBy('id', 'asc')
+      }
+      const candidateRows = await candidateQuery.execute() as Array<{ id: string } & Record<string, unknown>>
+      if (cap !== null && candidateRows.length >= cap) {
+        logger.warn('Encrypted sort candidate scan hit OM_ENCRYPTED_SORT_MAX_ROWS cap; results may be incomplete', {
+          component: 'interactions.GET',
+          cap,
+          sortField: sortConfig.column,
+          tenantId: auth.tenantId,
+        })
+      }
+
+      const decryptPayload = encryptionService?.decryptEntityPayload?.bind(encryptionService)
+      const { pageIds, hasMore: encryptedHasMore } = await resolveEncryptedSortPage({
+        candidates: candidateRows,
+        decryptRow: async (row) => {
+          if (!decryptPayload) return row
+          try {
+            const decrypted = await decryptPayload(CUSTOMER_INTERACTION_ENTITY_ID, row, auth.tenantId, selectedOrganizationId)
+            return { ...row, ...decrypted }
+          } catch (err) {
+            logger.error('error decrypting sort candidate', { component: 'interactions.GET', err })
+            return row
+          }
+        },
+        sortField: sortConfig.column,
+        sortDir,
+        cursorId: cursor?.id ?? null,
+        limit: query.limit,
+      })
+      hasMore = encryptedHasMore
+
+      if (pageIds.length === 0) {
+        pageRows = []
+      } else {
+        let pageQuery = applyInteractionListFilters(
+          db.selectFrom('customer_interactions').select([...INTERACTION_LIST_COLUMNS, sql`${sql.raw(sortSql)}`.as('__sort_value')]),
+          { tenantId: auth.tenantId, organizationIds, query },
+        )
+        pageQuery = applyEmailVisibilityFilter(pageQuery as any, {
+          currentUserId: viewerUserId,
+          userFeatures: callerUserFeatures,
+        })
+        pageQuery = pageQuery.where('id', 'in', pageIds)
+        const rawPageRows = await pageQuery.execute() as InteractionListRow[]
+        const byId = new Map(rawPageRows.map((row) => [row.id, row]))
+        pageRows = pageIds
+          .map((id) => byId.get(id))
+          .filter((row): row is InteractionListRow => row != null)
+      }
+    } else {
+      let rowsQuery = applyInteractionListFilters(
+        db
+          .selectFrom('customer_interactions')
+          .select([...INTERACTION_LIST_COLUMNS, sql`${sql.raw(sortSql)}`.as('__sort_value')])
+          .limit(query.limit + 1),
+        { tenantId: auth.tenantId, organizationIds, query },
+      )
+
+      if (cursor) {
+        const op = sortDir === 'asc' ? '>' : '<'
+        const opRaw = sql.raw(op)
+        const sortRaw = sql.raw(sortSql)
+        rowsQuery = rowsQuery.where((eb: any) => eb.or([
+          sql<boolean>`${sortRaw} ${opRaw} ${cursor.sortValue}`,
+          eb.and([
+            sql<boolean>`${sortRaw} = ${cursor.sortValue}`,
+            eb('id', op, cursor.id),
+          ]),
+        ]))
+      }
+
+      rowsQuery = applyEmailVisibilityFilter(rowsQuery as any, {
+        currentUserId: viewerUserId,
+        userFeatures: callerUserFeatures,
+      })
+
+      rowsQuery = rowsQuery.orderBy(sql`${sql.raw(sortSql)} ${sql.raw(sortDir)}`).orderBy('id', sortDir)
+
+      const rows = await rowsQuery.execute() as InteractionListRow[]
+      pageRows = rows.slice(0, query.limit)
+      hasMore = rows.length > query.limit
+    }
 
     const authorIds = Array.from(
       new Set(
@@ -490,8 +604,22 @@ export async function GET(req: Request) {
       ),
     )
     const interactionIds = pageRows.map((row) => row.id)
+    // A page can span the selected organization plus its descendants
+    // (organizationScope.ts expands a concrete selection that way), and
+    // encryption maps are resolved per organization with first-match-wins —
+    // an org-specific map replaces rather than merges with the tenant-wide
+    // one. Resolving a single field set from `selectedOrganizationId` and
+    // applying it to every row therefore missed descendant-org fields the
+    // row's own map covers (#5945 follow-up). Each row's own
+    // `organization_id` is resolved instead, one lookup per distinct
+    // organization on the page — `getEncryptedFieldNames` memoizes per
+    // (entity, tenant, organization), so this adds no query for the common
+    // single-organization case.
+    const pageOrganizationIds = Array.from(
+      new Set(pageRows.map((row) => row.organization_id).filter((value): value is string => !!value)),
+    )
 
-    const [users, deals, customFieldValues, interactionRecords] = await Promise.all([
+    const [users, deals, customFieldValues, interactionRecords, encryptedFieldsByOrganization] = await Promise.all([
       authorIds.length > 0 ? findWithDecryption(em, User, { id: { $in: authorIds } }, undefined, { tenantId: auth.tenantId, organizationId: selectedOrganizationId }) : Promise.resolve([]),
       dealIds.length > 0 ? findWithDecryption(em, CustomerDeal, { id: { $in: dealIds } }, undefined, { tenantId: auth.tenantId, organizationId: selectedOrganizationId }) : Promise.resolve([]),
       interactionIds.length > 0
@@ -507,6 +635,17 @@ export async function GET(req: Request) {
       interactionIds.length > 0
         ? findWithDecryption(em, CustomerInteraction, { id: { $in: interactionIds } } as never, undefined, { tenantId: auth.tenantId, organizationId: selectedOrganizationId })
         : Promise.resolve([]),
+      (async () => {
+        const byOrganization = new Map<string, readonly string[]>()
+        if (interactionIds.length === 0 || !encryptionService?.getEncryptedFieldNames || pageOrganizationIds.length === 0) {
+          return byOrganization
+        }
+        await Promise.all(pageOrganizationIds.map(async (organizationId) => {
+          const fields = await encryptionService.getEncryptedFieldNames(CUSTOMER_INTERACTION_ENTITY_ID, auth.tenantId, organizationId)
+          byOrganization.set(organizationId, fields)
+        }))
+        return byOrganization
+      })(),
     ])
 
     const userMap = new Map(
@@ -521,28 +660,31 @@ export async function GET(req: Request) {
     const dealMap = new Map(
       deals.map((deal) => [deal.id, deal.title]),
     )
-    // title/body are encrypted at rest (see encryption.ts). The kysely rows above
-    // carry ciphertext when tenant encryption is enabled, so override them with the
-    // decrypted values from findWithDecryption for the returned page.
-    const interactionContentMap = new Map(
-      (interactionRecords as Array<{ id: string; title?: string | null; body?: string | null }>).map(
-        (record) => [record.id, { title: record.title ?? null, body: record.body ?? null }],
-      ),
+    // The kysely rows above carry raw column values, so every field the entity's
+    // encryption map covers arrives as ciphertext. findWithDecryption already
+    // returned those fields in plaintext, so the response takes them from the
+    // decrypted records. The covered set is read from each row's own
+    // organization's resolved map rather than hard-coded or shared across the
+    // page, so extending the map — or a page spanning several organizations —
+    // cannot leave a field passing through as ciphertext (#5945).
+    const interactionRecordMap = new Map<string, CustomerInteraction>(
+      (interactionRecords as CustomerInteraction[]).map((record) => [record.id, record]),
     )
 
-    const baseItems = pageRows.map((row) => ({
+    const baseItems = pageRows.map((row) => applyDecryptedFields({
       id: row.id,
       entityId: row.entity_id,
       dealId: row.deal_id ?? null,
       interactionType: row.interaction_type,
-      title: (interactionContentMap.has(row.id) ? interactionContentMap.get(row.id)!.title : row.title) ?? null,
-      body: (interactionContentMap.has(row.id) ? interactionContentMap.get(row.id)!.body : row.body) ?? null,
+      title: row.title ?? null,
+      body: row.body ?? null,
       status: row.status,
       scheduledAt: toIsoString(row.scheduled_at),
       occurredAt: toIsoString(row.occurred_at),
       priority: row.priority ?? null,
       authorUserId: row.author_user_id ?? null,
       ownerUserId: row.owner_user_id ?? null,
+      externalMessageId: row.external_message_id ?? null,
       appearanceIcon: row.appearance_icon ?? null,
       appearanceColor: row.appearance_color ?? null,
       source: row.source ?? null,
@@ -566,7 +708,7 @@ export async function GET(req: Request) {
       authorEmail: row.author_user_id ? userMap.get(row.author_user_id)?.email ?? null : null,
       dealTitle: row.deal_id ? dealMap.get(row.deal_id) ?? null : null,
       customValues: normalizeCustomFieldResponse(customFieldValues[row.id]) ?? null,
-    }))
+    }, interactionRecordMap.get(row.id), encryptedFieldsByOrganization.get(row.organization_id) ?? []))
 
     const enricherContext = await buildEnricherContext(
       container,
@@ -599,7 +741,7 @@ export async function GET(req: Request) {
         { status: 400 },
       )
     }
-    console.error('customers.interactions.get failed', err)
+    logger.error('customers.interactions.get failed', { err })
     const { translate } = await resolveTranslations()
     return NextResponse.json(
       { error: translate('customers.interactions.load.error', 'Failed to load interactions.') },
@@ -622,6 +764,7 @@ const interactionListItemSchema = z
     priority: z.number().nullable(),
     authorUserId: z.string().uuid().nullable(),
     ownerUserId: z.string().uuid().nullable(),
+    externalMessageId: z.string().uuid().nullable().optional(),
     appearanceIcon: z.string().nullable().optional(),
     appearanceColor: z.string().nullable().optional(),
     source: z.string().nullable().optional(),
@@ -633,7 +776,13 @@ const interactionListItemSchema = z
     recurrenceEnd: z.string().nullable().optional(),
     participants: z.array(
       z.object({
-        userId: z.string().uuid(),
+        userId: z
+          .string()
+          .uuid()
+          .optional()
+          .describe(
+            'Absent for an external guest, who has no person/customer/staff record and is identified by email instead. Identify a participant by userId when present, otherwise by its normalized email.',
+          ),
         name: z.string().optional(),
         email: z.string().optional(),
         status: z.string().optional(),

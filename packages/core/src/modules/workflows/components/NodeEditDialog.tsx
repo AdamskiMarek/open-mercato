@@ -1,10 +1,14 @@
 'use client'
 
-import {Node} from '@xyflow/react'
+import type {Node} from '@xyflow/react'
 import {useEffect, useState} from 'react'
+import {useRouter} from 'next/navigation'
 import {Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle} from '@open-mercato/ui/primitives/dialog'
 import {Button} from '@open-mercato/ui/primitives/button'
 import {Input} from '@open-mercato/ui/primitives/input'
+import {Textarea} from '@open-mercato/ui/primitives/textarea'
+import {Checkbox} from '@open-mercato/ui/primitives/checkbox'
+import {RadioGroup, Radio} from '@open-mercato/ui/primitives/radio'
 import {Badge} from '@open-mercato/ui/primitives/badge'
 import {
   Select,
@@ -19,10 +23,36 @@ import {sanitizeId} from '../lib/graph-utils'
 import {WorkflowDefinition, WorkflowSelector} from './WorkflowSelector'
 import {JsonBuilder} from '@open-mercato/ui/backend/JsonBuilder'
 import {StartPreConditionsEditor, type StartPreCondition} from './fields/StartPreConditionsEditor'
+import {RolesMultiSelect} from './fields/RolesMultiSelect'
+import {useActivityTypeOptions} from './fields/useActivityTypeOptions'
 import {useT} from '@open-mercato/shared/lib/i18n/context'
 import {useDialogKeyHandler} from '@open-mercato/ui/hooks/useDialogKeyHandler'
 import {useConfirmDialog} from '@open-mercato/ui/backend/confirm-dialog'
+import {DurationInput} from '@open-mercato/ui/backend/inputs/DurationInput'
+import {apiCall} from '@open-mercato/ui/backend/utils/apiCall'
+import {flash} from '@open-mercato/ui/backend/FlashMessages'
+import {buildVisualEditorHref, extractFirstDefinitionId} from '../lib/visual-editor-navigation'
 import {isFutureIsoDateString, isValidDurationString} from '../data/validators'
+import type {InvokeAgentConfig} from '../data/validators'
+import {millisecondTimeoutInputValue, millisecondTimeoutPatch} from '../lib/activityTimeoutFields'
+
+// Signal name the INVOKE_AGENT step parks on when a proposal is routed to a
+// human. Mirrors INVOKE_AGENT_SIGNAL_NAME in lib/activity-executor.ts (which is
+// not imported here to keep server-only deps out of the client bundle). The
+// 02a step-handler resumes the parked AUTOMATED step by matching this name on
+// the step's signalConfig.
+const INVOKE_AGENT_SIGNAL_NAME = 'agent_orchestrator.proposal.ready'
+
+interface AgentListItem {
+  id: string
+  label: string
+  description: string
+}
+
+interface AgentInputRow {
+  key: string
+  value: string
+}
 
 export interface NodeEditDialogProps {
   node: Node | null
@@ -51,8 +81,14 @@ interface FormField {
   defaultValue?: string
 }
 
+function splitRolesText(raw: string): string[] {
+  return raw.split(',').map((role) => role.trim()).filter(Boolean)
+}
+
 export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: NodeEditDialogProps) {
   const t = useT()
+  const activityTypeOptions = useActivityTypeOptions()
+  const router = useRouter()
   const { confirm: confirmDialog, ConfirmDialogElement } = useConfirmDialog()
   const [stepName, setStepName] = useState('')
   const [description, setDescription] = useState('')
@@ -75,6 +111,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
   // Sub-workflow configuration fields (Phase 8)
   const [subWorkflowId, setSubWorkflowId] = useState('')
   const [subWorkflowVersion, setSubWorkflowVersion] = useState('')
+  const [isOpeningInside, setIsOpeningInside] = useState(false)
   const [inputMappings, setInputMappings] = useState<Array<{ key: string; value: string }>>([])
   const [outputMappings, setOutputMappings] = useState<Array<{ key: string; value: string }>>([])
   const [showWorkflowSelector, setShowWorkflowSelector] = useState(false)
@@ -93,6 +130,15 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
 
   // Pre-conditions state (for START steps)
   const [preConditions, setPreConditions] = useState<StartPreCondition[]>([])
+
+  // Invoke-agent configuration (for invokeAgent steps)
+  const [agentOptions, setAgentOptions] = useState<AgentListItem[]>([])
+  const [agentsLoading, setAgentsLoading] = useState(false)
+  const [agentId, setAgentId] = useState('')
+  const [agentInputRows, setAgentInputRows] = useState<AgentInputRow[]>([])
+  const [agentResultMode, setAgentResultMode] = useState<'autoApprove' | 'alwaysAsk'>('autoApprove')
+  const [agentAutoApproveThreshold, setAgentAutoApproveThreshold] = useState('0.8')
+  const [agentOutputMappings, setAgentOutputMappings] = useState<Array<{ key: string; value: string }>>([])
 
   // Inline validation errors keyed by field name
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
@@ -243,6 +289,49 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
         setPreConditions([])
       }
 
+      // Load invoke-agent configuration. The node stores its config on the
+      // single INVOKE_AGENT activity inside node.data.activities (see handleSave).
+      if (node.type === 'invokeAgent') {
+        const invokeActivity = (nodeData?.activities as any[] | undefined)?.find(
+          (activity) => activity?.activityType === 'INVOKE_AGENT',
+        )
+        const config = (invokeActivity?.config || {}) as Partial<InvokeAgentConfig>
+        setAgentId(config.agentId || '')
+        const inputEntries = Object.entries(config.input || {})
+        setAgentInputRows(
+          inputEntries.length > 0
+            ? inputEntries.map(([key, value]) => ({
+                key,
+                value: typeof value === 'string' ? value : JSON.stringify(value),
+              }))
+            : [{ key: 'dealId', value: '{{deal.id}}' }],
+        )
+        const onResult = config.onResult
+        if (onResult && 'alwaysAsk' in onResult) {
+          setAgentResultMode('alwaysAsk')
+          setAgentAutoApproveThreshold('0.8')
+        } else {
+          setAgentResultMode('autoApprove')
+          setAgentAutoApproveThreshold(
+            onResult && 'autoApproveThreshold' in onResult
+              ? String(onResult.autoApproveThreshold)
+              : '0.8',
+          )
+        }
+        const outputMapping = (config as Partial<InvokeAgentConfig>).outputMapping
+        setAgentOutputMappings(
+          outputMapping
+            ? Object.entries(outputMapping).map(([key, value]) => ({ key, value: value as string }))
+            : [],
+        )
+      } else {
+        setAgentId('')
+        setAgentInputRows([])
+        setAgentResultMode('autoApprove')
+        setAgentAutoApproveThreshold('0.8')
+        setAgentOutputMappings([])
+      }
+
       // Load form fields from userTaskConfig.formSchema
       if (nodeData?.userTaskConfig?.formSchema) {
         const schema = nodeData.userTaskConfig.formSchema
@@ -279,6 +368,29 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
     }
   }, [node, isOpen])
 
+  // Populate the Agent dropdown from the agent_orchestrator registry when an
+  // invokeAgent step is being edited. agent_orchestrator is an optional peer —
+  // when it is not installed the endpoint 404s and the list stays empty.
+  useEffect(() => {
+    if (!isOpen || node?.type !== 'invokeAgent') return
+    let cancelled = false
+    setAgentsLoading(true)
+    apiCall<{ items: AgentListItem[] }>('/api/agent_orchestrator/agents')
+      .then((res) => {
+        if (cancelled) return
+        setAgentOptions(res.ok && res.result?.items ? res.result.items : [])
+      })
+      .catch(() => {
+        if (!cancelled) setAgentOptions([])
+      })
+      .finally(() => {
+        if (!cancelled) setAgentsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isOpen, node?.type])
+
   const addFormField = () => {
     const newField: FormField = {
       name: `field_${Date.now()}`,
@@ -287,7 +399,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
       required: false,
       placeholder: '',
     }
-    setFormFields([...formFields, newField])
+    setFormFields(prev => [...prev, newField])
     // Auto-expand the new field
     const newExpanded = new Set(expandedFields)
     newExpanded.add(formFields.length)
@@ -300,7 +412,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
       variant: 'destructive',
     })
     if (confirmed) {
-      setFormFields(formFields.filter((_, i) => i !== index))
+      setFormFields(prev => prev.filter((_, i) => i !== index))
       const newExpanded = new Set(expandedFields)
       newExpanded.delete(index)
       setExpandedFields(newExpanded)
@@ -327,6 +439,32 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
     setSubWorkflowId(workflowId)
     setSubWorkflowVersion(workflow.version.toString())
     setShowWorkflowSelector(false)
+  }
+
+  // "Otwórz środek" — drill into the referenced sub-workflow's internals.
+  // Resolves the child definition's row id from its workflowId (+ pinned
+  // version) and navigates to the child's visual editor. Fail-open with a flash
+  // when the child can't be resolved.
+  const handleOpenInside = async () => {
+    if (!subWorkflowId) return
+    setIsOpeningInside(true)
+    try {
+      const versionNum = parseInt(subWorkflowVersion, 10)
+      const versionQuery = !isNaN(versionNum) ? `&version=${versionNum}` : ''
+      const res = await apiCall<{ data?: Array<{ id?: string }> }>(
+        `/api/workflows/definitions?workflowId=${encodeURIComponent(subWorkflowId)}&limit=1${versionQuery}`,
+      )
+      const childId = res.ok ? extractFirstDefinitionId(res.result) : null
+      if (!childId) {
+        flash(t('workflows.ports.openInsideNotFound'), 'error')
+        return
+      }
+      router.push(buildVisualEditorHref(childId))
+    } catch {
+      flash(t('workflows.ports.openInsideNotFound'), 'error')
+    } finally {
+      setIsOpeningInside(false)
+    }
   }
 
   const handleSave = () => {
@@ -472,6 +610,52 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
       updates.preConditions = preConditions.filter(pc => pc.ruleId && pc.ruleId.trim())
     }
 
+    // Invoke-agent step. Compiles to an AUTOMATED step (mapped in graph-utils)
+    // carrying ONE INVOKE_AGENT activity plus a signalConfig so the 02a
+    // step-handler can park-and-resume the human path. The activity lives on the
+    // STEP's activities (not a transition).
+    if (node.type === 'invokeAgent') {
+      const input = agentInputRows.reduce<Record<string, string>>((acc, row) => {
+        const key = row.key.trim()
+        if (key) acc[key] = row.value
+        return acc
+      }, {})
+
+      const onResult: InvokeAgentConfig['onResult'] =
+        agentResultMode === 'alwaysAsk'
+          ? { alwaysAsk: true }
+          : {
+              autoApproveThreshold: Number.parseFloat(agentAutoApproveThreshold) || 0,
+              // The near-tie margin has no control on this retired dialog; 0 is the
+              // schema default and preserves the node's existing behaviour exactly.
+              autoApproveMargin: 0,
+            }
+
+      const outputMapping = agentOutputMappings.reduce<Record<string, string>>((acc, row) => {
+        const key = row.key.trim()
+        if (key) acc[key] = row.value
+        return acc
+      }, {})
+
+      const config: InvokeAgentConfig = {
+        agentId,
+        input,
+        onResult,
+        ...(Object.keys(outputMapping).length > 0 ? { outputMapping } : {}),
+      }
+
+      updates.agentId = agentId || undefined
+      updates.activities = [
+        {
+          activityId: 'invoke_agent',
+          activityName: t('workflows.nodeTypes.invokeAgent'),
+          activityType: 'INVOKE_AGENT',
+          config,
+        },
+      ]
+      updates.signalConfig = { signalName: INVOKE_AGENT_SIGNAL_NAME }
+    }
+
     // Merge advanced config
     if (advancedConfig && Object.keys(advancedConfig).length > 0) {
       Object.assign(updates, advancedConfig)
@@ -501,6 +685,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
     subWorkflow: t('workflows.nodeTypes.subWorkflow'),
     parallelFork: t('workflows.nodeTypes.parallelFork'),
     parallelJoin: t('workflows.nodeTypes.parallelJoin'),
+    invokeAgent: t('workflows.nodeTypes.invokeAgent'),
   }[node.type || 'automated']
 
   // START nodes are partially editable (pre-conditions only), END nodes are not editable
@@ -538,7 +723,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
 
         <div className="space-y-4">
           {!isEditable ? (
-            <Alert variant="info">
+            <Alert status="information">
               <AlertDescription>
                 {t('workflows.nodeEditor.endStepsNotEditable')}
               </AlertDescription>
@@ -546,7 +731,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
           ) : isStartNode ? (
             <div className="space-y-4">
               {/* Info Alert for START nodes */}
-              <Alert variant="info">
+              <Alert status="information">
                 <AlertDescription>
                   {t('workflows.nodeEditor.startStepsInfo')}
                 </AlertDescription>
@@ -562,7 +747,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
             <div className="space-y-4">
               {/* Step Name */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-foreground mb-1">
                   {t('workflows.form.stepName')} *
                 </label>
                 <Input
@@ -572,24 +757,23 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                   placeholder={t('workflows.form.placeholders.stepName')}
                   autoFocus
                 />
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="text-xs text-muted-foreground mt-1">
                   {t('workflows.form.descriptions.stepName')}
                 </p>
               </div>
 
               {/* Description */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-foreground mb-1">
                   {t('workflows.form.description')}
                 </label>
-                <textarea
+                <Textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder={t('workflows.form.placeholders.description')}
                   rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring"
                 />
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="text-xs text-muted-foreground mt-1">
                   {t('workflows.form.descriptions.description')}
                 </p>
               </div>
@@ -598,16 +782,15 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                   (waitForTimer uses duration/until, waitForSignal uses signalConfig.timeout). */}
               {node.type !== 'waitForSignal' && node.type !== 'waitForTimer' && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-foreground mb-1">
                     {t('workflows.form.timeout')}
                   </label>
-                  <Input
-                    type="text"
+                  <DurationInput
                     value={timeout}
-                    onChange={(e) => setTimeout(e.target.value)}
-                    placeholder={t('workflows.form.placeholders.timeout')}
+                    onChange={setTimeout}
+                    aria-label={t('workflows.form.timeout')}
                   />
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-muted-foreground mt-1">
                     {t('workflows.form.descriptions.timeout')}
                   </p>
                 </div>
@@ -616,14 +799,14 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
               {/* User Task Configuration */}
               {node.type === 'userTask' && (
                 <>
-                  <div className="border-t border-gray-200 pt-4 mt-4">
+                  <div className="border-t border-border pt-4 mt-4">
                     <h3 className="text-sm font-semibold text-foreground mb-3">
                       {t('workflows.nodeEditor.userTaskConfig')}
                     </h3>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-foreground mb-1">
                       {t('workflows.form.assignedTo')}
                     </label>
                     <Input
@@ -632,28 +815,26 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                       onChange={(e) => setAssignedTo(e.target.value)}
                       placeholder={t('workflows.form.placeholders.userId')}
                     />
-                    <p className="text-xs text-gray-500 mt-1">
+                    <p className="text-xs text-muted-foreground mt-1">
                       {t('workflows.form.descriptions.assignedTo')}
                     </p>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-foreground mb-1">
                       {t('workflows.form.assignedToRoles')}
                     </label>
-                    <Input
-                      type="text"
-                      value={assignedToRoles}
-                      onChange={(e) => setAssignedToRoles(e.target.value)}
-                      placeholder={t('workflows.form.placeholders.roles')}
+                    <RolesMultiSelect
+                      value={splitRolesText(assignedToRoles)}
+                      onChange={(next) => setAssignedToRoles(next.join(', '))}
                     />
-                    <p className="text-xs text-gray-500 mt-1">
+                    <p className="text-xs text-muted-foreground mt-1">
                       {t('workflows.form.descriptions.assignedToRoles')}
                     </p>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-foreground mb-1">
                       {t('workflows.form.formKey')}
                     </label>
                     <Input
@@ -662,19 +843,19 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                       onChange={(e) => setFormKey(e.target.value)}
                       placeholder={t('workflows.form.placeholders.formKey')}
                     />
-                    <p className="text-xs text-gray-500 mt-1">
+                    <p className="text-xs text-muted-foreground mt-1">
                       {t('workflows.form.descriptions.formKey')}
                     </p>
                   </div>
 
                   {/* Form Schema Builder */}
-                  <div className="border-t border-gray-200 pt-4 mt-4">
+                  <div className="border-t border-border pt-4 mt-4">
                     <div className="flex items-center justify-between mb-3">
                       <div>
                         <h3 className="text-sm font-semibold text-foreground">
                           {t('workflows.form.formFields', { count: formFields.length })}
                         </h3>
-                        <p className="text-xs text-gray-500 mt-0.5">
+                        <p className="text-xs text-muted-foreground mt-0.5">
                           {t('workflows.form.descriptions.formFields')}
                         </p>
                       </div>
@@ -690,7 +871,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
 
                     {/* JSON Schema Format Notice */}
                     {isJsonSchemaFormat && (
-                      <Alert variant="info" className="mb-3">
+                      <Alert status="information" className="mb-3">
                         <AlertDescription>
                           {t('workflows.nodeEditor.jsonSchemaFormat')}
                         </AlertDescription>
@@ -698,7 +879,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                     )}
 
                     {formFields.length === 0 && (
-                      <div className="p-4 text-center text-sm text-gray-500 bg-gray-50 rounded-lg border border-gray-200">
+                      <div className="p-4 text-center text-sm text-muted-foreground bg-muted rounded-lg border border-border">
                         {t('workflows.nodeEditor.noFormFields')}
                       </div>
                     )}
@@ -707,11 +888,12 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                       {formFields.map((field, index) => {
                         const isExpanded = expandedFields.has(index)
                         return (
-                          <div key={index} className="border border-gray-200 rounded-lg bg-gray-50">
-                            <button
+                          <div key={index} className="border border-border rounded-lg bg-muted">
+                            <Button
                               type="button"
+                              variant="ghost"
                               onClick={() => toggleFieldExpanded(index)}
-                              className="w-full px-4 py-3 text-left flex items-center justify-between hover:bg-gray-100 transition-colors rounded-t-lg"
+                              className="h-auto w-full justify-between rounded-t-lg px-4 py-3 text-left hover:bg-muted/80"
                             >
                               <div className="flex-1">
                                 <div className="flex items-center gap-2">
@@ -722,25 +904,25 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                                     {field.type}
                                   </Badge>
                                   {field.required && (
-                                    <Badge variant="destructive" className="text-xs text-white">
+                                    <Badge variant="destructive" className="text-xs">
                                       {t('workflows.form.required')}
                                     </Badge>
                                   )}
                                 </div>
-                                <p className="text-xs text-gray-600 mt-1">
-                                  Field name: <code className="bg-white px-1 rounded">{field.name}</code>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  Field name: <code className="bg-background px-1 rounded">{field.name}</code>
                                 </p>
                               </div>
                               <ChevronDown
-                                className={`w-5 h-5 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                                className={`size-5 text-muted-foreground transition-transform ${isExpanded ? 'rotate-180' : ''}`}
                               />
-                            </button>
+                            </Button>
 
                             {isExpanded && (
-                              <div className="px-4 pb-4 space-y-3 border-t border-gray-200 bg-white">
+                              <div className="px-4 pb-4 space-y-3 border-t border-border bg-background">
                                 {/* Field Name */}
                                 <div className="pt-3">
-                                  <label className="block text-xs font-medium text-gray-700 mb-1">{t('workflows.form.fieldName')} *</label>
+                                  <label className="block text-xs font-medium text-foreground mb-1">{t('workflows.form.fieldName')} *</label>
                                   <Input
                                     type="text"
                                     size="sm"
@@ -748,12 +930,12 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                                     onChange={(e) => updateFormField(index, 'name', e.target.value)}
                                     placeholder={t('workflows.form.placeholders.fieldName')}
                                   />
-                                  <p className="text-xs text-gray-500 mt-0.5">{t('workflows.form.descriptions.fieldName')}</p>
+                                  <p className="text-xs text-muted-foreground mt-0.5">{t('workflows.form.descriptions.fieldName')}</p>
                                 </div>
 
                                 {/* Field Label */}
                                 <div>
-                                  <label className="block text-xs font-medium text-gray-700 mb-1">{t('workflows.form.fieldLabel')} *</label>
+                                  <label className="block text-xs font-medium text-foreground mb-1">{t('workflows.form.fieldLabel')} *</label>
                                   <Input
                                     type="text"
                                     size="sm"
@@ -761,12 +943,12 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                                     onChange={(e) => updateFormField(index, 'label', e.target.value)}
                                     placeholder={t('workflows.form.placeholders.fieldLabel')}
                                   />
-                                  <p className="text-xs text-gray-500 mt-0.5">{t('workflows.form.descriptions.fieldLabel')}</p>
+                                  <p className="text-xs text-muted-foreground mt-0.5">{t('workflows.form.descriptions.fieldLabel')}</p>
                                 </div>
 
                                 {/* Field Type */}
                                 <div>
-                                  <label className="block text-xs font-medium text-gray-700 mb-1">{t('workflows.form.fieldType')} *</label>
+                                  <label className="block text-xs font-medium text-foreground mb-1">{t('workflows.form.fieldType')} *</label>
                                   <Select
                                     value={field.type}
                                     onValueChange={(value) => updateFormField(index, 'type', value)}
@@ -793,7 +975,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
 
                                 {/* Placeholder */}
                                 <div>
-                                  <label className="block text-xs font-medium text-gray-700 mb-1">{t('workflows.form.placeholder')}</label>
+                                  <label className="block text-xs font-medium text-foreground mb-1">{t('workflows.form.placeholder')}</label>
                                   <Input
                                     type="text"
                                     size="sm"
@@ -805,7 +987,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
 
                                 {/* Default Value */}
                                 <div>
-                                  <label className="block text-xs font-medium text-gray-700 mb-1">{t('workflows.form.defaultValue')}</label>
+                                  <label className="block text-xs font-medium text-foreground mb-1">{t('workflows.form.defaultValue')}</label>
                                   <Input
                                     type="text"
                                     size="sm"
@@ -818,7 +1000,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                                 {/* Options (for select/radio) */}
                                 {(field.type === 'select' || field.type === 'radio') && (
                                   <div>
-                                    <label className="block text-xs font-medium text-gray-700 mb-1">{t('workflows.form.options')}</label>
+                                    <label className="block text-xs font-medium text-foreground mb-1">{t('workflows.form.options')}</label>
                                     <Input
                                       type="text"
                                       size="sm"
@@ -826,28 +1008,26 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                                       onChange={(e) => updateFormField(index, 'options', e.target.value.split(',').map(o => o.trim()).filter(Boolean))}
                                       placeholder={t('workflows.form.placeholders.options')}
                                     />
-                                    <p className="text-xs text-gray-500 mt-0.5">{t('workflows.form.descriptions.options')}</p>
+                                    <p className="text-xs text-muted-foreground mt-0.5">{t('workflows.form.descriptions.options')}</p>
                                   </div>
                                 )}
 
                                 {/* Required Checkbox */}
                                 <div>
-                                  <label className="flex items-center gap-2 text-xs font-medium text-gray-700">
-                                    <input
-                                      type="checkbox"
+                                  <label className="flex items-center gap-2 text-xs font-medium text-foreground">
+                                    <Checkbox
                                       checked={field.required}
-                                      onChange={(e) => updateFormField(index, 'required', e.target.checked)}
-                                      className="rounded border-gray-300 text-blue-600 focus-visible:ring-ring"
+                                      onCheckedChange={(checked) => updateFormField(index, 'required', checked === true)}
                                     />
                                     {t('workflows.form.requiredField')}
                                   </label>
                                 </div>
 
                                 {/* Delete Button */}
-                                <div className="border-t border-gray-200 pt-3">
+                                <div className="border-t border-border pt-3">
                                   <Button
                                     type="button"
-                                    variant="destructive"
+                                    variant="destructive-outline"
                                     size="sm"
                                     onClick={() => removeFormField(index)}
                                   >
@@ -868,13 +1048,13 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
               {/* Automated Step Activities */}
               {node.type === 'automated' && (
                 <>
-                  <div className="border-t border-gray-200 pt-4 mt-4">
+                  <div className="border-t border-border pt-4 mt-4">
                     <div className="flex items-center justify-between mb-3">
                       <div>
                         <h3 className="text-sm font-semibold text-foreground">
                           {t('workflows.form.stepActivities', { count: stepActivities.length })}
                         </h3>
-                        <p className="text-xs text-gray-500 mt-0.5">
+                        <p className="text-xs text-muted-foreground mt-0.5">
                           {t('workflows.form.descriptions.activities')}
                         </p>
                       </div>
@@ -900,7 +1080,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                     </div>
 
                     {stepActivities.length === 0 && (
-                      <div className="p-4 text-center text-sm text-gray-500 bg-gray-50 rounded-lg border border-gray-200">
+                      <div className="p-4 text-center text-sm text-muted-foreground bg-muted rounded-lg border border-border">
                         {t('workflows.nodeEditor.noActivities')}
                       </div>
                     )}
@@ -909,10 +1089,11 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                       {stepActivities.map((activity, index) => {
                         const isExpanded = expandedStepActivities.has(index)
                         return (
-                          <div key={index} className="border border-gray-200 rounded-lg bg-gray-50">
+                          <div key={index} className="border border-border rounded-lg bg-muted">
                             {/* Activity Header (Collapsed) */}
-                            <button
+                            <Button
                               type="button"
+                              variant="ghost"
                               onClick={() => {
                                 const newExpanded = new Set(expandedStepActivities)
                                 if (isExpanded) {
@@ -922,7 +1103,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                                 }
                                 setExpandedStepActivities(newExpanded)
                               }}
-                              className="w-full px-4 py-3 text-left flex items-center justify-between hover:bg-gray-100 transition-colors rounded-t-lg"
+                              className="h-auto w-full justify-between rounded-t-lg px-4 py-3 text-left hover:bg-muted/80"
                             >
                               <div className="flex-1">
                                 <div className="flex items-center gap-2">
@@ -938,21 +1119,21 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                                     </Badge>
                                   )}
                                 </div>
-                                <p className="text-xs text-gray-600 mt-1">
-                                  ID: <code className="bg-white px-1 rounded">{activity.activityId}</code>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  ID: <code className="bg-background px-1 rounded">{activity.activityId}</code>
                                 </p>
                               </div>
                               <ChevronDown
-                                className={`w-5 h-5 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                                className={`size-5 text-muted-foreground transition-transform ${isExpanded ? 'rotate-180' : ''}`}
                               />
-                            </button>
+                            </Button>
 
                             {/* Activity Body (Expanded) */}
                             {isExpanded && (
-                              <div className="px-4 pb-4 space-y-3 border-t border-gray-200 bg-white">
+                              <div className="px-4 pb-4 space-y-3 border-t border-border bg-background">
                                 {/* Activity ID */}
                                 <div className="pt-3">
-                                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                                  <label className="block text-xs font-medium text-foreground mb-1">
                                     {t('workflows.form.activityId')} *
                                   </label>
                                   <Input
@@ -970,7 +1151,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
 
                                 {/* Activity Name */}
                                 <div>
-                                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                                  <label className="block text-xs font-medium text-foreground mb-1">
                                     {t('workflows.form.activityName')} *
                                   </label>
                                   <Input
@@ -988,7 +1169,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
 
                                 {/* Activity Type */}
                                 <div>
-                                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                                  <label className="block text-xs font-medium text-foreground mb-1">
                                     {t('workflows.form.activityType')} *
                                   </label>
                                   <Select
@@ -1003,44 +1184,42 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                                       <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
-                                      <SelectItem value="SEND_EMAIL">{t('workflows.activities.types.SEND_EMAIL')}</SelectItem>
-                                      <SelectItem value="CALL_API">{t('workflows.activities.types.CALL_API')}</SelectItem>
-                                      <SelectItem value="UPDATE_ENTITY">{t('workflows.activities.types.UPDATE_ENTITY')}</SelectItem>
-                                      <SelectItem value="EMIT_EVENT">{t('workflows.activities.types.EMIT_EVENT')}</SelectItem>
-                                      <SelectItem value="CALL_WEBHOOK">{t('workflows.activities.types.CALL_WEBHOOK')}</SelectItem>
-                                      <SelectItem value="EXECUTE_FUNCTION">{t('workflows.activities.types.EXECUTE_FUNCTION')}</SelectItem>
-                                      <SelectItem value="WAIT">{t('workflows.activities.types.WAIT')}</SelectItem>
+                                      {activityTypeOptions.map((type) => (
+                                        <SelectItem key={type.value} value={type.value}>
+                                          {type.label}
+                                        </SelectItem>
+                                      ))}
                                     </SelectContent>
                                   </Select>
                                 </div>
 
                                 {/* Timeout */}
                                 <div>
-                                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                                  <label className="block text-xs font-medium text-foreground mb-1">
                                     {t('workflows.form.timeout')}
                                   </label>
                                   <Input
                                     type="text"
                                     size="sm"
-                                    value={activity.timeoutMs || ''}
+                                    value={millisecondTimeoutInputValue(activity)}
                                     onChange={(e) => {
                                       const updated = [...stepActivities]
-                                      updated[index].timeoutMs = e.target.value ? parseInt(e.target.value) : undefined
+                                      updated[index] = { ...updated[index], ...millisecondTimeoutPatch(e.target.value) }
                                       setStepActivities(updated)
                                     }}
                                     placeholder={t('workflows.form.placeholders.timeoutMs')}
                                   />
-                                  <p className="text-xs text-gray-500 mt-1">{t('workflows.form.descriptions.timeoutMs')}</p>
+                                  <p className="text-xs text-muted-foreground mt-1">{t('workflows.form.descriptions.timeoutMs')}</p>
                                 </div>
 
                                 {/* Retry Policy Grid */}
-                                <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
-                                  <label className="block text-xs font-semibold text-gray-700 mb-2">
+                                <div className="border border-border rounded-lg p-3 bg-muted">
+                                  <label className="block text-xs font-semibold text-foreground mb-2">
                                     {t('workflows.form.retryPolicy')}
                                   </label>
                                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                     <div>
-                                      <label className="block text-xs text-gray-600 mb-1">{t('workflows.form.maxAttempts')}</label>
+                                      <label className="block text-xs text-muted-foreground mb-1">{t('workflows.form.maxAttempts')}</label>
                                       <Input
                                         type="number"
                                         size="sm"
@@ -1056,7 +1235,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                                       />
                                     </div>
                                     <div>
-                                      <label className="block text-xs text-gray-600 mb-1">{t('workflows.form.initialInterval')}</label>
+                                      <label className="block text-xs text-muted-foreground mb-1">{t('workflows.form.initialInterval')}</label>
                                       <Input
                                         type="number"
                                         size="sm"
@@ -1070,7 +1249,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                                       />
                                     </div>
                                     <div>
-                                      <label className="block text-xs text-gray-600 mb-1">{t('workflows.form.backoffCoefficient')}</label>
+                                      <label className="block text-xs text-muted-foreground mb-1">{t('workflows.form.backoffCoefficient')}</label>
                                       <Input
                                         type="number"
                                         size="sm"
@@ -1085,7 +1264,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                                       />
                                     </div>
                                     <div>
-                                      <label className="block text-xs text-gray-600 mb-1">{t('workflows.form.maxInterval')}</label>
+                                      <label className="block text-xs text-muted-foreground mb-1">{t('workflows.form.maxInterval')}</label>
                                       <Input
                                         type="number"
                                         size="sm"
@@ -1104,17 +1283,15 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                                 {/* Activity Flags */}
                                 <div className="flex gap-4">
                                   <label className="flex items-center gap-2 cursor-pointer">
-                                    <input
-                                      type="checkbox"
+                                    <Checkbox
                                       checked={activity.async || false}
-                                      onChange={(e) => {
+                                      onCheckedChange={(checked) => {
                                         const updated = [...stepActivities]
-                                        updated[index].async = e.target.checked
+                                        updated[index].async = checked === true
                                         setStepActivities(updated)
                                       }}
-                                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus-visible:ring-ring"
                                     />
-                                    <span className="text-xs text-gray-700">{t('workflows.form.executeAsync')}</span>
+                                    <span className="text-xs text-foreground">{t('workflows.form.executeAsync')}</span>
                                   </label>
                                 </div>
 
@@ -1122,25 +1299,23 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                                 {activity.activityType === 'WAIT' && (
                                   <div className="space-y-3">
                                     <div>
-                                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                                      <label className="block text-xs font-medium text-foreground mb-1">
                                         {t('workflows.activities.waitDuration')}
                                       </label>
-                                      <Input
-                                        size="sm"
-                                        type="text"
+                                      <DurationInput
                                         value={activity.config?.duration || ''}
-                                        onChange={(e) => {
+                                        onChange={(value) => {
                                           const updated = [...stepActivities]
-                                          updated[index].config = { ...updated[index].config, duration: e.target.value, until: undefined }
+                                          updated[index].config = { ...updated[index].config, duration: value, until: undefined }
                                           setStepActivities(updated)
                                         }}
-                                        placeholder={t('workflows.activities.waitDurationPlaceholder')}
+                                        aria-label={t('workflows.activities.waitDuration')}
                                       />
                                       <p className="text-xs text-muted-foreground mt-1">{t('workflows.activities.waitDurationDescription')}</p>
                                     </div>
                                     <div className="text-xs text-center text-muted-foreground">{t('workflows.activities.waitOr')}</div>
                                     <div>
-                                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                                      <label className="block text-xs font-medium text-foreground mb-1">
                                         {t('workflows.activities.waitUntil')}
                                       </label>
                                       <Input
@@ -1161,7 +1336,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                                 {/* Activity Config JSON (hidden for WAIT) */}
                                 {activity.activityType !== 'WAIT' && (
                                 <div>
-                                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                                  <label className="block text-xs font-medium text-foreground mb-1">
                                     {t('workflows.form.configuration')}
                                   </label>
                                   <JsonBuilder
@@ -1172,17 +1347,17 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                                       setStepActivities(updated)
                                     }}
                                   />
-                                  <p className="text-xs text-gray-500 mt-1">
+                                  <p className="text-xs text-muted-foreground mt-1">
                                     {t('workflows.form.descriptions.activityConfig')}
                                   </p>
                                 </div>
                                 )}
 
                                 {/* Delete Button */}
-                                <div className="pt-3 border-t border-gray-100">
+                                <div className="pt-3 border-t border-border">
                                   <Button
                                     type="button"
-                                    variant="destructive"
+                                    variant="destructive-outline"
                                     size="sm"
                                     onClick={() => {
                                       setStepActivities(stepActivities.filter((_, i) => i !== index))
@@ -1208,14 +1383,14 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
               {/* Sub-Workflow Configuration (Phase 8) */}
               {node.type === 'subWorkflow' && (
                 <>
-                  <div className="border-t border-gray-200 pt-4 mt-4">
+                  <div className="border-t border-border pt-4 mt-4">
                     <h3 className="text-sm font-semibold text-foreground mb-3">
                       {t('workflows.form.subWorkflowConfig')}
                     </h3>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-foreground mb-1">
                       {t('workflows.form.workflowToInvoke')} *
                     </label>
                     <div className="flex gap-2">
@@ -1234,14 +1409,22 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                       >
                         {t('workflows.form.browse')}
                       </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleOpenInside}
+                        disabled={!subWorkflowId || isOpeningInside}
+                      >
+                        {t('workflows.ports.openInside')}
+                      </Button>
                     </div>
-                    <p className="text-xs text-gray-500 mt-1">
+                    <p className="text-xs text-muted-foreground mt-1">
                       {t('workflows.form.descriptions.subWorkflowId')}
                     </p>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-foreground mb-1">
                       {t('workflows.form.version')}
                     </label>
                     <Input
@@ -1250,26 +1433,26 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                       onChange={(e) => setSubWorkflowVersion(e.target.value)}
                       placeholder={t('workflows.form.placeholders.version')}
                     />
-                    <p className="text-xs text-gray-500 mt-1">
+                    <p className="text-xs text-muted-foreground mt-1">
                       {t('workflows.form.descriptions.subWorkflowVersion')}
                     </p>
                   </div>
 
                   {/* Input Mapping */}
-                  <div className="border-t border-gray-200 pt-4 mt-4">
+                  <div className="border-t border-border pt-4 mt-4">
                     <div className="flex items-center justify-between mb-3">
                       <div>
                         <h4 className="text-sm font-semibold text-foreground">
                           {t('workflows.form.inputMapping', { count: inputMappings.length })}
                         </h4>
-                        <p className="text-xs text-gray-500 mt-0.5">
+                        <p className="text-xs text-muted-foreground mt-0.5">
                           {t('workflows.form.descriptions.inputMapping')}
                         </p>
                       </div>
                       <Button
                         type="button"
                         size="sm"
-                        onClick={() => setInputMappings([...inputMappings, { key: '', value: '' }])}
+                        onClick={() => setInputMappings(prev => [...prev, { key: '', value: '' }])}
                       >
                         <Plus className="size-3 mr-1" />
                         {t('workflows.form.addMapping')}
@@ -1277,7 +1460,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                     </div>
 
                     {inputMappings.length === 0 ? (
-                      <p className="text-sm text-gray-500 italic">
+                      <p className="text-sm text-muted-foreground italic">
                         {t('workflows.nodeEditor.noInputMappings')}
                       </p>
                     ) : (
@@ -1295,9 +1478,9 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                                 }}
                                 placeholder={t('workflows.form.placeholders.childKey')}
                               />
-                              <p className="text-xs text-gray-500 mt-0.5">{t('workflows.form.descriptions.childKey')}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">{t('workflows.form.descriptions.childKey')}</p>
                             </div>
-                            <span className="text-gray-400 mt-2">→</span>
+                            <span className="text-muted-foreground mt-2">→</span>
                             <div className="flex-1">
                               <Input
                                 type="text"
@@ -1309,14 +1492,14 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                                 }}
                                 placeholder={t('workflows.form.placeholders.parentPath')}
                               />
-                              <p className="text-xs text-gray-500 mt-0.5">{t('workflows.form.descriptions.parentPath')}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">{t('workflows.form.descriptions.parentPath')}</p>
                             </div>
                             <Button
                               type="button"
                               size="sm"
                               variant="ghost"
                               onClick={() => {
-                                setInputMappings(inputMappings.filter((_, i) => i !== index))
+                                setInputMappings(prev => prev.filter((_, i) => i !== index))
                               }}
                               className="mt-1"
                             >
@@ -1329,20 +1512,20 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                   </div>
 
                   {/* Output Mapping */}
-                  <div className="border-t border-gray-200 pt-4 mt-4">
+                  <div className="border-t border-border pt-4 mt-4">
                     <div className="flex items-center justify-between mb-3">
                       <div>
                         <h4 className="text-sm font-semibold text-foreground">
                           {t('workflows.form.outputMapping', { count: outputMappings.length })}
                         </h4>
-                        <p className="text-xs text-gray-500 mt-0.5">
+                        <p className="text-xs text-muted-foreground mt-0.5">
                           {t('workflows.form.descriptions.outputMapping')}
                         </p>
                       </div>
                       <Button
                         type="button"
                         size="sm"
-                        onClick={() => setOutputMappings([...outputMappings, { key: '', value: '' }])}
+                        onClick={() => setOutputMappings(prev => [...prev, { key: '', value: '' }])}
                       >
                         <Plus className="size-3 mr-1" />
                         {t('workflows.form.addMapping')}
@@ -1350,7 +1533,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                     </div>
 
                     {outputMappings.length === 0 ? (
-                      <p className="text-sm text-gray-500 italic">
+                      <p className="text-sm text-muted-foreground italic">
                         {t('workflows.nodeEditor.noOutputMappings')}
                       </p>
                     ) : (
@@ -1368,9 +1551,9 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                                 }}
                                 placeholder={t('workflows.form.placeholders.parentKey')}
                               />
-                              <p className="text-xs text-gray-500 mt-0.5">{t('workflows.form.descriptions.parentKey')}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">{t('workflows.form.descriptions.parentKey')}</p>
                             </div>
-                            <span className="text-gray-400 mt-2">←</span>
+                            <span className="text-muted-foreground mt-2">←</span>
                             <div className="flex-1">
                               <Input
                                 type="text"
@@ -1382,14 +1565,14 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                                 }}
                                 placeholder={t('workflows.form.placeholders.childPath')}
                               />
-                              <p className="text-xs text-gray-500 mt-0.5">{t('workflows.form.descriptions.childPath')}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">{t('workflows.form.descriptions.childPath')}</p>
                             </div>
                             <Button
                               type="button"
                               size="sm"
                               variant="ghost"
                               onClick={() => {
-                                setOutputMappings(outputMappings.filter((_, i) => i !== index))
+                                setOutputMappings(prev => prev.filter((_, i) => i !== index))
                               }}
                               className="mt-1"
                             >
@@ -1406,14 +1589,14 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
               {/* Wait for Signal Configuration */}
               {node.type === 'waitForSignal' && (
                 <>
-                  <div className="border-t border-gray-200 pt-4 mt-4">
+                  <div className="border-t border-border pt-4 mt-4">
                     <h3 className="text-sm font-semibold text-foreground mb-3">
                       {t('workflows.form.signalConfig')}
                     </h3>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-foreground mb-1">
                       {t('workflows.form.signalName')} *
                     </label>
                     <Input
@@ -1422,35 +1605,33 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                       onChange={(e) => setSignalName(e.target.value)}
                       placeholder={t('workflows.form.placeholders.signalName')}
                     />
-                    <p className="text-xs text-gray-500 mt-1">
+                    <p className="text-xs text-muted-foreground mt-1">
                       {t('workflows.form.descriptions.signalName')}
                     </p>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-foreground mb-1">
                       {t('workflows.form.timeout')}
                     </label>
-                    <Input
-                      type="text"
+                    <DurationInput
                       value={signalTimeout}
-                      onChange={(e) => {
-                        setSignalTimeout(e.target.value)
+                      onChange={(value) => {
+                        setSignalTimeout(value)
                         if (fieldErrors.signalTimeout) {
                           const next = { ...fieldErrors }
                           delete next.signalTimeout
                           setFieldErrors(next)
                         }
                       }}
-                      placeholder={t('workflows.form.placeholders.signalTimeout')}
-                      aria-invalid={fieldErrors.signalTimeout ? true : undefined}
+                      aria-label={t('workflows.form.timeout')}
                     />
                     {fieldErrors.signalTimeout ? (
                       <p className="text-xs text-destructive mt-1">
                         {fieldErrors.signalTimeout}
                       </p>
                     ) : (
-                      <p className="text-xs text-gray-500 mt-1">
+                      <p className="text-xs text-muted-foreground mt-1">
                         {t('workflows.form.descriptions.signalTimeout')}
                       </p>
                     )}
@@ -1461,44 +1642,42 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
               {/* Wait for Timer Configuration */}
               {node.type === 'waitForTimer' && (
                 <>
-                  <div className="border-t border-gray-200 pt-4 mt-4">
+                  <div className="border-t border-border pt-4 mt-4">
                     <h3 className="text-sm font-semibold text-foreground mb-3">
                       {t('workflows.steps.types.WAIT_FOR_TIMER')}
                     </h3>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-foreground mb-1">
                       {t('workflows.activities.waitDuration')}
                     </label>
-                    <Input
-                      type="text"
+                    <DurationInput
                       value={timerDuration}
-                      onChange={(e) => {
-                        setTimerDuration(e.target.value)
-                        if (e.target.value) setTimerUntil('')
+                      onChange={(value) => {
+                        setTimerDuration(value)
+                        if (value) setTimerUntil('')
                         if (fieldErrors.timerDuration) {
                           const next = { ...fieldErrors }
                           delete next.timerDuration
                           setFieldErrors(next)
                         }
                       }}
-                      placeholder={t('workflows.activities.waitDurationPlaceholder')}
-                      aria-invalid={fieldErrors.timerDuration ? true : undefined}
+                      aria-label={t('workflows.activities.waitDuration')}
                     />
                     {fieldErrors.timerDuration ? (
                       <p className="text-xs text-destructive mt-1">
                         {fieldErrors.timerDuration}
                       </p>
                     ) : (
-                      <p className="text-xs text-gray-500 mt-1">
+                      <p className="text-xs text-muted-foreground mt-1">
                         {t('workflows.activities.waitDurationDescription')}
                       </p>
                     )}
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-foreground mb-1">
                       {t('workflows.activities.waitUntil')}
                     </label>
                     <Input
@@ -1522,7 +1701,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                         {fieldErrors.timerUntil}
                       </p>
                     ) : (
-                      <p className="text-xs text-gray-500 mt-1">
+                      <p className="text-xs text-muted-foreground mt-1">
                         {t('workflows.activities.waitUntilDescription')}
                       </p>
                     )}
@@ -1530,32 +1709,255 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
                 </>
               )}
 
+              {/* Invoke Agent Configuration */}
+              {node.type === 'invokeAgent' && (
+                <>
+                  <div className="border-t border-border pt-4 mt-4">
+                    <h3 className="text-sm font-semibold text-foreground mb-3">
+                      {t('workflows.nodeTypes.invokeAgent')}
+                    </h3>
+                  </div>
+
+                  {/* Agent */}
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1">
+                      {t('workflows.form.invokeAgent.agent')} *
+                    </label>
+                    <Select value={agentId} onValueChange={setAgentId}>
+                      <SelectTrigger aria-busy={agentsLoading || undefined}>
+                        <SelectValue
+                          placeholder={
+                            agentsLoading
+                              ? t('common.loading')
+                              : t('workflows.form.invokeAgent.agentPlaceholder')
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {agentOptions.map((agent) => (
+                          <SelectItem key={agent.id} value={agent.id}>
+                            {agent.label || agent.id}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {t('workflows.form.invokeAgent.agentDescription')}
+                    </p>
+                  </div>
+
+                  {/* Input */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-sm font-medium text-foreground">
+                        {t('workflows.form.invokeAgent.input')}
+                      </label>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setAgentInputRows([...agentInputRows, { key: '', value: '' }])}
+                      >
+                        <Plus className="size-3 mr-1" />
+                        {t('workflows.form.addMapping')}
+                      </Button>
+                    </div>
+                    <div className="space-y-2">
+                      {agentInputRows.map((row, index) => (
+                        <div key={index} className="flex gap-2 items-center">
+                          <Input
+                            type="text"
+                            value={row.key}
+                            onChange={(e) => {
+                              const updated = [...agentInputRows]
+                              updated[index] = { ...updated[index], key: e.target.value }
+                              setAgentInputRows(updated)
+                            }}
+                            placeholder={t('workflows.form.invokeAgent.inputKeyPlaceholder')}
+                            className="flex-1"
+                          />
+                          <span className="text-muted-foreground">=</span>
+                          <Input
+                            type="text"
+                            value={row.value}
+                            onChange={(e) => {
+                              const updated = [...agentInputRows]
+                              updated[index] = { ...updated[index], value: e.target.value }
+                              setAgentInputRows(updated)
+                            }}
+                            placeholder={t('workflows.form.invokeAgent.inputValuePlaceholder')}
+                            className="flex-1"
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            onClick={() =>
+                              setAgentInputRows(agentInputRows.filter((_, i) => i !== index))
+                            }
+                          >
+                            <Trash2 className="size-3" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {t('workflows.form.invokeAgent.inputDescription')}
+                    </p>
+                  </div>
+
+                  {/* On result */}
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      {t('workflows.form.invokeAgent.onResult')}
+                    </label>
+                    <RadioGroup
+                      className="space-y-3"
+                      name="invoke-agent-on-result"
+                      value={agentResultMode}
+                      onValueChange={(next) =>
+                        setAgentResultMode(next === 'alwaysAsk' ? 'alwaysAsk' : 'autoApprove')
+                      }
+                    >
+                      <label
+                        htmlFor="invoke-agent-on-result-auto-approve"
+                        className="flex cursor-pointer items-center gap-2 text-sm text-foreground"
+                      >
+                        <Radio id="invoke-agent-on-result-auto-approve" value="autoApprove" />
+                        <span>{t('workflows.form.invokeAgent.autoApprove')}</span>
+                        <Input
+                          type="number"
+                          step="0.05"
+                          min="0"
+                          max="1"
+                          value={agentAutoApproveThreshold}
+                          onChange={(e) => setAgentAutoApproveThreshold(e.target.value)}
+                          onFocus={() => setAgentResultMode('autoApprove')}
+                          disabled={agentResultMode !== 'autoApprove'}
+                          className="w-24"
+                        />
+                      </label>
+                      <label
+                        htmlFor="invoke-agent-on-result-always-ask"
+                        className="flex cursor-pointer items-center gap-2 text-sm text-foreground"
+                      >
+                        <Radio id="invoke-agent-on-result-always-ask" value="alwaysAsk" />
+                        <span>{t('workflows.form.invokeAgent.alwaysAsk')}</span>
+                      </label>
+                    </RadioGroup>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {t('workflows.form.invokeAgent.threshold')}
+                    </p>
+                  </div>
+
+                  {/* Output Mapping */}
+                  <div className="border-t border-border pt-4 mt-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h4 className="text-sm font-semibold text-foreground">
+                          {t('workflows.form.invokeAgent.outputMapping', {
+                            count: agentOutputMappings.length,
+                          })}
+                        </h4>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {t('workflows.form.invokeAgent.outputMappingDescription')}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setAgentOutputMappings([...agentOutputMappings, { key: '', value: '' }])
+                        }
+                      >
+                        <Plus className="size-3 mr-1" />
+                        {t('workflows.form.addMapping')}
+                      </Button>
+                    </div>
+
+                    {agentOutputMappings.length === 0 ? (
+                      <p className="text-sm text-muted-foreground italic">
+                        {t('workflows.form.invokeAgent.noOutputMappings')}
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {agentOutputMappings.map((mapping, index) => (
+                          <div key={index} className="flex gap-2 items-start">
+                            <div className="flex-1">
+                              <Input
+                                type="text"
+                                value={mapping.key}
+                                onChange={(e) => {
+                                  const updated = [...agentOutputMappings]
+                                  updated[index] = { ...updated[index], key: e.target.value }
+                                  setAgentOutputMappings(updated)
+                                }}
+                                placeholder={t('workflows.form.invokeAgent.outputKeyPlaceholder')}
+                              />
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                {t('workflows.form.invokeAgent.outputKeyDescription')}
+                              </p>
+                            </div>
+                            <span className="text-muted-foreground mt-2">←</span>
+                            <div className="flex-1">
+                              <Input
+                                type="text"
+                                value={mapping.value}
+                                onChange={(e) => {
+                                  const updated = [...agentOutputMappings]
+                                  updated[index] = { ...updated[index], value: e.target.value }
+                                  setAgentOutputMappings(updated)
+                                }}
+                                placeholder={t('workflows.form.invokeAgent.outputPathPlaceholder')}
+                              />
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                {t('workflows.form.invokeAgent.outputPathDescription')}
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() =>
+                                setAgentOutputMappings(
+                                  agentOutputMappings.filter((_, i) => i !== index),
+                                )
+                              }
+                              className="mt-1"
+                            >
+                              <Trash2 className="size-3" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
               {/* Advanced Configuration */}
-              <div className="border-t border-gray-200 pt-4 mt-4">
-                <button
+              <div className="border-t border-border pt-4 mt-4">
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={() => setShowAdvanced(!showAdvanced)}
-                  className="flex items-center justify-between w-full text-left"
+                  className="h-auto w-full justify-between px-0 py-0 text-left hover:bg-transparent"
                 >
                   <h3 className="text-sm font-semibold text-foreground">
                     {t('workflows.form.advancedConfiguration')}
                   </h3>
-                  <svg
-                    className={`w-5 h-5 transition-transform ${showAdvanced ? 'rotate-180' : ''}`}
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
+                  <ChevronDown
+                    className={`size-5 transition-transform ${showAdvanced ? 'rotate-180' : ''}`}
+                  />
+                </Button>
                 {showAdvanced && (
                   <div className="mt-3">
                     <JsonBuilder
                       value={advancedConfig}
                       onChange={setAdvancedConfig}
                     />
-                    <p className="text-xs text-gray-500 mt-1">
+                    <p className="text-xs text-muted-foreground mt-1">
                       {t('workflows.form.descriptions.advancedConfig')}
                     </p>
                   </div>
@@ -1569,7 +1971,7 @@ export function NodeEditDialog({ node, isOpen, onClose, onSave, onDelete }: Node
           {onDelete && (
             <Button
               type="button"
-              variant="destructive"
+              variant="destructive-outline"
               onClick={handleDelete}
             >
               <Trash2 className="size-4" />

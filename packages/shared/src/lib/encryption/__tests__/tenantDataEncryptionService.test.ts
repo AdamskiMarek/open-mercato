@@ -196,6 +196,64 @@ describe('TenantDataEncryptionService.encryptFields (issue #2720)', () => {
   })
 })
 
+describe('TenantDataEncryptionService system-scoped maps', () => {
+  const originalToggle = process.env.TENANT_DATA_ENCRYPTION
+
+  beforeEach(() => {
+    process.env.TENANT_DATA_ENCRYPTION = 'yes'
+  })
+
+  afterEach(() => {
+    if (originalToggle === undefined) delete process.env.TENANT_DATA_ENCRYPTION
+    else process.env.TENANT_DATA_ENCRYPTION = originalToggle
+  })
+
+  it('encrypts tenant-less payloads with a stable entity-scoped KMS key', async () => {
+    const entityId = 'onboarding:onboarding_request'
+    const systemKeyId = `system:${entityId}`
+    const getTenantDek = jest.fn(async (keyId: string) => (
+      keyId === systemKeyId
+        ? { tenantId: keyId, key: fixedKey, fetchedAt: new Date() }
+        : null
+    ))
+    const service = new TenantDataEncryptionService(
+      {
+        getConnection: () => ({ execute: jest.fn(async () => []) }),
+      } as never,
+      {
+        kms: {
+          getTenantDek,
+          createTenantDek: jest.fn(async () => null),
+          isHealthy: () => true,
+        },
+        defaultEncryptionMaps: [
+          {
+            entityId,
+            keyScope: 'system',
+            fields: [
+              { field: 'email', hashField: 'email_hash' },
+              { field: 'password_hash' },
+            ],
+          },
+        ],
+      } as never,
+    )
+
+    const encrypted = await service.encryptEntityPayload(entityId, {
+      email: 'person@example.com',
+      email_hash: null,
+      password_hash: 'bcrypt-value',
+    }, null, null)
+
+    expect(getTenantDek).toHaveBeenCalledWith(systemKeyId)
+    expect(encrypted.email).not.toBe('person@example.com')
+    expect(encrypted.password_hash).not.toBe('bcrypt-value')
+    expect(encrypted.email_hash).toBe(hashForLookup('person@example.com'))
+    expect(decryptWithAesGcm(encrypted.email as string, fixedKey)).toBe('person@example.com')
+    expect(decryptWithAesGcm(encrypted.password_hash as string, fixedKey)).toBe('bcrypt-value')
+  })
+})
+
 describe('TenantDataEncryptionService.getEncryptedFieldNames', () => {
   it('returns active encryption-map field names for query planning', async () => {
     const service = new TenantDataEncryptionService({} as never)
@@ -214,5 +272,28 @@ describe('TenantDataEncryptionService.getEncryptedFieldNames', () => {
     await expect(
       service.getEncryptedFieldNames('customers:customer_entity', 't1', 'org1'),
     ).resolves.toEqual(['display_name', 'primary_email'])
+  })
+
+  it('returns org-scoped field union for all-organization query planning', async () => {
+    const execute = jest.fn(async (_sql: string, params: unknown[]) => {
+      if (params.length === 3) return []
+      return [
+        { fields_json: [{ field: 'display_name' }, { field: 'primary_email' }] },
+        { fields_json: [{ field: 'display_name' }, { field: 'description' }, { field: '' }] },
+      ]
+    })
+    const service = new TenantDataEncryptionService({
+      getConnection: () => ({ execute }),
+    } as never)
+    jest.spyOn(service, 'isEnabled').mockReturnValue(true)
+
+    await expect(
+      service.getEncryptedFieldNames('test:all_org_customer_entity', 'tenant-all', null),
+    ).resolves.toEqual(['display_name', 'primary_email', 'description'])
+
+    expect(execute).toHaveBeenCalledWith(
+      expect.stringContaining('organization_id is not null'),
+      ['test:all_org_customer_entity', 'tenant-all'],
+    )
   })
 })

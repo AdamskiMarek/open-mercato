@@ -1,8 +1,32 @@
 import type { AwilixContainer } from 'awilix'
 import type { EntityManager } from '@mikro-orm/postgresql'
+import type { ZodTypeAny } from 'zod'
 import { randomUUID } from 'crypto'
 import type { AuthContext } from '../auth/server'
 import type { OrganizationScope } from '@open-mercato/core/modules/directory/utils/organizationScope'
+
+/**
+ * Bulk-import / backfill deferral flags. When a command runs under a context that
+ * carries this, the command bus and data engine suppress the heavy per-record side
+ * effects flagged below so a large backfill can defer them to a single batched pass.
+ *
+ * IMPORTANT — the caller owns restoring whatever it suppresses. With `skipReindex`
+ * the `query_index` projection (and its search tokens) is stale for every record
+ * written under this context until the caller runs a batched `query_index rebuild`
+ * for the affected entity types at end-of-run.
+ *
+ * Concurrency: these flags are read from the context and threaded as a local
+ * parameter through the side-effect flush — no shared engine state is mutated — so
+ * two commands running concurrently with different flags never clobber each other.
+ */
+export type BulkImportSuppression = {
+  /** Skip the inline `query_index.upsert_one` / `delete_one` reindex (rebuild after the run). */
+  skipReindex?: boolean
+  /** Skip the per-record `<module>.<entity>.<action>` domain event emission. */
+  skipEvents?: boolean
+  /** Advisory: handlers that fan out per-record notifications SHOULD honor this and skip them. */
+  skipNotifications?: boolean
+}
 
 export type CommandRuntimeContext = {
   container: AwilixContainer
@@ -12,6 +36,13 @@ export type CommandRuntimeContext = {
   organizationIds: string[] | null
   request?: Request
   syncOrigin?: string | null
+  /**
+   * See {@link BulkImportSuppression}. Set by bulk backfill callers to defer heavy
+   * per-record side effects (reindex, events, notifications). The caller MUST rebuild
+   * the `query_index` for the affected entity types after the run when `skipReindex`
+   * is set. Unset for normal (interactive) writes — they get all side effects.
+   */
+  bulkImport?: BulkImportSuppression
   /**
    * Marks a trusted server-side invocation (CLI seeding, tenant setup) that runs
    * without an authenticated end-user actor. Commands that gate writes behind a
@@ -27,6 +58,28 @@ export type CommandRuntimeContext = {
    * surrounding work as a single atomic, single-locked operation.
    */
   transactionalEm?: EntityManager
+  /**
+   * On-behalf-of attribution for non-human principals (Agent Identity &
+   * On-Behalf-Of, Wave 4 P2). When an agent runs on behalf of a human, the
+   * orchestrator's `runAs` wrapper sets this so every `ActionLog` the command
+   * path writes records `actorUserId = runAs.actorUserId` (the agent principal's
+   * `auth.User` id), `onBehalfOfUserId = runAs.onBehalfOfUserId` (the invoking
+   * human, or null for system-invoked agents), and `sourceKey = runAs.source`
+   * (`'agent'`). Additive + optional: callers that omit it keep the existing
+   * `ctx.auth.sub`-derived attribution unchanged. This threads agent attribution
+   * through the SAME audited Command/CRUD path as a human action — not a parallel
+   * audit path.
+   */
+  runAs?: CommandRunAsContext
+}
+
+export type CommandRunAsContext = {
+  /** The actor stamped on every ActionLog this context produces (agent `auth.User` id). */
+  actorUserId: string
+  /** The human (or system) principal the actor acts on behalf of; null when system-invoked. */
+  onBehalfOfUserId?: string | null
+  /** The audit source key for the attributed writes; `'agent'` for agent runs. */
+  source: 'agent'
 }
 
 export type CommandLogMetadata = {
@@ -34,6 +87,7 @@ export type CommandLogMetadata = {
   tenantId?: string | null
   organizationId?: string | null
   actorUserId?: string | null
+  onBehalfOfUserId?: string | null
   actionLabel?: string | null
   resourceKind?: string | null
   resourceId?: string | null
@@ -99,6 +153,13 @@ export type CommandLogBuilderArgs<TInput, TResult> = {
 export interface CommandHandler<TInput = unknown, TResult = unknown> {
   readonly id: string
   readonly isUndoable?: boolean
+  /**
+   * Optional Zod schema describing the command's return value. Feeds the
+   * workflows context ledger so downstream activities can reason about the
+   * shape a command produces; when absent the ledger renders the output as
+   * unknown.
+   */
+  readonly outputSchema?: ZodTypeAny
   prepare?(input: TInput, ctx: CommandRuntimeContext): Promise<{ before?: unknown } | null> | { before?: unknown } | null
   execute(input: TInput, ctx: CommandRuntimeContext): Promise<TResult> | TResult
   buildLog?(args: CommandLogBuilderArgs<TInput, TResult>): Promise<CommandLogMetadata | null | undefined> | CommandLogMetadata | null | undefined

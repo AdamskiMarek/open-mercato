@@ -14,6 +14,7 @@
  *   - Tools without an explicit fixture entry are skipped with reason
  *     `'no fixture'` rather than failing.
  */
+import { createLogger } from '@open-mercato/shared/lib/logger'
 import type { AwilixContainer } from 'awilix'
 import { createRequestContainer } from '@open-mercato/shared/lib/di/container'
 import type { McpToolContext, AiToolDefinition } from './types'
@@ -26,6 +27,8 @@ import {
   compileAndImportGenerated,
   ensureApiRouteManifestsRegistered,
 } from './generated-registry-loader'
+
+const logger = createLogger('ai_assistant')
 
 export type ToolTestStatus = 'pass' | 'fail' | 'skip'
 
@@ -73,7 +76,9 @@ async function loadGeneratedTools(): Promise<{ moduleId: string; tools: AiToolDe
     )
   }
   await ensureApiRouteManifestsRegistered()
-  const mod = (await compileAndImportGenerated(tsPath)) as RawAiToolsModule
+  const mod = (await compileAndImportGenerated(tsPath, {
+    bundleLocalModules: true,
+  })) as RawAiToolsModule
   const entries = mod.aiToolConfigEntriesRaw ?? mod.aiToolConfigEntries ?? []
   const result: { moduleId: string; tools: AiToolDefinition[] }[] = []
   for (const entry of entries) {
@@ -127,7 +132,7 @@ export async function pickDefaultTenant(
     return { tenantId, organizationId, userId }
   } catch (error) {
     if (process.env.OM_TOOL_TEST_DEBUG === '1') {
-      console.warn('[tool-test-runner] pickDefaultTenant failed:', error)
+      logger.warn('tool-test-runner — pickDefaultTenant failed', { err: error })
     }
     return null
   }

@@ -42,10 +42,28 @@ import {
   seedAgentRegistryForTests,
 } from '../agent-registry'
 import { registerMcpTool, toolRegistry } from '../tool-registry'
+import { ensureModuleToolsLoaded } from '../tool-loader'
 import type {
   AiPendingActionStatus,
   AiPendingActionQueueMode,
 } from '../pending-action-types'
+
+jest.mock('@open-mercato/shared/lib/logger', () => {
+  const mocked = {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    child: jest.fn(),
+  }
+  mocked.child.mockImplementation(() => mocked)
+  return { createLogger: jest.fn(() => mocked) }
+})
+
+const testLogger = jest
+  .requireMock('@open-mercato/shared/lib/logger')
+  .createLogger('test') as Record<'debug' | 'info' | 'warn' | 'error', jest.Mock>
+
 
 type Row = {
   id: string
@@ -378,7 +396,8 @@ describe('prepareMutation', () => {
   it('missing loadBeforeRecord: ships fieldDiff=[] + sideEffectsSummary warning + still creates the pending row', async () => {
     const em = mockEm()
     const container = makeContainer(em)
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    const warnSpy = testLogger.warn
+    warnSpy.mockClear()
     const tool = makeTool({
       name: 'catalog.products.update',
       isMutation: true,
@@ -538,12 +557,22 @@ describe('prepareMutation', () => {
 })
 
 describe('resolveAiAgentTools mutation interception (Step 5.6)', () => {
-  let warnSpy: jest.SpyInstance
+  let warnSpy: jest.Mock
+
+  // `resolveAiAgentTools` populates the tool registry on first use, which
+  // compiles and imports the generated ai-tools registry. On a cold CI runner
+  // that one-time cost lands inside whichever test happens to run first and
+  // blows the default 5s per-test budget; the loader memoizes, so paying it
+  // here keeps every test below on the default timeout.
+  beforeAll(async () => {
+    await ensureModuleToolsLoaded()
+  }, 120_000)
 
   beforeEach(() => {
     resetAgentRegistryForTests()
     toolRegistry.clear()
-    warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    warnSpy = testLogger.warn
+    warnSpy.mockClear()
   })
 
   afterEach(() => {

@@ -9,14 +9,18 @@ import { buildOptimisticLockHeader } from '@open-mercato/ui/backend/utils/optimi
 import { collectCustomFieldValues } from '@open-mercato/ui/backend/utils/customFieldValues'
 import { createCrud, updateCrud } from '@open-mercato/ui/backend/utils/crud'
 import { createCrudFormError } from '@open-mercato/ui/backend/utils/serverErrors'
-import { handleSectionMutationError, rowOptimisticVersion } from './optimisticLock'
+import { handleSectionMutationError } from './optimisticLock'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@open-mercato/ui/primitives/dialog'
 import { useDialogKeyHandler } from '@open-mercato/ui/hooks/useDialogKeyHandler'
 import { Input } from '@open-mercato/ui/primitives/input'
 import { Spinner } from '@open-mercato/ui/primitives/spinner'
 import { E } from '#generated/entities.ids.generated'
-import { useT } from '@open-mercato/shared/lib/i18n/context'
+import { useT, useLocale } from '@open-mercato/shared/lib/i18n/context'
+import { parseLocaleNumber } from '@open-mercato/shared/lib/number'
 import { normalizeCustomFieldSubmitValue, extractCustomFieldValues } from './customFieldHelpers'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+
+const logger = createLogger('sales')
 
 export type PaymentTotals = {
   paidTotalAmount?: number | null
@@ -58,17 +62,20 @@ type PaymentDialogProps = {
   orderId: string
   organizationId: string | null
   tenantId: string | null
+  documentUpdatedAt?: string | null
   onOpenChange: (open: boolean) => void
   onSaved?: (totals?: PaymentTotals | null) => void | Promise<void>
 }
 
-const normalizeNumber = (value: unknown): number => {
-  if (typeof value === 'number' && Number.isFinite(value)) return value
-  if (typeof value === 'string' && value.trim().length) {
-    const parsed = Number(value)
-    if (!Number.isNaN(parsed)) return parsed
-  }
-  return 0
+// The amount field is a hand-rolled text input, so the raw string a user typed reaches
+// the submit handler carrying the separator the surrounding UI displays — `110,70` under
+// Polish (issue #5828, same defect class as #5552). A blank/absent value keeps the old
+// "must be a positive amount" message; only genuinely unparseable input returns null.
+const parseAmountInput = (value: unknown, locale?: string): number | null => {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+  if (typeof value !== 'string') return 0
+  if (!value.trim()) return 0
+  return parseLocaleNumber(value, locale)
 }
 
 export function PaymentDialog({
@@ -79,10 +86,12 @@ export function PaymentDialog({
   orderId,
   organizationId,
   tenantId,
+  documentUpdatedAt,
   onOpenChange,
   onSaved,
 }: PaymentDialogProps) {
   const t = useT()
+  const locale = useLocale()
   const dialogContentRef = React.useRef<HTMLDivElement | null>(null)
   const [formResetKey, setFormResetKey] = React.useState(0)
   const [paymentMethods, setPaymentMethods] = React.useState<PaymentMethodOption[]>([])
@@ -151,7 +160,7 @@ export function PaymentDialog({
         if (!query) setPaymentMethods([])
         return []
       } catch (err) {
-        console.error('sales.payments.methods.load', err)
+        logger.error('sales.payments.methods.load', { err })
         return []
       } finally {
         setMethodsLoading(false)
@@ -222,7 +231,7 @@ export function PaymentDialog({
       setDocumentStatuses(mapped)
       return mapped
     } catch (err) {
-      console.error('sales.payments.statuses.load', err)
+      logger.error('sales.payments.statuses.load', { err })
       setDocumentStatuses([])
       return []
     } finally {
@@ -257,7 +266,7 @@ export function PaymentDialog({
       setPaymentStatuses(mapped)
       return mapped
     } catch (err) {
-      console.error('sales.payments.statuses.load', err)
+      logger.error('sales.payments.statuses.load', { err })
       setPaymentStatuses([])
       return []
     } finally {
@@ -347,9 +356,8 @@ export function PaymentDialog({
           return (
             <div className="flex items-center gap-2">
               <Input
-                type="number"
+                type="text"
                 inputMode="decimal"
-                step="0.01"
                 value={normalized as string | number}
                 onChange={(event) => setValue(event.target.value)}
                 placeholder="0.00"
@@ -488,9 +496,13 @@ export function PaymentDialog({
   const handleSubmit = React.useCallback(
     async (values: Record<string, unknown>) => {
       const resolvedCurrency = currencyCode ? currencyCode.toUpperCase() : ''
-      const amountValue = normalizeNumber(values.amount)
+      const amountValue = parseAmountInput(values.amount, locale)
       if (!resolvedCurrency.trim()) {
         throw createCrudFormError(t('sales.documents.payments.currencyRequired', 'Currency is required.'))
+      }
+      if (amountValue === null) {
+        const message = t('sales.documents.payments.amountInvalid', 'Enter the amount as a number.')
+        throw createCrudFormError(message, { amount: message })
       }
       if (amountValue <= 0) {
         throw createCrudFormError(t('sales.documents.payments.amountRequired', 'Enter a positive amount.'), {
@@ -539,7 +551,9 @@ export function PaymentDialog({
       const action = payment?.id ? updateCrud : createCrud
       try {
         const result = await withScopedApiRequestHeaders(
-          buildOptimisticLockHeader(payment?.id ? rowOptimisticVersion(payment) : undefined),
+          // The server guards the PARENT order's aggregate version (Gap A) for
+          // both create and update, so send the order's `updated_at`.
+          buildOptimisticLockHeader(documentUpdatedAt ?? undefined),
           () =>
             action(
               'sales/payments',
@@ -569,7 +583,7 @@ export function PaymentDialog({
         throw err
       }
     },
-    [currencyCode, mode, onOpenChange, onSaved, orderId, organizationId, payment?.id, payment?.updatedAt, t, tenantId]
+    [currencyCode, documentUpdatedAt, mode, onOpenChange, onSaved, orderId, organizationId, payment?.id, t, tenantId]
   )
 
   const handleSubmitForm = React.useCallback(

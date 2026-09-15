@@ -1,83 +1,15 @@
 import * as React from 'react'
 import { flash } from '@open-mercato/ui/backend/FlashMessages'
+import { surfaceRecordConflict } from '@open-mercato/ui/backend/conflicts'
 import { updateCrud } from '@open-mercato/ui/backend/utils/crud'
-import { readApiResultOrThrow } from '@open-mercato/ui/backend/utils/apiCall'
+import { readApiResultOrThrow, withScopedApiRequestHeaders } from '@open-mercato/ui/backend/utils/apiCall'
+import { buildOptimisticLockHeader } from '@open-mercato/ui/backend/utils/optimisticLock'
 import { useT } from '@open-mercato/shared/lib/i18n/context'
 import type {
-  CompanyAssociationApiRecord,
   DealAssociation,
   DealDetailPayload,
   GuardedMutationRunner,
-  PersonAssociationApiRecord,
 } from './types'
-
-export function normalizePersonAssociationRecord(
-  record: PersonAssociationApiRecord,
-  fallbackId: string,
-): DealAssociation {
-  const displayName =
-    typeof record.displayName === 'string' && record.displayName.trim().length
-      ? record.displayName.trim()
-      : typeof record.display_name === 'string' && record.display_name.trim().length
-        ? record.display_name.trim()
-        : null
-  const email =
-    typeof record.primaryEmail === 'string' && record.primaryEmail.trim().length
-      ? record.primaryEmail.trim()
-      : typeof record.primary_email === 'string' && record.primary_email.trim().length
-        ? record.primary_email.trim()
-        : null
-  const phone =
-    typeof record.primaryPhone === 'string' && record.primaryPhone.trim().length
-      ? record.primaryPhone.trim()
-      : typeof record.primary_phone === 'string' && record.primary_phone.trim().length
-        ? record.primary_phone.trim()
-        : null
-  const profile = record.personProfile ?? record.person_profile ?? null
-  const jobTitle =
-    profile && typeof profile.jobTitle === 'string' && profile.jobTitle.trim().length
-      ? profile.jobTitle.trim()
-      : null
-  return {
-    id: typeof record.id === 'string' ? record.id : fallbackId,
-    label: displayName ?? email ?? phone ?? fallbackId,
-    subtitle: jobTitle ?? email ?? phone ?? null,
-    kind: 'person',
-  }
-}
-
-export function normalizeCompanyAssociationRecord(
-  record: CompanyAssociationApiRecord,
-  fallbackId: string,
-): DealAssociation {
-  const displayName =
-    typeof record.displayName === 'string' && record.displayName.trim().length
-      ? record.displayName.trim()
-      : typeof record.display_name === 'string' && record.display_name.trim().length
-        ? record.display_name.trim()
-        : null
-  const profile = record.companyProfile ?? record.company_profile ?? null
-  const domain =
-    typeof record.domain === 'string' && record.domain.trim().length
-      ? record.domain.trim()
-      : profile && typeof profile.domain === 'string' && profile.domain.trim().length
-        ? profile.domain.trim()
-        : null
-  const website =
-    typeof record.websiteUrl === 'string' && record.websiteUrl.trim().length
-      ? record.websiteUrl.trim()
-      : typeof record.website_url === 'string' && record.website_url.trim().length
-        ? record.website_url.trim()
-        : profile && typeof profile.websiteUrl === 'string' && profile.websiteUrl.trim().length
-          ? profile.websiteUrl.trim()
-          : null
-  return {
-    id: typeof record.id === 'string' ? record.id : fallbackId,
-    label: displayName ?? domain ?? website ?? fallbackId,
-    subtitle: domain ?? website ?? null,
-    kind: 'company',
-  }
-}
 
 function sameIdList(left: string[], right: string[]): boolean {
   if (left.length !== right.length) return false
@@ -95,6 +27,12 @@ type UseDealAssociationsOptions = {
   data: DealDetailPayload | null
   setData: React.Dispatch<React.SetStateAction<DealDetailPayload | null>>
   runMutationWithContext: GuardedMutationRunner
+  /**
+   * Re-fetch the deal detail. Required, not optional: this hook no longer patches the list
+   * itself on success, so a caller without it would show a stale list *and* keep a superseded
+   * lock token that 409s on the next save. It also backs the conflict bar's refresh on a 409.
+   */
+  onRefresh: () => void | Promise<void>
 }
 
 type UseDealAssociationsResult = {
@@ -113,6 +51,7 @@ export function useDealAssociations({
   data,
   setData,
   runMutationWithContext,
+  onRefresh,
 }: UseDealAssociationsOptions): UseDealAssociationsResult {
   const t = useT()
   const [peopleEditorIds, setPeopleEditorIds] = React.useState<string[]>([])
@@ -124,80 +63,6 @@ export function useDealAssociations({
     setPeopleEditorIds(data?.linkedPersonIds ?? [])
     setCompaniesEditorIds(data?.linkedCompanyIds ?? [])
   }, [data?.linkedCompanyIds, data?.linkedPersonIds])
-
-  const loadPeopleAssociations = React.useCallback(async (ids: string[]): Promise<DealAssociation[]> => {
-    const uniqueIds = Array.from(new Set(ids.map((value) => value.trim()).filter(Boolean)))
-    if (!uniqueIds.length) return []
-    try {
-      const params = new URLSearchParams({
-        ids: uniqueIds.join(','),
-        pageSize: String(Math.max(uniqueIds.length, 1)),
-      })
-      const payload = await readApiResultOrThrow<{ items?: PersonAssociationApiRecord[] }>(
-        `/api/customers/people?${params.toString()}`,
-      )
-      const items = Array.isArray(payload.items) ? payload.items : []
-      const byId = new Map<string, PersonAssociationApiRecord>()
-      items.forEach((record) => {
-        if (record && typeof record.id === 'string') byId.set(record.id, record)
-      })
-      return uniqueIds.map((personId) => {
-        const record = byId.get(personId)
-        return record
-          ? normalizePersonAssociationRecord(record, personId)
-          : {
-              id: personId,
-              label: personId,
-              subtitle: null,
-              kind: 'person' as const,
-            }
-      })
-    } catch {
-      return uniqueIds.map((personId) => ({
-        id: personId,
-        label: personId,
-        subtitle: null,
-        kind: 'person' as const,
-      }))
-    }
-  }, [])
-
-  const loadCompanyAssociations = React.useCallback(async (ids: string[]): Promise<DealAssociation[]> => {
-    const uniqueIds = Array.from(new Set(ids.map((value) => value.trim()).filter(Boolean)))
-    if (!uniqueIds.length) return []
-    try {
-      const params = new URLSearchParams({
-        ids: uniqueIds.join(','),
-        pageSize: String(Math.max(uniqueIds.length, 1)),
-      })
-      const payload = await readApiResultOrThrow<{ items?: CompanyAssociationApiRecord[] }>(
-        `/api/customers/companies?${params.toString()}`,
-      )
-      const items = Array.isArray(payload.items) ? payload.items : []
-      const byId = new Map<string, CompanyAssociationApiRecord>()
-      items.forEach((record) => {
-        if (record && typeof record.id === 'string') byId.set(record.id, record)
-      })
-      return uniqueIds.map((companyId) => {
-        const record = byId.get(companyId)
-        return record
-          ? normalizeCompanyAssociationRecord(record, companyId)
-          : {
-              id: companyId,
-              label: companyId,
-              subtitle: null,
-              kind: 'company' as const,
-            }
-      })
-    } catch {
-      return uniqueIds.map((companyId) => ({
-        id: companyId,
-        label: companyId,
-        subtitle: null,
-        kind: 'company' as const,
-      }))
-    }
-  }, [])
 
   const loadLinkedPeoplePage = React.useCallback(
     async (page: number, query: string): Promise<LinkedPageResult> => {
@@ -263,21 +128,14 @@ export function useDealAssociations({
       setPeopleSaving(true)
       try {
         await runMutationWithContext(
-          () => updateCrud('customers/deals', { id: currentDealId, personIds: nextIds }),
+          () => withScopedApiRequestHeaders(
+            buildOptimisticLockHeader(data?.deal.updatedAt),
+            () => updateCrud('customers/deals', { id: currentDealId, personIds: nextIds }),
+          ),
           { id: currentDealId, personIds: nextIds, operation: 'updateDealPeople' },
         )
-        const nextPeople = await loadPeopleAssociations(nextIds.slice(0, 3))
-        setData((prev) =>
-          prev
-            ? {
-                ...prev,
-                people: nextPeople,
-                linkedPersonIds: nextIds,
-                counts: { ...prev.counts, people: nextIds.length },
-              }
-            : prev,
-        )
-      } catch {
+        await onRefresh()
+      } catch (error) {
         setPeopleEditorIds(previousIds)
         setData((prev) =>
           prev
@@ -289,12 +147,16 @@ export function useDealAssociations({
               }
             : prev,
         )
-        flash(t('customers.deals.detail.peopleUpdateError', 'Failed to update linked people.'), 'error')
+        // runMutationWithContext already surfaces the conflict bar on a 409; only
+        // fall back to the generic flash when this is not a record conflict.
+        if (!surfaceRecordConflict(error, t, { onRefresh })) {
+          flash(t('customers.deals.detail.peopleUpdateError', 'Failed to update linked people.'), 'error')
+        }
       } finally {
         setPeopleSaving(false)
       }
     },
-    [currentDealId, data?.people, loadPeopleAssociations, peopleEditorIds, runMutationWithContext, setData, t],
+    [currentDealId, data?.deal.updatedAt, data?.people, onRefresh, peopleEditorIds, runMutationWithContext, setData, t],
   )
 
   const handleCompaniesAssociationsChange = React.useCallback(
@@ -307,21 +169,14 @@ export function useDealAssociations({
       setCompaniesSaving(true)
       try {
         await runMutationWithContext(
-          () => updateCrud('customers/deals', { id: currentDealId, companyIds: nextIds }),
+          () => withScopedApiRequestHeaders(
+            buildOptimisticLockHeader(data?.deal.updatedAt),
+            () => updateCrud('customers/deals', { id: currentDealId, companyIds: nextIds }),
+          ),
           { id: currentDealId, companyIds: nextIds, operation: 'updateDealCompanies' },
         )
-        const nextCompanies = await loadCompanyAssociations(nextIds.slice(0, 3))
-        setData((prev) =>
-          prev
-            ? {
-                ...prev,
-                companies: nextCompanies,
-                linkedCompanyIds: nextIds,
-                counts: { ...prev.counts, companies: nextIds.length },
-              }
-            : prev,
-        )
-      } catch {
+        await onRefresh()
+      } catch (error) {
         setCompaniesEditorIds(previousIds)
         setData((prev) =>
           prev
@@ -333,7 +188,11 @@ export function useDealAssociations({
               }
             : prev,
         )
-        flash(t('customers.deals.detail.companiesUpdateError', 'Failed to update linked companies.'), 'error')
+        // runMutationWithContext already surfaces the conflict bar on a 409; only
+        // fall back to the generic flash when this is not a record conflict.
+        if (!surfaceRecordConflict(error, t, { onRefresh })) {
+          flash(t('customers.deals.detail.companiesUpdateError', 'Failed to update linked companies.'), 'error')
+        }
       } finally {
         setCompaniesSaving(false)
       }
@@ -342,7 +201,8 @@ export function useDealAssociations({
       companiesEditorIds,
       currentDealId,
       data?.companies,
-      loadCompanyAssociations,
+      data?.deal.updatedAt,
+      onRefresh,
       runMutationWithContext,
       setData,
       t,

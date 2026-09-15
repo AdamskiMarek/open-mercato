@@ -3,12 +3,12 @@ import { z } from 'zod'
 import type { OpenApiRouteDoc } from '@open-mercato/shared/lib/openapi'
 import { CrudHttpError, isCrudHttpError } from '@open-mercato/shared/lib/crud/errors'
 import { parseBooleanToken } from '@open-mercato/shared/lib/boolean'
+import { isUnrestrictedOrganizationScope } from '@open-mercato/shared/lib/auth/organizationAccess'
 import { resolveTranslations } from '@open-mercato/shared/lib/i18n/server'
 import type { QueryEngine } from '@open-mercato/shared/lib/query/types'
 import { createCustomersCrudOpenApi, createPagedListResponseSchema } from '../../openapi'
 import { resolveCustomerInteractionFeatureFlags } from '../../../lib/interactionFeatureFlags'
 import { resolveCustomersRequestContext } from '../../../lib/interactionRequestContext'
-import { CUSTOMER_INTERACTION_TODO_ADAPTER_SOURCE } from '../../../lib/interactionCompatibility'
 import {
   filterTodoRows,
   listCanonicalTodoRows,
@@ -17,6 +17,9 @@ import {
   paginateTodoRows,
   sortTodoRows,
 } from '../../../lib/todoCompatibility'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+
+const logger = createLogger('customers')
 
 const querySchema = z.object({
   page: z.coerce.number().min(1).default(1),
@@ -30,19 +33,38 @@ export const metadata = {
   GET: { requireAuth: true, requireFeatures: ['customers.interactions.view'] },
 }
 
-// Per-source fetch cap used when the legacy adapter must merge legacy and
-// canonical-bridge rows without DB-side union. Bounds memory on tenants with
-// large task history.
+// Per-source fetch cap used when compatibility mode must merge legacy todo
+// links and canonical task rows without DB-side union. Bounds memory on
+// tenants with large task history.
 const MERGED_TASK_FETCH_CAP = 2000
 
 export async function GET(request: Request): Promise<Response> {
   const { translate } = await resolveTranslations()
   try {
-    const { auth, em, organizationIds, container, selectedOrganizationId } =
+    const { auth, em, organizationIds, container, selectedOrganizationId, scope } =
       await resolveCustomersRequestContext(request)
     const query = querySchema.parse(Object.fromEntries(new URL(request.url).searchParams))
     const flags = await resolveCustomerInteractionFeatureFlags(container, auth.tenantId)
     const exportAll = parseBooleanToken(query.all) === true
+    const isUnrestricted = isUnrestrictedOrganizationScope({
+      isSuperAdmin: auth.isSuperAdmin === true,
+      allowedOrganizationIds: scope?.allowedIds,
+    })
+    if (!isUnrestricted && (!organizationIds || organizationIds.length === 0)) {
+      logger.warn('customers.interactions.tasks.list collapsed organization scope', {
+        tenantId: auth.tenantId,
+        organizationIds,
+        selectedId: scope?.selectedId ?? null,
+        allowedIdsCount: scope?.allowedIds?.length ?? null,
+      })
+      return NextResponse.json({
+        items: [],
+        total: 0,
+        page: exportAll ? 1 : query.page,
+        pageSize: exportAll ? 0 : query.pageSize,
+        totalPages: 1,
+      })
+    }
     const search = normalizeTodoSearch(query.search)
     const queryEngine = container.resolve('queryEngine') as QueryEngine
 
@@ -57,6 +79,7 @@ export async function GET(request: Request): Promise<Response> {
           entityId: query.entityId,
           pagination: exportAll ? null : { page: query.page, pageSize: query.pageSize },
           searchText: search,
+          isUnrestricted,
         },
       )
       const total = canonical.total
@@ -78,6 +101,7 @@ export async function GET(request: Request): Promise<Response> {
     const [legacyRows, canonicalRows] = await Promise.all([
       listLegacyTodoRows(em, queryEngine, auth.tenantId, organizationIds, query.entityId, {
         limit: legacyWindow,
+        isUnrestricted,
       }),
       listCanonicalTodoRows(
         em,
@@ -88,8 +112,8 @@ export async function GET(request: Request): Promise<Response> {
         {
           entityId: query.entityId,
           includeDeleted: true,
-          source: CUSTOMER_INTERACTION_TODO_ADAPTER_SOURCE,
           limit: legacyWindow,
+          isUnrestricted,
         },
       ),
     ])
@@ -114,7 +138,7 @@ export async function GET(request: Request): Promise<Response> {
     if (err instanceof z.ZodError) {
       return NextResponse.json({ error: translate('customers.errors.validationFailed', 'Validation failed'), details: err.issues }, { status: 400 })
     }
-    console.error('customers.interactions.tasks.get failed', err)
+    logger.error('customers.interactions.tasks.get failed', { err })
     return NextResponse.json({ error: translate('customers.errors.internalError', 'Internal server error') }, { status: 500 })
   }
 }

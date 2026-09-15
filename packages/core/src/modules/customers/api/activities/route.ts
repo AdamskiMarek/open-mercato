@@ -30,6 +30,10 @@ import { resolveCustomersRequestContext } from '../../lib/interactionRequestCont
 import { hydrateCanonicalInteractions } from '../../lib/interactionReadModel'
 import { resolveCanonicalActivityTargetId } from '../../lib/legacyActivityBridge'
 import { buildEmailVisibilityMikroFilter } from '../../lib/visibilityFilter'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+import { getCommandInterceptorHttpRejection } from '@open-mercato/shared/lib/commands/errors'
+
+const logger = createLogger('customers')
 
 const listSchema = z.object({
   page: z.coerce.number().min(1).default(1),
@@ -74,6 +78,12 @@ const ADAPTER_HEADERS = {
 // canonical bridge) read path. Keeps memory bounded on tenants with large
 // activity history; deep-pagination beyond this window is not supported here —
 // use /api/customers/interactions instead.
+//
+// Audited for the #3386 rollout (P2): this merged path sorts only on
+// non-encrypted system timestamps (createdAt/occurredAt, see
+// resolveActivitySortValue), so the #3278 two-phase *encrypted*-sort migration
+// is intentionally not applied here. Merge-order correctness across the page
+// boundary is covered by __tests__/merged-pagination.test.ts.
 const MERGED_ACTIVITY_FETCH_CAP = 2000
 
 type ActivityItem = {
@@ -275,7 +285,22 @@ async function listCanonicalActivities(
   organizationIds: string[] | null,
   query: z.infer<typeof listSchema>,
   options?: { includeDeleted?: boolean; source?: string | string[] | null; paginate?: boolean },
+  isUnrestricted?: boolean,
 ): Promise<CanonicalActivityListResult> {
+  if (organizationIds && organizationIds.length === 0 && !isUnrestricted) {
+    return {
+      items: [],
+      total: 0,
+      bridgeIds: new Set(),
+    }
+  }
+  if (organizationIds === null && !isUnrestricted) {
+    return {
+      items: [],
+      total: 0,
+      bridgeIds: new Set(),
+    }
+  }
   const where: Record<string, unknown> = {
     tenantId,
     interactionType: { $ne: 'task' },
@@ -352,7 +377,14 @@ async function listLegacyActivities(
   query: z.infer<typeof listSchema>,
   options?: { paginate?: boolean },
   selectedOrganizationId?: string | null,
+  isUnrestricted?: boolean,
 ): Promise<{ items: ActivityItem[]; total: number }> {
+  if (organizationIds && organizationIds.length === 0 && !isUnrestricted) {
+    return { items: [], total: 0 }
+  }
+  if (organizationIds === null && !isUnrestricted) {
+    return { items: [], total: 0 }
+  }
   const where: Record<string, unknown> = { tenantId }
   if (organizationIds && organizationIds.length > 0) {
     where.organizationId = { $in: organizationIds }
@@ -401,10 +433,29 @@ export async function GET(request: Request): Promise<Response> {
       organizationIds,
       container,
       selectedOrganizationId,
+      scope,
     } = await resolveCustomersRequestContext(request)
     const flags = await resolveCustomerInteractionFeatureFlags(container, auth.tenantId)
     if (!flags.legacyAdapters) {
       return await legacyAdaptersDisabledResponse()
+    }
+
+    const isUnrestricted = auth.isSuperAdmin === true || scope?.allowedIds === null
+    if (!isUnrestricted && (!organizationIds || organizationIds.length === 0)) {
+      logger.warn('activities.list collapsed organization scope — returning empty page', {
+        tenantId: auth.tenantId,
+        organizationIds,
+        scope,
+      })
+      return withAdapterHeaders(
+        NextResponse.json({
+          items: [],
+          total: 0,
+          page: query.page,
+          pageSize: query.pageSize,
+          totalPages: 1,
+        }),
+      )
     }
 
     const sortDir = query.sortDir ?? 'desc'
@@ -418,6 +469,8 @@ export async function GET(request: Request): Promise<Response> {
           auth.tenantId,
           organizationIds,
           query,
+          undefined,
+          isUnrestricted,
         )
       : await (async () => {
         const windowSize = Math.min(
@@ -433,6 +486,7 @@ export async function GET(request: Request): Promise<Response> {
             windowedQuery,
             { paginate: true },
             selectedOrganizationId,
+            isUnrestricted,
           ),
           listCanonicalActivities(
             em,
@@ -447,6 +501,7 @@ export async function GET(request: Request): Promise<Response> {
               paginate: true,
               source: CUSTOMER_INTERACTION_ACTIVITY_ADAPTER_SOURCE,
             },
+            isUnrestricted,
           ),
         ])
         const merged = sortActivityItems(
@@ -482,7 +537,7 @@ export async function GET(request: Request): Promise<Response> {
         NextResponse.json({ error: 'Validation failed', details: err.issues }, { status: 400 }),
       )
     }
-    console.error('customers.activities.get failed', err)
+    logger.error('customers.activities.get failed', { err })
     return withAdapterHeaders(
       NextResponse.json({ error: 'Internal server error' }, { status: 500 }),
     )
@@ -566,12 +621,16 @@ export async function POST(request: Request): Promise<Response> {
     if (isCrudHttpError(err)) {
       return withAdapterHeaders(NextResponse.json(err.body, { status: err.status }))
     }
+    const interceptorRejection = getCommandInterceptorHttpRejection(err)
+    if (interceptorRejection) {
+      return withAdapterHeaders(NextResponse.json(interceptorRejection.body, { status: interceptorRejection.status }))
+    }
     if (err instanceof z.ZodError) {
       return withAdapterHeaders(
         NextResponse.json({ error: 'Validation failed', details: err.issues }, { status: 400 }),
       )
     }
-    console.error('customers.activities.post failed', err)
+    logger.error('customers.activities.post failed', { err })
     return withAdapterHeaders(
       NextResponse.json({ error: 'Internal server error' }, { status: 500 }),
     )
@@ -649,12 +708,16 @@ export async function PUT(request: Request): Promise<Response> {
     if (isCrudHttpError(err)) {
       return withAdapterHeaders(NextResponse.json(err.body, { status: err.status }))
     }
+    const interceptorRejection = getCommandInterceptorHttpRejection(err)
+    if (interceptorRejection) {
+      return withAdapterHeaders(NextResponse.json(interceptorRejection.body, { status: interceptorRejection.status }))
+    }
     if (err instanceof z.ZodError) {
       return withAdapterHeaders(
         NextResponse.json({ error: 'Validation failed', details: err.issues }, { status: 400 }),
       )
     }
-    console.error('customers.activities.put failed', err)
+    logger.error('customers.activities.put failed', { err })
     return withAdapterHeaders(
       NextResponse.json({ error: 'Internal server error' }, { status: 500 }),
     )
@@ -717,12 +780,16 @@ export async function DELETE(request: Request): Promise<Response> {
     if (isCrudHttpError(err)) {
       return withAdapterHeaders(NextResponse.json(err.body, { status: err.status }))
     }
+    const interceptorRejection = getCommandInterceptorHttpRejection(err)
+    if (interceptorRejection) {
+      return withAdapterHeaders(NextResponse.json(interceptorRejection.body, { status: interceptorRejection.status }))
+    }
     if (err instanceof z.ZodError) {
       return withAdapterHeaders(
         NextResponse.json({ error: 'Validation failed', details: err.issues }, { status: 400 }),
       )
     }
-    console.error('customers.activities.delete failed', err)
+    logger.error('customers.activities.delete failed', { err })
     return withAdapterHeaders(
       NextResponse.json({ error: 'Internal server error' }, { status: 500 }),
     )

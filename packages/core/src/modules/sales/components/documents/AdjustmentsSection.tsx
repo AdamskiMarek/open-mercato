@@ -3,7 +3,7 @@
 "use client"
 
 import * as React from 'react'
-import type { ColumnDef } from '@tanstack/react-table'
+import type { LegacyColumnDef as ColumnDef } from '@tanstack/react-table/legacy'
 import { Badge } from '@open-mercato/ui/primitives/badge'
 import { DataTable } from '@open-mercato/ui/backend/DataTable'
 import { ErrorMessage, LoadingMessage, TabEmptyState } from '@open-mercato/ui/backend/detail'
@@ -23,9 +23,12 @@ import type { SectionAction } from '@open-mercato/core/modules/customers/compone
 import type { SalesAdjustmentKind } from '../../data/entities'
 import { PriceWithCurrency } from '../PriceWithCurrency'
 import { AdjustmentDialog, type AdjustmentRowData, type AdjustmentSubmitPayload } from './AdjustmentDialog'
-import { useT } from '@open-mercato/shared/lib/i18n/context'
+import { useT, useLocale } from '@open-mercato/shared/lib/i18n/context'
 import { useOrganizationScopeDetail } from '@open-mercato/shared/lib/frontend/useOrganizationScope'
 import { extractCustomFieldValues } from './customFieldHelpers'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+
+const logger = createLogger('sales')
 
 type AdjustmentRow = AdjustmentRowData
 
@@ -57,9 +60,9 @@ function normalizeNumber(value: unknown, fallback = 0): number {
   return fallback
 }
 
-function formatPercent(value: number | null | undefined): string {
+export function formatPercent(value: number | null | undefined, locale?: string): string {
   if (value === null || value === undefined) return '—'
-  const formatter = new Intl.NumberFormat(undefined, { style: 'percent', maximumFractionDigits: 2 })
+  const formatter = new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 2 })
   return formatter.format(value / 100)
 }
 
@@ -74,6 +77,7 @@ export function SalesDocumentAdjustmentsSection({
   onRowsChange,
 }: SalesDocumentAdjustmentsSectionProps) {
   const t = useT()
+  const locale = useLocale()
   const { organizationId, tenantId } = useOrganizationScopeDetail()
   const resolvedOrganizationId = orgFromProps ?? organizationId ?? null
   const resolvedTenantId = tenantFromProps ?? tenantId ?? null
@@ -153,7 +157,7 @@ export function SalesDocumentAdjustmentsSection({
       kindLoadingRef.current = false
       return options
     } catch (err) {
-      console.error('sales.adjustment-kinds.fetch', err)
+      logger.error('sales.adjustment-kinds.fetch', { err })
       kindLoadingRef.current = false
       setKindOptions(fallbackKindOptions)
       return fallbackKindOptions
@@ -240,7 +244,7 @@ export function SalesDocumentAdjustmentsSection({
       setRows(ordered)
       if (onRowsChange) onRowsChange(ordered)
     } catch (err) {
-      console.error('sales.document.adjustments.load', err)
+      logger.error('sales.document.adjustments.load', { err })
       setError(t('sales.documents.adjustments.errorLoad', 'Failed to load adjustments.'))
     } finally {
       setLoading(false)
@@ -389,7 +393,7 @@ export function SalesDocumentAdjustmentsSection({
         }
       } catch (err) {
         if (handleSectionMutationError(err, t, () => void loadAdjustments())) return
-        console.error('sales.document.adjustments.delete', err)
+        logger.error('sales.document.adjustments.delete', { err })
         flash(t('sales.documents.adjustments.errorDelete', 'Failed to delete adjustment.'), 'error')
       }
     },
@@ -430,7 +434,7 @@ export function SalesDocumentAdjustmentsSection({
       {
         id: 'rate',
         header: t('sales.documents.adjustments.rate', 'Rate'),
-        cell: ({ row }) => <span className="font-mono text-sm text-muted-foreground">{formatPercent(row.original.rate)}</span>,
+        cell: ({ row }) => <span className="font-mono text-sm text-muted-foreground">{formatPercent(row.original.rate, locale)}</span>,
       },
       {
         id: 'position',
@@ -438,7 +442,7 @@ export function SalesDocumentAdjustmentsSection({
         cell: ({ row }) => <span className="text-sm text-muted-foreground">{row.original.position}</span>,
       },
     ],
-    [currencyCode, resolveKindLabel, t]
+    [currencyCode, locale, resolveKindLabel, t]
   )
 
   const showLoadingState = loading && rows.length === 0

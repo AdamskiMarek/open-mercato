@@ -7,8 +7,9 @@ import { z } from 'zod'
 import type { EntityManager } from '@mikro-orm/postgresql'
 import type { OpenApiRouteDoc } from '@open-mercato/shared/lib/openapi'
 import type { CommandBus } from '@open-mercato/shared/lib/commands'
-import { CrudHttpError, isCrudHttpError } from '@open-mercato/shared/lib/crud/errors'
+import { isCrudHttpError, notFound } from '@open-mercato/shared/lib/crud/errors'
 import { parseBooleanToken } from '@open-mercato/shared/lib/boolean'
+import { isUnrestrictedOrganizationScope } from '@open-mercato/shared/lib/auth/organizationAccess'
 import { resolveTranslations } from '@open-mercato/shared/lib/i18n/server'
 import {
   runCrudMutationGuardAfterSuccess,
@@ -35,6 +36,10 @@ import {
   sortTodoRows,
   resolveLegacyTodoDetails,
 } from '../../lib/todoCompatibility'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+import { getCommandInterceptorHttpRejection } from '@open-mercato/shared/lib/commands/errors'
+
+const logger = createLogger('customers')
 
 const querySchema = z.object({
   page: z.coerce.number().min(1).default(1),
@@ -215,7 +220,7 @@ async function resolveCanonicalTodoTargetId(
 
   const legacyLink = await findLegacyTodoLink(em, target, tenantId)
   if (!legacyLink) {
-    if (!target.todoId) throw new CrudHttpError(404, { error: 'Todo not found' })
+    if (!target.todoId) throw notFound('Todo not found')
     return target.todoId
   }
 
@@ -230,15 +235,36 @@ async function resolveCanonicalTodoTargetId(
 
 export async function GET(request: Request): Promise<Response> {
   try {
-    const { auth, em, organizationIds, container, selectedOrganizationId } =
+    const { auth, em, organizationIds, container, selectedOrganizationId, scope } =
       await resolveCustomersRequestContext(request)
     const query = querySchema.parse(Object.fromEntries(new URL(request.url).searchParams))
     const flags = await resolveCustomerInteractionFeatureFlags(container, auth.tenantId)
     if (!flags.legacyAdapters) {
       return await legacyAdaptersDisabledResponse()
     }
-    const queryEngine = container.resolve('queryEngine') as QueryEngine
     const exportAll = parseBooleanToken(query.all) === true
+    const isUnrestricted = isUnrestrictedOrganizationScope({
+      isSuperAdmin: auth.isSuperAdmin === true,
+      allowedOrganizationIds: scope?.allowedIds,
+    })
+    if (!isUnrestricted && (!organizationIds || organizationIds.length === 0)) {
+      logger.warn('customers.todos.list collapsed organization scope', {
+        tenantId: auth.tenantId,
+        organizationIds,
+        selectedId: scope?.selectedId ?? null,
+        allowedIdsCount: scope?.allowedIds?.length ?? null,
+      })
+      return withAdapterHeaders(
+        NextResponse.json({
+          items: [],
+          total: 0,
+          page: exportAll ? 1 : query.page,
+          pageSize: exportAll ? 0 : query.pageSize,
+          totalPages: 1,
+        }),
+      )
+    }
+    const queryEngine = container.resolve('queryEngine') as QueryEngine
     const search = normalizeTodoSearch(query.search)
 
     if (flags.unified) {
@@ -252,6 +278,7 @@ export async function GET(request: Request): Promise<Response> {
           entityId: query.entityId,
           pagination: exportAll ? null : { page: query.page, pageSize: query.pageSize },
           searchText: search,
+          isUnrestricted,
         },
       )
       const total = canonical.total
@@ -272,6 +299,7 @@ export async function GET(request: Request): Promise<Response> {
     const [legacyRows, canonicalRows] = await Promise.all([
       listLegacyTodoRows(em, queryEngine, auth.tenantId, organizationIds, query.entityId, {
         limit: legacyWindow,
+        isUnrestricted,
       }),
       listCanonicalTodoRows(
         em,
@@ -284,6 +312,7 @@ export async function GET(request: Request): Promise<Response> {
           includeDeleted: true,
           source: CUSTOMER_INTERACTION_TODO_ADAPTER_SOURCE,
           limit: legacyWindow,
+          isUnrestricted,
         },
       ),
     ])
@@ -312,7 +341,7 @@ export async function GET(request: Request): Promise<Response> {
         NextResponse.json({ error: 'Validation failed', details: err.issues }, { status: 400 }),
       )
     }
-    console.error('customers.todos.get failed', err)
+    logger.error('customers.todos.get failed', { err })
     return withAdapterHeaders(
       NextResponse.json({ error: 'Internal server error' }, { status: 500 }),
     )
@@ -411,12 +440,16 @@ export async function POST(request: Request): Promise<Response> {
     if (isCrudHttpError(err)) {
       return withAdapterHeaders(NextResponse.json(err.body, { status: err.status }))
     }
+    const interceptorRejection = getCommandInterceptorHttpRejection(err)
+    if (interceptorRejection) {
+      return withAdapterHeaders(NextResponse.json(interceptorRejection.body, { status: interceptorRejection.status }))
+    }
     if (err instanceof z.ZodError) {
       return withAdapterHeaders(
         NextResponse.json({ error: 'Validation failed', details: err.issues }, { status: 400 }),
       )
     }
-    console.error('customers.todos.post failed', err)
+    logger.error('customers.todos.post failed', { err })
     return withAdapterHeaders(
       NextResponse.json({ error: 'Internal server error' }, { status: 500 }),
     )
@@ -508,12 +541,16 @@ export async function PUT(request: Request): Promise<Response> {
     if (isCrudHttpError(err)) {
       return withAdapterHeaders(NextResponse.json(err.body, { status: err.status }))
     }
+    const interceptorRejection = getCommandInterceptorHttpRejection(err)
+    if (interceptorRejection) {
+      return withAdapterHeaders(NextResponse.json(interceptorRejection.body, { status: interceptorRejection.status }))
+    }
     if (err instanceof z.ZodError) {
       return withAdapterHeaders(
         NextResponse.json({ error: 'Validation failed', details: err.issues }, { status: 400 }),
       )
     }
-    console.error('customers.todos.put failed', err)
+    logger.error('customers.todos.put failed', { err })
     return withAdapterHeaders(
       NextResponse.json({ error: 'Internal server error' }, { status: 500 }),
     )
@@ -588,12 +625,16 @@ export async function DELETE(request: Request): Promise<Response> {
     if (isCrudHttpError(err)) {
       return withAdapterHeaders(NextResponse.json(err.body, { status: err.status }))
     }
+    const interceptorRejection = getCommandInterceptorHttpRejection(err)
+    if (interceptorRejection) {
+      return withAdapterHeaders(NextResponse.json(interceptorRejection.body, { status: interceptorRejection.status }))
+    }
     if (err instanceof z.ZodError) {
       return withAdapterHeaders(
         NextResponse.json({ error: 'Validation failed', details: err.issues }, { status: 400 }),
       )
     }
-    console.error('customers.todos.delete failed', err)
+    logger.error('customers.todos.delete failed', { err })
     return withAdapterHeaders(
       NextResponse.json({ error: 'Internal server error' }, { status: 500 }),
     )

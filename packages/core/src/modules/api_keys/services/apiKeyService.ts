@@ -4,9 +4,13 @@ import { hash, compare } from 'bcryptjs'
 import type { RbacService } from '@open-mercato/core/modules/auth/services/rbacService'
 import { Role } from '@open-mercato/core/modules/auth/data/entities'
 import { ApiKey } from '../data/entities'
-import { createKmsService } from '@open-mercato/shared/lib/encryption/kms'
-import { encryptWithAesGcm, decryptWithAesGcm } from '@open-mercato/shared/lib/encryption/aes'
+import { createKmsService, resolveEncryptionMode } from '@open-mercato/shared/lib/encryption/kms'
+import { encryptWithAesGcm, decryptWithAesGcm, looksLikeEncryptedPayload } from '@open-mercato/shared/lib/encryption/aes'
 import { getSharedApiKeyAuthCache } from '@open-mercato/shared/lib/auth/apiKeyAuthCache'
+import { findOneWithDecryption } from '@open-mercato/shared/lib/encryption/find'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+
+const logger = createLogger('api_keys').child({ component: 'api-key-service' })
 
 const BCRYPT_COST = 10
 
@@ -15,8 +19,16 @@ const BCRYPT_COST = 10
 // =============================================================================
 
 /**
- * Encrypt an API key secret for storage.
- * Uses tenant-specific DEK if available, otherwise returns null.
+ * Seal an ephemeral session API key secret for storage in `session_secret_encrypted`.
+ *
+ * Returns null when the secret cannot be stored at all, which costs the caller MCP session-token
+ * auth (the secret is unrecoverable and `findSessionApiKeyWithSecret` gives up).
+ *
+ * Under `TENANT_DATA_ENCRYPTION=no` the secret is stored as-is. That is the same bargain the rest
+ * of the system already strikes in that mode -- emails, integration credentials and the search
+ * index all sit in plaintext -- and it is what keeps the AI chat working when an operator opts
+ * out. A DEK that is merely unreachable is a different situation and still yields null: writing a
+ * secret in the clear because Vault happens to be down is not a downgrade anyone asked for.
  */
 async function encryptSessionSecret(
   secret: string,
@@ -25,7 +37,16 @@ async function encryptSessionSecret(
   if (!tenantId) return null
 
   const kms = createKmsService()
-  if (!kms.isHealthy()) return null
+  const mode = resolveEncryptionMode(kms)
+  if (mode === 'disabled') return secret
+  if (mode === 'unavailable') {
+    logger.warn(
+      'Tenant data encryption is enabled but no DEK is reachable; session secret not stored. '
+        + 'MCP session-token auth will fail until the KMS recovers.',
+      { tenantId },
+    )
+    return null
+  }
 
   const dek = await kms.getTenantDek(tenantId)
   if (!dek) {
@@ -41,22 +62,37 @@ async function encryptSessionSecret(
 }
 
 /**
- * Decrypt an API key secret from storage.
- * Returns null if decryption fails or no DEK available.
+ * Recover a session API key secret written by {@link encryptSessionSecret}.
+ * Returns null if it cannot be recovered.
  */
 async function decryptSessionSecret(
-  encrypted: string,
+  stored: string,
   tenantId: string | null
 ): Promise<string | null> {
-  if (!tenantId || !encrypted) return null
+  if (!tenantId || !stored) return null
 
   const kms = createKmsService()
-  if (!kms.isHealthy()) return null
+  const mode = resolveEncryptionMode(kms)
+  if (mode === 'disabled') {
+    // Written in the clear by the branch above -- unless it predates the toggle being flipped, in
+    // which case it is a sealed envelope no key can open and null is the honest answer.
+    return looksLikeEncryptedPayload(stored) ? null : stored
+  }
+  if (mode === 'unavailable') {
+    logger.warn('Tenant data encryption is enabled but no DEK is reachable; cannot recover session secret', { tenantId })
+    return null
+  }
+
+  // Mirror of the `disabled` branch: a secret written in the clear while the toggle was off is
+  // still recoverable after it is switched back on. Without this `decryptWithAesGcm` reads the
+  // plaintext as a malformed envelope and returns null, so the flip would silently break every
+  // live session rather than only the ones sealed under the old setting.
+  if (!looksLikeEncryptedPayload(stored)) return stored
 
   const dek = await kms.getTenantDek(tenantId)
   if (!dek) return null
 
-  return decryptWithAesGcm(encrypted, dek.key)
+  return decryptWithAesGcm(stored, dek.key)
 }
 
 export type CreateApiKeyInput = {
@@ -135,7 +171,10 @@ export async function findApiKeyBySecret(em: EntityManager, secret: string): Pro
   if (!secret) return null
   // Extract prefix from the secret for fast candidate lookup
   const prefix = secret.slice(0, 12)
-  // Find candidates by prefix (fast index lookup)
+  // Find candidates by prefix (fast index lookup). Invariant: the unique keyPrefix
+  // constraint plus the deletedAt: null filter keep this to at most one live row, so
+  // the bcrypt loop below stays bounded. Do not widen the prefix space or relax either
+  // filter without re-evaluating that cost (see #3812).
   const candidates = await em.find(ApiKey, { keyPrefix: prefix, deletedAt: null })
   // Verify each candidate with bcrypt until we find a match
   for (const candidate of candidates) {
@@ -231,6 +270,68 @@ export async function findApiKeyBySessionToken(
 }
 
 /**
+ * Bind an OpenCode session id to the api_key row that owns this chat session.
+ *
+ * Called by the chat dispatcher the first time we see the `done` event for a
+ * freshly minted session token. From that point on,
+ * `findApiKeyByOpencodeSessionId(em, opencodeSessionId)` returns the same row,
+ * which the ai-assistant runtime uses to assert ownership on every resume.
+ *
+ * Throws when the session token has been deleted/expired, and when the api_key
+ * row is already bound to a DIFFERENT OpenCode session (defensive: this should
+ * never happen in practice because each chat mints a new session token, but we
+ * fail closed instead of silently overwriting).
+ *
+ * Idempotent when the row is already bound to the same OpenCode session id.
+ */
+export async function bindOpencodeSessionToApiKey(
+  em: EntityManager,
+  sessionToken: string,
+  opencodeSessionId: string
+): Promise<void> {
+  if (!sessionToken) throw new Error('Session token not found or expired')
+  if (!opencodeSessionId) throw new Error('OpenCode session id is required')
+
+  const row = await findApiKeyBySessionToken(em, sessionToken)
+  if (!row) throw new Error('Session token not found or expired')
+
+  if (row.opencodeSessionId === opencodeSessionId) return
+  if (row.opencodeSessionId && row.opencodeSessionId !== opencodeSessionId) {
+    throw new Error('Session token already bound to a different OpenCode session')
+  }
+
+  row.opencodeSessionId = opencodeSessionId
+  await em.persist(row).flush()
+}
+
+/**
+ * Find an api_key row by its bound OpenCode session id.
+ *
+ * Returns null if no active row matches, or if the matched row is expired
+ * (same contract as `findApiKeyBySessionToken`). Uses
+ * `findOneWithDecryption` so encrypted-at-rest fields on the row are decrypted
+ * before the ai-assistant runtime inspects `sessionUserId` / `tenantId` /
+ * `organizationId` for the ownership check.
+ */
+export async function findApiKeyByOpencodeSessionId(
+  em: EntityManager,
+  opencodeSessionId: string
+): Promise<ApiKey | null> {
+  if (!opencodeSessionId) return null
+
+  const record = await findOneWithDecryption(
+    em,
+    ApiKey,
+    { opencodeSessionId, deletedAt: null } as any,
+  )
+
+  if (!record) return null
+  if (record.expiresAt && record.expiresAt.getTime() < Date.now()) return null
+
+  return record
+}
+
+/**
  * Find a session API key with its decrypted secret.
  * Returns null if not found, expired, deleted, or decryption fails.
  * This is used by the MCP server to recover the API key secret for making
@@ -245,14 +346,14 @@ export async function findSessionApiKeyWithSecret(
 
   // If no encrypted secret stored, cannot recover
   if (!record.sessionSecretEncrypted) {
-    console.warn('[ApiKeyService] Session key has no encrypted secret:', sessionToken.slice(0, 12))
+    logger.warn('Session key has no encrypted secret', { apiKeyId: record.id })
     return null
   }
 
   // Decrypt the secret
   const secret = await decryptSessionSecret(record.sessionSecretEncrypted, record.tenantId ?? null)
   if (!secret) {
-    console.warn('[ApiKeyService] Failed to decrypt session secret:', sessionToken.slice(0, 12))
+    logger.warn('Failed to decrypt session secret', { apiKeyId: record.id })
     return null
   }
 
@@ -314,7 +415,7 @@ export async function withOnetimeApiKey<T>(
       await em.persist(record).flush()
       getSharedApiKeyAuthCache().invalidateByKeyId(record.id)
     } catch (error) {
-      console.error('[withOnetimeApiKey] Failed to soft-delete one-time API key:', error)
+      logger.error('Failed to soft-delete one-time API key', { err: error })
     }
   }
 }

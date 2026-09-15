@@ -1,12 +1,24 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useT } from '@open-mercato/shared/lib/i18n/context'
 import { apiFetch } from '@open-mercato/ui/backend/utils/api'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@open-mercato/ui/primitives/dialog'
+import {
+  Drawer,
+  DrawerBody,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
+} from '@open-mercato/ui/primitives/drawer'
 import { Button } from '@open-mercato/ui/primitives/button'
 import { Input } from '@open-mercato/ui/primitives/input'
 import { Badge } from '@open-mercato/ui/primitives/badge'
 import { Plus, Loader2, AlertCircle, Workflow } from 'lucide-react'
+import { createLogger } from '@open-mercato/shared/lib/logger'
+
+const logger = createLogger('workflows')
 
 export interface WorkflowDefinition {
   id: string
@@ -57,6 +69,11 @@ export interface WorkflowSelectorProps {
  * - Exclude already-selected workflows
  * - Loading and error states
  * - Responsive grid layout
+ *
+ * A wide Drawer rather than a modal: this is a searchable record BROWSER, not a
+ * tiny picker — each row carries a version chip, an enabled state and a
+ * description, which a Popover cannot hold and a CommandMenu would flatten
+ * away. Escape cancels; there is no submit, selection IS the primary action.
  */
 export function WorkflowSelector({
   isOpen,
@@ -69,6 +86,7 @@ export function WorkflowSelector({
   emptyMessage,
   searchPlaceholder = 'Search by workflow ID, name, or description...',
 }: WorkflowSelectorProps) {
+  const t = useT()
   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -109,15 +127,15 @@ export function WorkflowSelector({
         } catch {
           // Use default error message
         }
-        console.error('Failed to fetch workflows:', {
+        logger.error('Failed to fetch workflows', {
           url,
           status: response.status,
-          error: errorMessage,
+          message: errorMessage,
         })
         setError(errorMessage)
       }
     } catch (err) {
-      console.error('Failed to fetch workflows:', err)
+      logger.error('Failed to fetch workflows', { err })
       const errorMessage = err instanceof Error ? err.message : 'Network error loading workflows'
       setError(errorMessage)
     } finally {
@@ -153,12 +171,16 @@ export function WorkflowSelector({
   const filteredWorkflows = getFilteredWorkflows()
 
   return (
-    <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-4xl max-h-[85vh] flex flex-col">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
-        </DialogHeader>
+    <Drawer open={isOpen} onOpenChange={(next) => { if (!next) handleClose() }}>
+      <DrawerContent
+        data-testid="workflow-selector-drawer"
+        className="w-full max-w-none sm:w-3/5"
+        closeAriaLabel={t('workflows.selectors.workflow.close', 'Close workflow picker')}
+      >
+        <DrawerHeader>
+          <DrawerTitle>{title}</DrawerTitle>
+          <DrawerDescription>{description}</DrawerDescription>
+        </DrawerHeader>
 
         {/* Search Input */}
         <div className="px-6">
@@ -173,7 +195,7 @@ export function WorkflowSelector({
         </div>
 
         {/* Workflows List */}
-        <div className="flex-1 overflow-y-auto px-6 py-4 min-h-[400px]">
+        <DrawerBody className="py-4">
           {loading ? (
             <div className="flex flex-col items-center justify-center py-12">
               <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
@@ -250,7 +272,7 @@ export function WorkflowSelector({
                         v{workflow.version}
                       </Badge>
                       {workflow.enabled ? (
-                        <Badge variant="default" className="bg-emerald-500 text-xs">
+                        <Badge variant="default" className="bg-status-success-solid text-status-success-solid-foreground text-xs">
                           Enabled
                         </Badge>
                       ) : (
@@ -270,18 +292,18 @@ export function WorkflowSelector({
               </div>
             </>
           )}
-        </div>
+        </DrawerBody>
 
-        <DialogFooter>
+        <DrawerFooter>
           <Button
             type="button"
             variant="outline"
             onClick={handleClose}
           >
-            Cancel
+            {t('common.cancel', 'Cancel')}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </DrawerFooter>
+      </DrawerContent>
+    </Drawer>
   )
 }
