@@ -55,6 +55,7 @@ import { assertLocalSplashRequest, resolveSplashBindHost } from './dev-splash-sh
 import { normalizeSplashDisplayState } from './dev-splash-state.mjs'
 import { DevRuntimeConfigError, resolveDevRuntimeConfig } from './dev-runtime-config.mjs'
 import { createDevRuntimeSupervisor } from './dev-runtime-supervisor.mjs'
+import { selectRuntimeProbeBaseUrl } from './dev-runtime-probe.mjs'
 import { createDevRuntimeGateway } from './dev-runtime-gateway.mjs'
 import { createDevRuntimeActionRunner } from './dev-runtime-actions.mjs'
 import { isMatchingDevRuntimeToken } from './dev-runtime-diagnostics.mjs'
@@ -429,12 +430,12 @@ function resolveExpectedAppBaseUrl() {
   return resolveDevBaseUrl(process.env).url
 }
 
-// The continuous probe always talks to the managed runtime directly, so in
-// gateway mode it must target the internal loopback port rather than the public
-// gateway it is meant to diagnose.
 function resolveRuntimeProbeBaseUrl() {
-  if (gatewayMode && devUpstreamPort) return `http://127.0.0.1:${devUpstreamPort}`
-  return resolveExpectedAppBaseUrl()
+  return selectRuntimeProbeBaseUrl({
+    upstreamPort: gatewayMode ? devUpstreamPort : null,
+    runtimeUrl: readSplashChildState()?.readyUrl,
+    configuredUrl: resolveExpectedAppBaseUrl(),
+  })
 }
 
 function resolveExpectedBackendUrl() {
@@ -2371,6 +2372,18 @@ async function fetchOpencodeMcpStatus() {
 let opencodeKeyRefreshNeeded = false
 let opencodeRestartAttempted = false
 
+// The monorepo keeps its compose files under starters/docker/; a standalone app
+// scaffolded by create-app keeps them at its own root and gates the OpenCode
+// service behind the `agents` profile. Print the command that actually exists
+// for the layout we are running in.
+function opencodeRestartCommand() {
+  const infraCompose = path.join(process.cwd(), 'starters', 'docker', 'compose.infra.yml')
+  if (fs.existsSync(infraCompose)) {
+    return 'docker compose --project-directory . -f starters/docker/compose.infra.yml restart opencode'
+  }
+  return 'docker compose --profile agents restart opencode'
+}
+
 function restartOpencodeContainer(reason) {
   if (opencodeRestartAttempted || shuttingDown) return false
   opencodeRestartAttempted = true
@@ -2382,7 +2395,7 @@ function restartOpencodeContainer(reason) {
   const restart = spawnSync('docker', ['restart', 'mercato-opencode'], { encoding: 'utf8', timeout: 120_000 })
   if (restart.error || restart.status !== 0) {
     console.warn('⚠️ Could not restart the OpenCode container automatically.')
-    console.warn('   ↳ restart it manually: docker compose --project-directory . -f starters/docker/compose.infra.yml restart opencode')
+    console.warn(`   ↳ restart it manually: ${opencodeRestartCommand()}`)
     return false
   }
   return true
@@ -2393,7 +2406,7 @@ async function checkOpencodeMcpWiring() {
   if (status === null || status === 'connected') return
   if (!restartOpencodeContainer('OpenCode is not connected to the MCP server')) {
     console.warn('⚠️ OpenCode is running but not connected to the MCP server (it may hold a stale key).')
-    console.warn('   ↳ restart it with: docker compose --project-directory . -f starters/docker/compose.infra.yml restart opencode')
+    console.warn(`   ↳ restart it with: ${opencodeRestartCommand()}`)
     return
   }
   await sleepUnlessShuttingDown(30_000)
