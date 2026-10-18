@@ -114,6 +114,41 @@ describe('module-facts discovery (T1)', () => {
     }
   })
 
+  it('falls back to @open-mercato/core for a duplicate id that src/modules.ts does not mention', () => {
+    const pkgCore = path.join(tmp, 'fallback-core')
+    writeModule(path.join(pkgCore, 'src', 'modules'), 'payment_gateways', 'index.ts')
+    const pkgShared = path.join(tmp, 'fallback-shared')
+    writeModule(path.join(pkgShared, 'src', 'modules'), 'payment_gateways', 'index.ts')
+
+    const packages = [
+      { name: '@open-mercato/shared', path: pkgShared, modulesPath: path.join(pkgShared, 'src', 'modules') },
+      { name: '@open-mercato/core', path: pkgCore, modulesPath: path.join(pkgCore, 'src', 'modules') },
+    ]
+
+    for (const discoveredPackages of [packages, [...packages].reverse()]) {
+      const sources = discoverPackageModuleSources(makeResolver(discoveredPackages, [{ id: 'customers' }]))
+      expect(sources).toHaveLength(1)
+      expect(sources[0]).toMatchObject({ moduleId: 'payment_gateways', from: '@open-mercato/core' })
+      expect(sources[0].moduleRoot).toBe(path.join(pkgCore, 'src', 'modules', 'payment_gateways'))
+    }
+  })
+
+  it('still fails closed when src/modules.ts selects a provider that does not match', () => {
+    const pkgCore = path.join(tmp, 'mismatch-core')
+    writeModule(path.join(pkgCore, 'src', 'modules'), 'workflows', 'index.ts')
+    const pkgShared = path.join(tmp, 'mismatch-shared')
+    writeModule(path.join(pkgShared, 'src', 'modules'), 'workflows', 'index.ts')
+
+    const packages = [
+      { name: '@open-mercato/core', path: pkgCore, modulesPath: path.join(pkgCore, 'src', 'modules') },
+      { name: '@open-mercato/shared', path: pkgShared, modulesPath: path.join(pkgShared, 'src', 'modules') },
+    ]
+
+    expect(() => discoverPackageModuleSources(makeResolver(packages, [{ id: 'workflows', from: '@app' }]))).toThrow(
+      'src/modules.ts selects @app',
+    )
+  })
+
   it('explains that an omitted provider implicitly selects core', () => {
     const pkgA = path.join(tmp, 'implicit-a')
     writeModule(path.join(pkgA, 'src', 'modules'), 'shared', 'index.ts')
