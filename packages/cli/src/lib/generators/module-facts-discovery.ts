@@ -29,6 +29,8 @@ export function hasReadableModuleSource(moduleRoot: string): boolean {
   return false
 }
 
+const DEFAULT_MODULE_PROVIDER = '@open-mercato/core'
+
 function resolveDuplicateModuleIds(
   sources: ModuleFactSource[],
   resolver: PackageResolver,
@@ -47,7 +49,7 @@ function resolveDuplicateModuleIds(
   const implicitCoreSelections = new Set<string>()
   for (const entry of resolver.loadEnabledModules()) {
     const providers = selectedProviders.get(entry.id) ?? new Set<string>()
-    providers.add(entry.from ?? '@open-mercato/core')
+    providers.add(entry.from ?? DEFAULT_MODULE_PROVIDER)
     selectedProviders.set(entry.id, providers)
     if (entry.from === undefined) implicitCoreSelections.add(entry.id)
   }
@@ -58,8 +60,20 @@ function resolveDuplicateModuleIds(
       .sort((left, right) => left.localeCompare(right))
     const configuredProviders = [...(selectedProviders.get(moduleId) ?? [])]
       .sort((left, right) => left.localeCompare(right))
-    const selected = configuredProviders.length === 1
-      ? matches.filter((source) => source.from === configuredProviders[0])
+    // Fork-local (AdamskiMarek/open-mercato, develop_OM_CRM): this discovery feeds the
+    // build-time agentic fact sheets for *every* package module, not only the enabled ones.
+    // When the app's src/modules.ts does not mention a duplicated id at all (e.g. a trimmed
+    // `crm` preset that intentionally leaves payment_gateways / phone_calls / workflows
+    // disabled), fall back to @open-mercato/core if it is one of the providers — the same
+    // provider an entry without `from` selects. Ambiguous duplicates without a core provider,
+    // and explicit selections that match no provider, still fail closed.
+    const fallbackProvider = configuredProviders.length === 0
+      && providers.includes(DEFAULT_MODULE_PROVIDER)
+      ? DEFAULT_MODULE_PROVIDER
+      : null
+    const selectedProvider = configuredProviders.length === 1 ? configuredProviders[0] : fallbackProvider
+    const selected = selectedProvider
+      ? matches.filter((source) => source.from === selectedProvider)
       : []
 
     if (selected.length !== 1) {
