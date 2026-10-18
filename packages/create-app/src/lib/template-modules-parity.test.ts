@@ -58,3 +58,26 @@ test('modules.ts transform keeps every commented module commented out, not delet
     )
   }
 })
+
+test('modules.ts files gate CRM preset and keep non-CRM domains out of the CRM set', () => {
+  const appContent = fs.readFileSync(APP_MODULES_FILE, 'utf8')
+  const templateContent = fs.readFileSync(TEMPLATE_MODULES_FILE, 'utf8')
+
+  for (const content of [appContent, templateContent]) {
+    assert.match(content, /const appPreset = process\.env\.OM_APP_PRESET\?\.trim\(\)\.toLowerCase\(\)/)
+    assert.match(content, /const crmPresetEnabled = appPreset === 'crm'/)
+
+    const crmSetStart = content.indexOf('const crmPresetModuleIds')
+    const enabledModulesStart = content.indexOf('export const enabledModules')
+    assert.ok(crmSetStart >= 0, 'crmPresetModuleIds must exist in modules.ts')
+    assert.ok(enabledModulesStart > crmSetStart, 'crmPresetModuleIds should be declared before enabledModules')
+
+    const crmSetBlock = content.slice(crmSetStart, enabledModulesStart)
+    assert.match(crmSetBlock, /'customers'/)
+    assert.match(crmSetBlock, /'messages'/)
+    assert.match(crmSetBlock, /'search'/)
+    assert.doesNotMatch(crmSetBlock, /'sales'/)
+    assert.doesNotMatch(crmSetBlock, /'catalog'/)
+    assert.doesNotMatch(crmSetBlock, /'wms'/)
+  }
+})
