@@ -1,0 +1,94 @@
+# Fork-only (AdamskiMarek/open-mercato): build the fullapp `app` image in GitHub
+# Actions and push it to GHCR, so the small Dokploy VPS only pulls it
+# (docker-compose.fullapp.ghcr.yml) instead of building it for 25+ minutes.
+#
+# Mirrors the `app` service build in docker-compose.fullapp.yml: same Dockerfile,
+# context `.`, final (`runner`) stage and build args with the compose defaults.
+# Override a build arg with a repository variable of the same name
+# (Settings → Secrets and variables → Actions → Variables).
+name: GHCR app image
+
+on:
+  push:
+    branches:
+      - develop_OM_CRM
+  workflow_dispatch:
+
+concurrency:
+  group: ghcr-image-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/adamskimarek/open-mercato-app
+
+jobs:
+  build-and-push:
+    # Never runs in upstream or other forks: the image name is owner-specific.
+    if: github.repository == 'AdamskiMarek/open-mercato'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # Parity with Dokploy, which clones this compose with enableSubmodules=false
+          # (the repo has no .gitmodules today anyway).
+          submodules: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/develop_OM_CRM' }}
+            type=ref,event=branch
+            type=sha,prefix=sha-,format=short
+          labels: |
+            org.opencontainers.image.title=open-mercato-app
+
+      - name: Build and push app image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: runner
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            CONTAINER_PORT=${{ vars.CONTAINER_PORT || '3000' }}
+            ALPINE_MIRROR=${{ vars.ALPINE_MIRROR || '' }}
+            INSTALL_CHROMIUM=${{ vars.INSTALL_CHROMIUM || '0' }}
+            NEXT_PUBLIC_DOCUMENTS_COLLAB_URL=${{ vars.NEXT_PUBLIC_DOCUMENTS_COLLAB_URL || '' }}
+          # Also read ci.yml's docker-build cache (same Dockerfile and default args).
+          cache-from: |
+            type=gha,scope=ghcr-app-image
+            type=gha,scope=ci-docker-fullapp
+          cache-to: type=gha,mode=max,scope=ghcr-app-image
+
+      - name: Trigger Dokploy redeploy (optional)
+        env:
+          DOKPLOY_DEPLOY_WEBHOOK: ${{ secrets.DOKPLOY_DEPLOY_WEBHOOK }}
+        run: |
+          if [ -z "${DOKPLOY_DEPLOY_WEBHOOK}" ]; then
+            echo "DOKPLOY_DEPLOY_WEBHOOK not set; skipping redeploy."
+            exit 0
+          fi
+          curl -fsS -X POST --max-time 60 "${DOKPLOY_DEPLOY_WEBHOOK}" -o /dev/null
+          echo "Dokploy redeploy triggered."
