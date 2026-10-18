@@ -81,6 +81,10 @@ export const enabledModules: ModuleEntry[] = [
   { id: 'query_index', from: '@open-mercato/core' },
   { id: 'audit_logs', from: '@open-mercato/core' },
   { id: 'attachments', from: '@open-mercato/core' },
+  // Fork addition (not in the upstream `crm` preset): the ApiKey entity is required by
+  // `ai_assistant mcp:ensure-api-key` (mcp/opencode containers) and by API-key auth for
+  // external integrations (n8n lead intake). Requires only `auth`; same position as upstream main.
+  { id: 'api_keys', from: '@open-mercato/core' },
   { id: 'dictionaries', from: '@open-mercato/core' },
   { id: 'api_docs', from: '@open-mercato/core' },
   { id: 'feature_toggles', from: '@open-mercato/core' },
