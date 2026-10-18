@@ -68,158 +68,36 @@ export const moduleOverrideExamples: ModuleOverrides = {
   },
 }
 
-const appPreset = process.env.OM_APP_PRESET?.trim().toLowerCase()
-const crmPresetEnabled = appPreset === 'crm'
-const crmPresetModuleIds = new Set([
-  'auth',
-  'directory',
-  'configs',
-  'entities',
-  'query_index',
-  'api_docs',
-  'audit_logs',
-  'notifications',
-  'dashboards',
-  'events',
-  'search',
-  'attachments',
-  'customers',
-  'messages',
-  'dictionaries',
-  'feature_toggles',
-  'currencies',
-  'communication_channels',
-  'ai_assistant',
-])
-
 export const enabledModules: ModuleEntry[] = [
+  // Official Open Mercato `crm` starter preset (`empty` + CRM additions) from
+  // packages/create-app/src/lib/starter-presets.ts. Enable further modules by
+  // adding them here explicitly.
   { id: 'dashboards', from: '@open-mercato/core' },
   { id: 'auth', from: '@open-mercato/core' },
   { id: 'directory', from: '@open-mercato/core' },
   { id: 'customers', from: '@open-mercato/core' },
-  { id: 'customer_groups', from: '@open-mercato/core' },
-  { id: 'perspectives', from: '@open-mercato/core' },
   { id: 'entities', from: '@open-mercato/core' },
   { id: 'configs', from: '@open-mercato/core' },
   { id: 'query_index', from: '@open-mercato/core' },
   { id: 'audit_logs', from: '@open-mercato/core' },
   { id: 'attachments', from: '@open-mercato/core' },
-  { id: 'catalog', from: '@open-mercato/core' },
-  { id: 'sales', from: '@open-mercato/core' },
-  { id: 'warranty_claims', from: '@open-mercato/core' },
-  { id: 'wms', from: '@open-mercato/core' },
-  // Availability contract, policy module, and provider registry (Phase 1+2).
-  // Ships with the scaffold but stays commented out in the template until
-  // standalone-harness coverage lands: no case in
-  // packages/create-app/agentic/shared/ai/harness/cases.json lists
-  // .ai/guides/modules/availability/index.md in context.required, so enabling it
-  // here trips packages/create-app/src/lib/module-facts-build.test.ts ('every
-  // module fact-sheet a scaffold ships is required by at least one catalog
-  // case'). Run the om-refresh-standalone-harness skill to add that coverage,
-  // then enable it in the template.
-  { id: 'availability', from: '@open-mercato/core' },
-  { id: 'api_keys', from: '@open-mercato/core' },
-  { id: 'devices', from: '@open-mercato/core' },
   { id: 'dictionaries', from: '@open-mercato/core' },
-  { id: 'seeds', from: '@open-mercato/core' },
-  { id: 'content', from: '@open-mercato/content' },
-  { id: 'onboarding', from: '@open-mercato/onboarding' },
   { id: 'api_docs', from: '@open-mercato/core' },
-  // Live DS component gallery at /backend/design-system (feature-gated by
-  // design_system.view). Disable by removing this line.
-  { id: 'design_system', from: '@open-mercato/core' },
-  { id: 'business_rules', from: '@open-mercato/core' },
   { id: 'feature_toggles', from: '@open-mercato/core' },
-  { id: 'workflows', from: '@open-mercato/core' },
   { id: 'search', from: '@open-mercato/search' },
   { id: 'currencies', from: '@open-mercato/core' },
-  { id: 'planner', from: '@open-mercato/core' },
-  { id: 'resources', from: '@open-mercato/core' },
-  { id: 'staff', from: '@open-mercato/core' },
   { id: 'events', from: '@open-mercato/events' },
   { id: 'notifications', from: '@open-mercato/core' },
   { id: 'progress', from: '@open-mercato/core' },
   { id: 'integrations', from: '@open-mercato/core' },
-  { id: 'data_sync', from: '@open-mercato/core' },
-  { id: 'sync_excel', from: '@open-mercato/core' },
   { id: 'messages', from: '@open-mercato/core' },
   // Communication channels hub (SPEC-045d) — bridges external chat/email channels
   // (Slack, WhatsApp, Email) to the unified Messages inbox. Provider packages
   // (channel-slack, channel-whatsapp, future email providers) register adapters here.
   { id: 'communication_channels', from: '@open-mercato/core' },
-  // Push notification rails — `push` delivery strategy + delivery log + send-push worker.
-  // Fans out to `devices` tokens and sends through the `communication_channels` hub.
-  { id: 'push_notifications', from: '@open-mercato/core' },
-  { id: 'phone_calls', from: '@open-mercato/core' },
   { id: 'ai_assistant', from: '@open-mercato/ai-assistant' },
-  // agent_orchestrator moved to the enterprise catalog — enabled below behind
-  // OM_ENABLE_ENTERPRISE_MODULES + OM_ENABLE_ENTERPRISE_MODULES_AGENTS.
-  { id: 'translations', from: '@open-mercato/core' },
-  { id: 'scheduler', from: '@open-mercato/scheduler' },
-  { id: 'inbox_ops', from: '@open-mercato/core' },
-  { id: 'payment_gateways', from: '@open-mercato/core' },
-  { id: 'checkout', from: '@open-mercato/checkout' },
-  { id: 'documents', from: '@open-mercato/documents' },
-  { id: 'gateway_stripe', from: '@open-mercato/gateway-stripe' },
-  // Per-user email channels for the Communications Hub (SPEC-045d / email
-  // integration spec). Each provider package registers its `ChannelAdapter`
-  // at import time via `setup.ts`; the hub picks them up by `providerKey`.
-  { id: 'channel_resend', from: '@open-mercato/channel-resend' },
-  { id: 'channel_ses', from: '@open-mercato/channel-ses' },
   { id: 'channel_imap', from: '@open-mercato/channel-imap' },
   { id: 'channel_gmail', from: '@open-mercato/channel-gmail' },
-  // Mobile push providers for the push_notifications channel. Each registers a
-  // `push` ChannelAdapter at import time; the push delivery strategy routes each
-  // device to the channel whose providerKey matches its push_provider.
-  { id: 'channel_apns', from: '@open-mercato/channel-apns' },
-  { id: 'channel_expo', from: '@open-mercato/channel-expo' },
-  { id: 'channel_fcm', from: '@open-mercato/channel-fcm' },
-  // Discord bot channel (SPEC 2026-06-19) — two-way Discord via REST + a
-  // provider-owned Gateway worker + a signed Interactions endpoint, plus an
-  // optional AI auto-reply subscriber.
-  { id: 'channel_discord', from: '@open-mercato/channel-discord' },
-  { id: 'sync_akeneo', from: '@open-mercato/sync-akeneo' },
-  { id: 'tillio', from: '@open-mercato/tillio' },
-  { id: 'shipping_carriers', from: '@open-mercato/core' },
-  { id: 'eudr', from: '@open-mercato/core' },
-  { id: 'webhooks', from: '@open-mercato/webhooks' },
-  // Same-origin OTLP proxy for browser RUM spans; inert unless
-  // TELEMETRY_BROWSER_ENABLED is set alongside an active telemetry backend.
-  { id: 'telemetry', from: '@open-mercato/telemetry' },
-  { id: 'customer_accounts', from: '@open-mercato/core' },
-  { id: 'portal', from: '@open-mercato/core' },
-  // Audit-grade questionnaire/form primitive — versioned definitions, append-only
-  // submissions, role-sliced rendering, public runner + portal + embed surfaces.
-  // Listed after customer_accounts/portal because its portal pages and public
-  // runner resolve customer auth through them.
-  { id: 'forms', from: '@open-mercato/core' },
-  {
-    id: 'example',
-    from: '@app',
-    overrides: {
-      acl: {
-        features: { 'example.manage': null },
-      },
-      // Keep the real-bootstrap nav override probe isolated from normal app behavior. The integration
-      // runner sets OM_INTEGRATION_TEST, while development and production keep Example at the tail.
-      nav: parseBooleanWithDefault(process.env.OM_INTEGRATION_TEST, false)
-        ? { groupOrder: ['example.nav.group'] }
-        : undefined,
-      routes: {
-        api: {
-          'GET /api/example/override-probe': {
-            handler: async () => Response.json({
-              ok: true,
-              source: 'modules.ts override',
-              route: 'example.override-probe',
-            }),
-            metadata: { requireAuth: false },
-          },
-        },
-      },
-    },
-  },
-  { id: 'ratelimit_probe', from: '@app' },
 ]
 
 // Official modules activated via official-modules.json / official-modules.local.json
@@ -262,9 +140,4 @@ if (enterpriseModulesEnabled && enterpriseAgentsEnabled) {
   // brand-new module (see apps/mercato/src/modules/agent_examples/README.md).
   // It imports the orchestrator SDK, so it is only enabled alongside it.
   enabledModules.push({ id: 'agent_examples', from: '@app' })
-}
-
-if (crmPresetEnabled) {
-  const crmModules = enabledModules.filter((entry) => crmPresetModuleIds.has(entry.id))
-  enabledModules.splice(0, enabledModules.length, ...crmModules)
 }
