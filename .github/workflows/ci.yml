@@ -81,11 +81,13 @@ on:
       - main
       - develop
       - feat/wms
+      - develop_OM_CRM
   pull_request:
     branches:
       - main
       - develop
       - feat/wms
+      - develop_OM_CRM
 
 # Cancel any in-progress run on the same branch when a new push arrives.
 # Prevents multiple long runs queuing up from rapid pushes.
@@ -105,7 +107,7 @@ jobs:
   #                      Only uploaded when integration tests will actually run;
   #                      skipped for CI/docs-only PRs to save ~2 min.
   prepare:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     outputs:
       skip_integration: ${{ steps.integration-scope.outputs.skip }}
       affected_modules: ${{ steps.integration-scope.outputs.modules }}
@@ -277,7 +279,7 @@ jobs:
   # Determines whether dependency audit needs to run. Package manifests and
   # lockfiles are the only inputs that can change the dependency graph.
   audit-scope:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     outputs:
       should_run: ${{ steps.dependency-files.outputs.should_run }}
     steps:
@@ -333,7 +335,7 @@ jobs:
   # `.github/workflows/audit.yml` instead — this job is the change-triggered
   # half of the pair (#4479).
   audit:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: audit-scope
     if: needs.audit-scope.outputs.should_run == 'true'
@@ -442,7 +444,7 @@ jobs:
   # in scope: excluding it left turbo with zero commands and a permanently green
   # no-op job (issue #4472).
   lint:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -512,7 +514,7 @@ jobs:
   # native compiler has no JS API, so the parser's `typescript` import must be
   # redirected to `typescript-js`.
   ds-lint:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write   # sticky comment; no-op on fork PRs (read-only token)
@@ -618,7 +620,7 @@ jobs:
   # so typecheck cost does not add to the integration wall time.
   # merge-coverage and docker-build both wait for this job to complete.
   test:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     needs: [prepare, audit-scope, audit, lint]
     if: |
       always() &&
@@ -877,7 +879,7 @@ jobs:
   #         wall time from ~45 min to ~6 min. A merge-coverage job then
   #         combines per-shard coverage reports.
   ephemeral-integration:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     needs: [prepare, audit-scope, audit, lint]
     if: |
       always() &&
@@ -1105,7 +1107,7 @@ jobs:
   # Ensures both typecheck/units and integration must pass before reporting green.
   # On push: downloads per-shard artifacts, merges coverage reports, writes summary.
   merge-coverage:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     needs: [prepare, test, documents-multi-instance, ephemeral-integration]
     if: needs.prepare.outputs.shard_matrix != '["none"]'
     steps:
@@ -1183,7 +1185,7 @@ jobs:
   # a 10+ min rebuild caused by Docker layer cache busting when files like
   # turbo.json or scripts/ are the only things that changed.
   docker-build:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     needs: prepare
     # Only run on non-fork PRs and direct pushes (forks don't have access to GHA cache).
     # Also skip for CI/docs-only PRs — no app code changed, image is unchanged.
@@ -1195,29 +1197,33 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Setup Blacksmith Builder
-        uses: useblacksmith/setup-docker-builder@v2
-        with:
-          # One builder serves all three Dockerfile builds in this job, so they share one
-          # layer cache — same as v1, where the key defaulted to the repository name.
-          cache-key: ci-docker-build
+      # GitHub-hosted runners: standard Buildx with the GitHub Actions cache backend
+      # replaces the Blacksmith builder and its layer cache.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Build docs Dockerfile
-        uses: useblacksmith/build-push-action@v2
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: apps/docs/Dockerfile
           push: false
+          cache-from: type=gha,scope=ci-docker-docs
+          cache-to: type=gha,mode=max,scope=ci-docker-docs
 
       - name: Build fullapp (main app)
-        uses: useblacksmith/build-push-action@v2
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile
           push: false
+          cache-from: type=gha,scope=ci-docker-fullapp
+          cache-to: type=gha,mode=max,scope=ci-docker-fullapp
 
       - name: Build opencode container
-        uses: useblacksmith/build-push-action@v2
+        uses: docker/build-push-action@v6
         with:
           context: ./docker/opencode
           push: false
+          cache-from: type=gha,scope=ci-docker-opencode
+          cache-to: type=gha,mode=max,scope=ci-docker-opencode
