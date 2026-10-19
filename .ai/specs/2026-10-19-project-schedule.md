@@ -211,35 +211,60 @@ Kolumny: id, organization_id, tenant_id, provider_id, label, inbound_webhook_sec
 
 ### 3.1 Porównanie opcji
 
-| Biblioteka | Licencja | Ver. | Ostatnia aktual. | React-native | WBS tree | Milestones | FS/SS/FF/SF | Bundle (~) | Uwagi |
-|------------|----------|------|-----------------|--------------|----------|------------|-------------|-----------|-------|
-| **@svar-ui/react-gantt** | MIT | 2.8.1 | Oct 2026 | ✅ TS | ✅ [niezwer.] | ✅ [niezwer.] | ✅ [niezwer.] | ~100–200 KB [niezwer.] | React >=18; aktywna (tydzień temu); zweryfikuj w docs svar.dev/react/gantt |
-| frappe-gantt | MIT | 1.2.2 | Feb 2026 | Nie (JS) | ❌ | ❌ | FS only | ~50 KB | Drag&drop ✅; brak WBS/milestones/SS/FF/SF — **niewystarczający** dla wymagań rev 5 |
-| DHTMLX Gantt | Podwójna licencja | — | — | Nie | ✅ | ✅ | ✅ | ~200 KB | npm MIT **niereliable**; weryfikacja z vendorem |
-| Bryntum Gantt | Komercyjna | 7.3.7 | — | ✅ | ✅ | ✅ | ✅ | ~500 KB | npm MIT **niereliable**; weryfikacja z vendorem |
-| wx-react-gantt | **GPLv3** | — | — | — | — | — | — | — | **Nie używać** |
+> **Źródło weryfikacji**: `@svar-ui/react-gantt` 2.8.1 npm tarball — `license.txt` (MIT, © 2025 XB Software Sp. z o.o.) + `readme.md`. Podział MIT/PRO zweryfikowany.
+
+| Biblioteka | Licencja | React-native | WBS tree | Milestones | Dep links | FS/SS/FF/SF auto | CPM | Baseline UI | Bundle (~) | Uwagi |
+|------------|----------|--------------|----------|------------|-----------|-----------------|-----|-------------|-----------|-------|
+| **@svar-ui/react-gantt MIT core** | **MIT ✅** | **✅ TS, React 19/Next.js** | **✅** | [niezwer.] | **✅** | ❌ PRO | ❌ PRO | ❌ PRO | ~100–200 KB [niezwer.] | Zweryfikowano z tarball; 17 @svar-ui/* + date-fns |
+| @svar-ui/react-gantt PRO | Komercyjna | ✅ | ✅ | ✅ | ✅ | ✅ + lag | ✅ | ✅ (S-curve) | — | Otwarto-źródłowe core, PRO paywall |
+| frappe-gantt | MIT | Nie (JS) | ❌ | ❌ | FS only | ❌ | ❌ | ❌ | ~50 KB | **Niewystarczający** — brak WBS/milestones |
+| DHTMLX Gantt | Podwójna lic. | Nie | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ~200 KB | npm MIT **niereliable**; weryfikacja z vendorem |
+| Bryntum Gantt | Komercyjna | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ~500 KB | npm MIT **niereliable**; weryfikacja z vendorem |
+| wx-react-gantt | **GPLv3** | — | — | — | — | — | — | — | — | **Nie używać** |
 
 ### 3.2 Wybór i uzasadnienie
 
-**Rekomendacja: `@svar-ui/react-gantt` v2.8.1 (MIT, React-native TS)**.
+**Wybrana biblioteka: `@svar-ui/react-gantt` v2.8.1 MIT core** (XB Software Sp. z o.o., © 2025, MIT zweryfikowano z `license.txt`).
 
-Rev 5 wymaga WBS tree, milestones i FS/SS/FF/SF dependency links. `frappe-gantt` jest niewystarczający (brak WBS, milestones, obsługuje tylko FS). `@svar-ui/react-gantt` jako React-native, MIT, aktywna biblioteka jest najlepszym kandydatem.
+**Zweryfikowane w MIT core (tarball README)**:
+- ✅ React >=18, gotowe dla React 19 i Next.js (potwierdzono w README)
+- ✅ TypeScript
+- ✅ Interactive drag-and-drop timeline (przesuwanie + resize)
+- ✅ Hierarchical view of subtasks (WBS tree) — przez `@svar-ui/react-tasklist` dep
+- ✅ Dependency links — tworzenie na osi czasu i w formularzu; wizualizacja linków
+- ✅ Progress na paskach, konfigurowane skale (Day/Week/Month/…)
+- ✅ Grid z edycją w komórce, sort, reorder
+- ✅ Edit form, toolbar, menu kontekstowe, wirtualizacja, RestDataProvider, lokalizacja
 
-**Krytyczna weryfikacja przed implementacją**: WBS tree, milestones, FS/SS/FF/SF links — wszystkie zaznaczone [niezweryfikowane z npm metadata]. **Implementator MUSI zweryfikować pełny feature set w dokumentacji svar.dev/react/gantt oraz przykładach GitHub przed rozpoczęciem Gantt task w MVP.** Jeśli brakuje którejkolwiek cechy:
-- WBS tree: sprawdź `@svar-ui/react-tasklist` (dep w paczce) lub własna implementacja lewej kolumny WBS.
-- Milestones: diamond shape → custom task renderer.
-- SF/FF/SS: jeśli tylko FS — wystarczające dla v1 MVP; SF/FF/SS jako v2 enhancement.
+**Wyłącznie w SVAR PRO (commercial open-core)**:
+- ❌ Auto-scheduling FS/SS/FF/SF z lag i constraints
+- ❌ Critical Path Method (CPM, slack, deadlines)
+- ❌ Baselines / progress line / S-curve
+- ❌ Working calendars, resources
+- ❌ MS Project import/export (wbudowane)
+- ❌ Summary-task automation, split tasks
 
-DHTMLX i Bryntum: pełne wsparcie WBS/milestones/links, ale licencje wymagają weryfikacji z vendorami — nie rekomenduję bez weryfikacji kosztów.
+**Milestones**: nie wymienione wprost w MIT feature list [niezweryfikowane — dokumentacja SVAR sugeruje obsługę "milestone" task type; weryfikacja w svar.dev/react/gantt przed implementacją; fallback: custom task renderer z diamond shape].
+
+**Implikacje dla projektu:**
+- WBS tree, drag&drop, dependency links: ✅ MIT — bez dodatkowych kosztów.
+- FS/SS/FF/SF **type labels i lag renderowanie**: client-side custom CSS overlay na linkach; server-side logika (`ps_task_dependencies`) bez zmian.
+- **Auto-scheduling** (propagacja dat): NIE w zakresie v1/v2 bez PRO lub własnej implementacji.
+- **CPM rendering**: server-side algorytm (v2) → `is_critical_path: bool` na zadaniu → custom CSS class na pasku.
+- **Baseline wizualizacja**: custom overlay/marker na pasku zadania (`baseline_start/end_at`).
+- **MS Project import/export**: server-side parser (v2, `exceljs`/`xml2js`), nie PRO.
+
+**Decyzja SVAR PRO** — otwarte pytanie do Marka: §15, pkt 5.
 
 ### 3.3 Wymagania Gantt w MVP
 
-- WBS tree (lewa kolumna z wcięciem hierarchy).
-- Milestones (diamond / ikona, zero-duration).
-- Drag & drop: przesuwanie + resize zadań.
-- Strzałki zależności FS (minimum); SS/FF/SF w v1/v2.
-- Przełącznik Day / Week / Month.
-- SSR: `dynamic(() => import('./GanttChart'), { ssr: false })`.
+- **WBS tree**: ✅ MIT.
+- **Milestones** (zero-duration, diamond): [niezweryfikowane w MIT — weryfikacja przed implementacją; plan B: custom task renderer].
+- **Drag & drop** (move + resize): ✅ MIT.
+- **Dependency links** (strzałki): ✅ MIT. Etykiety typ (FS/SS/FF/SF) + lag = custom CSS nad linkami.
+- **Przełącznik Day / Week / Month**: ✅ MIT.
+- **Baseline overlay** (v1): custom rendering nadpisujące `baseline_start/end_at` jako pasek drugorzędny.
+- **SSR**: `dynamic(() => import('./GanttChart'), { ssr: false })`.
 
 ---
 
@@ -434,9 +459,11 @@ Zawartość:
 // components/GanttChart.tsx  — 'use client'
 // Import przez: dynamic(() => import('./GanttChart'), { ssr: false })
 import { Gantt } from '@svar-ui/react-gantt'
-// API @svar-ui/react-gantt wymaga weryfikacji w docs svar.dev/react/gantt przed implementacją
-// Wymagane: WBS tree (lewa kolumna hierarchy), milestones, FS dependency links,
-//           drag&drop przesuwanie/resize, onTaskUpdate callback
+// MIT core: WBS tree ✅, drag&drop ✅, dependency links ✅, React 19 ✅
+// Milestones: [niezweryfikowane — weryfikacja przed implementacją]
+// FS/SS/FF/SF auto-scheduling: PRO only; MIT renderuje linki (custom etykiety type/lag)
+// Baseline overlay: custom rendering (not PRO) — dodatkowy div per task
+// Dokładne API props (@svar-ui/react-gantt): zweryfikuj w svar.dev/react/gantt/docs
 ```
 
 Zaktualizuj API call po weryfikacji docs: propsName onTaskUpdate/onChange, format zadania (id, start, end, parent, type: 'milestone'|'task', dependencies).
@@ -564,7 +591,7 @@ Przy każdej zmianie `planned_start_at`/`planned_end_at` zadania (drag&drop) →
 | `ps_production_batches` (task_id, calculation_line_id) — migracje + API | S (0.5 dnia) |
 | Pozostałe API: schedules CRUD, bulk tasks, forecast endpoint (pro-rata LRM + prob. weighting) | M (2 dni) |
 | ACL features + setup.ts + analytics.ts | S (1 dzień) |
-| `GanttChart.tsx` (@svar-ui/react-gantt: WBS tree, milestones, dep arrows, drag & drop) | L (4 dni) |
+| `GanttChart.tsx` (@svar-ui/react-gantt MIT: WBS ✅, drag&drop ✅, dep links ✅; milestones [niezwer.]; custom: dep type labels + baseline overlay) | L (4 dni) |
 | `DealScheduleTab` widget + panel boczny + miniatura prognozy | M (3 dni) |
 
 **Suma MVP**: 1+0.5+1.5+1.5+0.5+2+1+4+3 = **15 dni roboczych**.
@@ -611,7 +638,7 @@ Przy każdej zmianie `planned_start_at`/`planned_end_at` zadania (drag&drop) →
 
 | # | Ryzyko | P-stwo | Wpływ | Mitygacja |
 |---|--------|--------|-------|-----------|
-| R1 | @svar-ui/react-gantt: WBS tree / milestones / SS/FF/SF — niezweryfikowane z npm | Średnie | Wysoki | **Weryfikacja docs svar.dev/react/gantt przed implementacją** (milestone zadania w MVP) |
+| R1 | @svar-ui/react-gantt MIT: milestones [niezwer.]; FS/SS/FF/SF auto-scheduling = PRO | Niskie | Średni | Milestones: weryfikacja w docs + plan B custom renderer; FS/SS/FF/SF type labels = custom CSS; auto-scheduling poza scope |
 | R2 | SSR Next.js + @svar-ui/react-gantt — wymaga DOM | Średnie | Średni | `dynamic(..., { ssr: false })` |
 | R3 | Walidacja cykli w dużych WBS (setki zależności) — wydajność DFS | Niskie | Niski | DFS O(V+E); dla typowych budowlanych WBS (<200 zadań) bez problemu |
 | R4 | LRM rounding przy bardzo krótkich batchach (<3 dni) | Niskie | Niski | Min 1 dzień; residual absorbowany przez miesiąc/tydzień z max overlap |
@@ -632,7 +659,7 @@ Przy każdej zmianie `planned_start_at`/`planned_end_at` zadania (drag&drop) →
 
 4. **Offer → Execution transition**: Kto inicjuje przejście z harmonogramu ofertowego (`offer`) do wykonawczego (`execution`)? Czy to akceptacja oferty (`accepted`) wyzwala `create-execution` automatycznie?
 
-5. **SS/FF/SF dependencies**: Czy w v1 wystarczą tylko FS (Finish-to-Start), czy od razu potrzebne SS/FF/SF?
+5. **SVAR PRO vs własna implementacja**: Funkcje potrzebne w v2 (auto-scheduling FS/SS/FF/SF z lag, CPM, baseline UI, MS Project import/export) są dostępne w SVAR PRO (commercial, open-core). Czy Marek chce zakupić licencję SVAR PRO dla tych funkcji, czy implementować je samodzielnie server-side (algorytm CPM w `lib/critical-path.ts`, MS Project XML parser, custom baseline renderer)? Spec zakłada server-side dla CPM/MS Project (plan MIT); PRO = szybsze i bogatsze UI ale koszt licencji [niezweryfikowany].
 
 ---
 
@@ -640,7 +667,7 @@ Przy każdej zmianie `planned_start_at`/`planned_end_at` zadania (drag&drop) →
 
 | # | Założenie | Uzasadnienie |
 |---|-----------|--------------|
-| A1 | @svar-ui/react-gantt v2.8.1 (MIT); weryfikacja WBS/milestones/links wymagana przed impl. | React-native TS, aktywna (Oct 2026); frappe-gantt niewystarczający (brak WBS/milestones) |
+| A1 | @svar-ui/react-gantt v2.8.1 (MIT, zweryfikowano z tarball): WBS ✅, drag&drop ✅, dep links ✅, React 19/Next.js ✅; milestones [niezwer.]; FS/SS/FF/SF auto = PRO | React-native TS, aktywna (Oct 2026); frappe-gantt niewystarczający (brak WBS/milestones); PRO = pytanie do Marka |
 | A2 | SSR: `dynamic(..., { ssr: false })` | Biblioteki Gantt wymagają DOM |
 | A3 | `project_schedule` nie zależy od `project_costing` | Brak circular dependency |
 | A4 | Prognoza: endpoint `/forecast` z LRM + probability param | Precyzja LRM; probability = param (nie hardcoded) |
@@ -704,4 +731,5 @@ apps/mercato/src/modules/project_schedule/
 |------|--------|
 | 2026-10-19 | v1 (rev 3) — inicjalna spec |
 | 2026-10-19 | v2 (rev 4) — Gantt MVP, @svar-ui, ps_element_types, ps_import_column_mappings, LRM |
-| 2026-10-19 | v3 (rev 5) — schedule_type (offer/execution); ps_schedule_tasks (WBS, parent_task_id, is_milestone, baseline_start/end_at, progress_pct); ps_task_dependencies (FS/SS/FF/SF + lag, cycle validation); ps_production_batches (task_id, calculation_line_id opaque); ps_schedules.offer_schedule_id; baseline_captured_at; capture-baseline + create-execution endpoints; GanttChart wymaga WBS tree+milestones+deps (frappe-gantt niewystarczający — weryfikacja @svar-ui przed impl.); prognoza tygodniowa + probability weighting; analytics: ps_schedule_tasks entity dodana; effort: MVP 15d, v1 5d, v2 10d = 30d; combined: 32+22+24=78d |
+| 2026-10-19 | v3 (rev 5) — …(jak poprzednio)… |
+| 2026-10-19 | v3 patch (rev 5 update) — @svar-ui/react-gantt 2.8.1 MIT/PRO zweryfikowane z tarball: MIT core ma WBS ✅, drag&drop ✅, dep links ✅, React 19/Next.js ✅; FS/SS/FF/SF auto-scheduling = PRO only; CPM/baselines/MS Project = PRO; milestones [niezwer.]; zaktualizowano §3.1 tabela, §3.2 (MIT/PRO split), §3.3, GanttChart.tsx, R1, A1; dodano pytanie otwarte o SVAR PRO vs impl. własna (§15 pkt 5) |
