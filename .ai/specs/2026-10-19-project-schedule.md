@@ -6,57 +6,62 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-19 |
-| **Rewizja** | 2026-10-19 (v4 — Gantt w MVP, SVAR, ps_element_types, ps_import_column_mappings, rounding) |
+| **Rewizja** | 2026-10-19 (v5 — WBS, milestones, FS/SS/FF/SF, baseline, schedule types, probability forecast) |
 | **Moduł** | `project_schedule` (`apps/mercato/src/modules/project_schedule`) |
 | **Zależności upstream** | `customers`, `dictionaries`, `dashboards`, `attachments`, `notifications` |
 | **Powiązany spec** | `.ai/specs/2026-10-19-project-costing-offer-calculator.md` |
-| **Kierunek zależności** | `project_costing` → konsumuje `project_schedule`; `project_schedule` nigdy nie importuje z `project_costing` |
+| **Kierunek zależności** | `project_costing` → konsumuje `project_schedule`; odwrotna zależność zabroniona |
 
 ---
 
 ## Streszczenie
 
-Moduł `project_schedule` dostarcza interaktywny harmonogram produkcji z widokiem Gantt (drag & drop od MVP) dla branży budowlanej. Posiada własny słownik typów elementów (`ps_element_types`) współdzielony z `project_costing` przez API/id. Faza MVP: Gantt interaktywny + zakładka na karcie deala + batche + prognoza. Faza v1: import/eksport XLSX/CSV. Faza v2: adaptery zewnętrznych narzędzi i webhooks.
+Moduł `project_schedule` dostarcza interaktywny harmonogram produkcji z widokiem Gantt (WBS + drag & drop od MVP). Rev 5 dodaje:
+- **Dwa typy harmonogramów**: `offer` (szacunki na etapie ofertowania) i `execution` (harmonogram realizacji).
+- **WBS z hierarchią** (`parent_task_id`) i **milestones** (zero-duration).
+- **Zależności zadań**: FS / SS / FF / SF + lag (dni, może być ujemny); walidacja cykli.
+- **Baseline**: zrzut harmonogramu ofertowego przy przejściu do realizacji; wariancja.
+- **ProductionBatch** powiązany z zadaniem WBS i opcjonalnie z linią kalkulacji (`calculation_line_id` = opaque UUID).
+- **Prognoza 6 miesięcy** (tygodnie i miesiące) z opcjonalnym ważeniem prawdopodobieństwem deala.
 
-`project_schedule` jest **niezależny** od `project_costing` — nie importuje żadnego kodu z kosztów. `project_costing` konsumuje ten moduł przez API i zdarzenia.
+Właściciel `ps_element_types` (typy elementów) i `ps_schedule_tasks` (zadania WBS). `project_costing` czyta przez API i events.
 
 ---
 
 ## 1. Cel i zakres
 
-### 1.1 Faza MVP — Interaktywny harmonogram wewnętrzny (z Gantt)
+### 1.1 Faza MVP — Interaktywny harmonogram z WBS i Gantt
 
-- Interaktywny Gantt z drag & drop od MVP (Marek: „Gantt od razu").
-- Własny słownik typów elementów (`ps_element_types`) z seedem dla prefabrykacji żelbetowej.
-- Batche per typ elementu (strop/ściana/słup/belka), powiązane z kalkulacją i dealem przez `calculation_id` UUID.
-- Status batcha: `planned` / `in_progress` / `done` / `cancelled`.
-- Zakładka „Harmonogram" na karcie Deala (injection spot `detail:customers.deal:tabs`).
-- Prognoza produkcji 6 miesięcy (pro-rata z batchów) eksponowana przez `analytics.ts`.
+- `ps_element_types`: własny słownik typów elementów + seed precast.
+- `ps_schedules` z typem `offer` / `execution`.
+- `ps_schedule_tasks`: hierarchia WBS, milestones, pola baseline.
+- `ps_task_dependencies`: FS/SS/FF/SF + lag; walidacja cykli.
+- `ps_production_batches`: partia produkcji powiązana z zadaniem.
+- Gantt z WBS tree, milestones, dependency arrows — od MVP.
+- Zakładka „Harmonogram" na karcie Deala.
+- Prognoza 6 miesięcy (LRM rounding).
 
-### 1.2 Faza v1 — Import/eksport i integracja
+### 1.2 Faza v1 — Import/eksport i baseline
 
 - Import/eksport XLSX/CSV harmonogramu.
-- Zdarzenia notyfikujące `project_costing` o zmianach batchów.
-- Widok cross-deal listy harmonogramów.
+- `ps_import_column_mappings`.
+- Baseline capture (offer → execution transition).
+- Zdarzenia dla `project_costing` (batch.updated, schedule.activated).
 
-### 1.3 Faza v2 — Integracja zewnętrzna
+### 1.3 Faza v2 — Integracje zewnętrzne i krytyczna ścieżka
 
-- Interfejs providera/adaptera dla zewnętrznych narzędzi.
-- Inbound/outbound webhooks (Standard Webhooks).
-- Import MS Project XML (opcjonalny, złożony format — do weryfikacji z Markiem).
+- Provider/adapter interface + webhooks (Standard Webhooks).
+- Import MS Project XML.
+- Algoritm krytycznej ścieżki (CPM).
 
 ### 1.4 Granica z `project_costing`
 
 | Pytanie | Odpowiedź |
 |---------|-----------|
-| Kto posiada `ps_element_types`? | `project_schedule` |
-| Kto posiada `ps_schedule_batches`? | `project_schedule` |
-| Kto posiada `pc_calculations`? | `project_costing` |
-| Jak `project_costing` czyta batche i prognozy? | `GET /api/project-schedule/batches?calculationId=`, `/forecast` |
-| Jak `project_costing` synchronizuje sumy? | Subskrybuje `project_schedule.batch.*` events |
-| Czy `project_schedule` importuje z `project_costing`? | **NIE.** Tylko FK-id (`calculation_id`, `deal_id`) jako opaque UUID |
-| Gdzie żyją typy wspólne? | `apps/mercato/src/modules/project_schedule/types.ts` |
-| Element types: jak `project_costing` je zna? | Czyta przez `GET /api/project-schedule/element-types`; FK `element_type_id` = UUID z `ps_element_types` |
+| Kto posiada `ps_element_types`, `ps_schedule_tasks`, `ps_production_batches`? | `project_schedule` |
+| Jak `project_costing` czyta dane? | HTTP API + events |
+| Czy `project_schedule` importuje z `project_costing`? | NIE — tylko FK-id (calculation_id, deal_id, calculation_line_id) jako opaque UUID |
+| Skąd `project_schedule` bierze prawdopodobieństwo do prognozy? | Parametr query `?probability=` albo `deal.probability` pobrany przez consumer (project_costing lub dashboard) |
 
 ---
 
@@ -64,115 +69,141 @@ Moduł `project_schedule` dostarcza interaktywny harmonogram produkcji z widokie
 
 ### 2.1 Konwencje
 
-Wszystkie tabele: `organization_id` + `tenant_id`, UUID PK, `updated_at` (optimistic locking).
+`organization_id` + `tenant_id`, UUID PK, FK-id bez ORM relation, `updated_at`.
 
 ### 2.2 Tabele
 
 #### `ps_element_types` — typy elementów (słownik)
 
-*Właściciel: `project_schedule`. Używany przez `project_costing` przez FK-id.*
+Kolumny: id, organization_id, tenant_id, segment_code (opaque string), code, label, default_unit_id FK-id, sort_order, is_active, created_at, updated_at. `UNIQUE (organization_id, tenant_id, code)`.
+
+Seed `segment_code = 'precast_concrete'`: floor_slab, wall, column, beam, staircase.
+
+#### `ps_schedules` — głowa harmonogramu
 
 | Kolumna | Typ | Uwagi |
 |---------|-----|-------|
 | `id` | `uuid` PK | |
 | `organization_id` | `uuid` NOT NULL | |
 | `tenant_id` | `uuid` NOT NULL | |
-| `segment_code` | `text` NOT NULL | powiązanie z segmentem w `project_costing` (np. `precast_concrete`); opaque string (nie FK) |
-| `code` | `text` NOT NULL | np. `floor_slab`, `wall`, `column`, `beam`, `staircase` |
-| `label` | `text` NOT NULL | |
-| `default_unit_id` | `uuid` NULL | FK-id → dictionaries `unit` |
-| `sort_order` | `int` DEFAULT 0 | |
-| `is_active` | `bool` DEFAULT true | |
-| `created_at` | `timestamptz` | |
-| `updated_at` | `timestamptz` | |
-
-`UNIQUE (organization_id, tenant_id, code)`. Indeks: `(organization_id, tenant_id, segment_code)`.
-
-Seed dla `segment_code = 'precast_concrete'`: strop (`floor_slab`), ściana (`wall`), słup (`column`), belka (`beam`), klatka schodowa (`staircase`).
-
-#### `ps_schedules` — głowa harmonogramu per kalkulacja/deal
-
-| Kolumna | Typ | Uwagi |
-|---------|-----|-------|
-| `id` | `uuid` PK | |
-| `organization_id` | `uuid` NOT NULL | |
-| `tenant_id` | `uuid` NOT NULL | |
-| `deal_id` | `uuid` NOT NULL | FK-id → `customer_deals.id` |
-| `calculation_id` | `uuid` NULL | FK-id → `pc_calculations.id` (opaque UUID, ON DELETE SET NULL) |
+| `deal_id` | `uuid` NOT NULL | FK-id → customer_deals |
+| `calculation_id` | `uuid` NULL | FK-id → pc_calculations (opaque; ON DELETE SET NULL) |
+| `schedule_type` | `text` NOT NULL DEFAULT `'offer'` | `offer` \| `execution` |
+| `offer_schedule_id` | `uuid` NULL | FK → ps_schedules.id — referencja do harmonogramu ofertowego dla `execution` |
 | `label` | `text` NOT NULL | |
 | `status` | `text` DEFAULT `'draft'` | `draft` \| `active` \| `locked` \| `archived` |
+| `baseline_captured_at` | `timestamptz` NULL | moment przechwycenia baseline |
 | `notes` | `text` NULL | |
-| `created_by` | `uuid` NULL | FK-id → users |
+| `created_by` | `uuid` NULL | |
 | `created_at` | `timestamptz` | |
 | `updated_at` | `timestamptz` | |
 
-Indeksy: `(deal_id)`, `(calculation_id)`, `(organization_id, tenant_id)`.
+Constraint: `CHECK (schedule_type IN ('offer','execution'))`.
 
-#### `ps_schedule_batches` — batche/etapy harmonogramu
+Reguła: `execution` harmonogram jest kopią `offer` z zachowanym `offer_schedule_id`. Baseline rejestruje daty z `offer` w polach `baseline_start_at/end_at` zadań.
+
+#### `ps_schedule_tasks` — zadania WBS
 
 | Kolumna | Typ | Uwagi |
 |---------|-----|-------|
 | `id` | `uuid` PK | |
-| `schedule_id` | `uuid` NOT NULL | FK → `ps_schedules.id` |
+| `schedule_id` | `uuid` NOT NULL | FK → ps_schedules.id |
 | `organization_id` | `uuid` NOT NULL | |
 | `tenant_id` | `uuid` NOT NULL | |
-| `element_type_id` | `uuid` NULL | FK → `ps_element_types.id` |
+| `parent_task_id` | `uuid` NULL | FK → ps_schedule_tasks.id (WBS hierarchy) |
+| `wbs_code` | `text` NULL | np. `1.2.3` (auto-generated lub ręcznie) |
+| `label` | `text` NOT NULL | |
+| `is_milestone` | `bool` NOT NULL DEFAULT false | milestone = zero-duration task |
+| `element_type_id` | `uuid` NULL | FK → ps_element_types.id |
+| `planned_start_at` | `date` NULL | null dla summary tasks (wyliczone z dzieci) |
+| `planned_end_at` | `date` NULL | |
+| `actual_start_at` | `date` NULL | |
+| `actual_end_at` | `date` NULL | |
+| `baseline_start_at` | `date` NULL | z offer schedule; nigdy nadpisywane po baseline_captured_at |
+| `baseline_end_at` | `date` NULL | |
+| `duration_days` | `int` NULL | planowana liczba dni roboczych (informacyjna) |
+| `progress_pct` | `numeric(5,2)` DEFAULT 0 | % ukończenia (0–100) |
+| `status` | `text` DEFAULT `'not_started'` | `not_started` \| `in_progress` \| `done` \| `cancelled` |
+| `color` | `text` NULL | hex lub DS token |
+| `notes` | `text` NULL | |
+| `sort_order` | `int` DEFAULT 0 | kolejność wśród rodzeństwa (per parent_task_id) |
+| `external_id` | `text` NULL | ID w zewnętrznym narzędziu |
+| `external_tool_id` | `uuid` NULL | FK → ps_external_integrations.id |
+| `created_at` | `timestamptz` | |
+| `updated_at` | `timestamptz` | |
+
+Indeksy: `(schedule_id)`, `(parent_task_id)`, `(organization_id, tenant_id)`.
+
+Constraints: `CHECK (is_milestone = false OR planned_start_at = planned_end_at)` (milestone: start=end).
+
+Reguły WBS:
+- Zadania-podsumowanie (summary tasks) = te z dziećmi; ich `planned_start_at` = MIN(child.planned_start_at), `planned_end_at` = MAX(child.planned_end_at) — wyliczane przez serwis.
+- Liście WBS = zadania bez dzieci.
+
+#### `ps_task_dependencies` — zależności między zadaniami
+
+| Kolumna | Typ | Uwagi |
+|---------|-----|-------|
+| `id` | `uuid` PK | |
+| `schedule_id` | `uuid` NOT NULL | FK → ps_schedules.id |
+| `organization_id` | `uuid` NOT NULL | |
+| `tenant_id` | `uuid` NOT NULL | |
+| `predecessor_task_id` | `uuid` NOT NULL | FK → ps_schedule_tasks.id |
+| `successor_task_id` | `uuid` NOT NULL | FK → ps_schedule_tasks.id |
+| `dependency_type` | `text` NOT NULL DEFAULT `'FS'` | `FS` \| `SS` \| `FF` \| `SF` |
+| `lag_days` | `int` NOT NULL DEFAULT 0 | lag (dni); może być ujemny (lead) |
+| `created_at` | `timestamptz` | |
+| `updated_at` | `timestamptz` | |
+
+`UNIQUE (predecessor_task_id, successor_task_id)`.
+
+**Typy zależności**:
+- `FS` (Finish-to-Start): successor zaczyna gdy predecessor kończy + lag.
+- `SS` (Start-to-Start): successor zaczyna gdy predecessor zaczyna + lag.
+- `FF` (Finish-to-Finish): successor kończy gdy predecessor kończy + lag.
+- `SF` (Start-to-Finish): rzadkie; successor kończy gdy predecessor zaczyna + lag.
+
+**Walidacja cykli**: przy tworzeniu/aktualizacji zależności — serwis weryfikuje brak cykli w DAG (DFS); błąd HTTP 422 gdy cykl wykryty.
+
+**Krytyczna ścieżka** (v2): algorytm CPM (Critical Path Method) — forward pass (ES/EF) + backward pass (LS/LF) + float; zadania z float=0 = ścieżka krytyczna. Pola `early_start`, `early_finish`, `late_start`, `late_finish`, `float_days` dodane do `ps_schedule_tasks` w v2.
+
+#### `ps_production_batches` — partie produkcji
+
+| Kolumna | Typ | Uwagi |
+|---------|-----|-------|
+| `id` | `uuid` PK | |
+| `schedule_id` | `uuid` NOT NULL | FK → ps_schedules.id |
+| `task_id` | `uuid` NULL | FK → ps_schedule_tasks.id (batch powiązany z zadaniem WBS) |
+| `organization_id` | `uuid` NOT NULL | |
+| `tenant_id` | `uuid` NOT NULL | |
+| `element_type_id` | `uuid` NULL | FK → ps_element_types.id |
+| `calculation_line_id` | `uuid` NULL | **opaque UUID** FK-id → pc_calculation_lines (project_costing) |
 | `label` | `text` NOT NULL | |
 | `quantity_m3` | `numeric(14,3)` NULL | |
 | `quantity_pcs` | `numeric(14,0)` NULL | |
-| `planned_start_at` | `date` NOT NULL | |
-| `planned_end_at` | `date` NOT NULL | |
+| `planned_start_at` | `date` NOT NULL | data startu produkcji |
+| `planned_end_at` | `date` NOT NULL | data końca produkcji |
+| `planned_delivery_at` | `date` NULL | data dostawy |
 | `actual_start_at` | `date` NULL | |
 | `actual_end_at` | `date` NULL | |
+| `actual_delivery_at` | `date` NULL | |
 | `status` | `text` DEFAULT `'planned'` | `planned` \| `in_progress` \| `done` \| `cancelled` |
-| `color` | `text` NULL | kolor na Gantt (hex lub token DS) |
-| `depends_on_batch_id` | `uuid` NULL | FK → `ps_schedule_batches.id` (dependency arrow) |
-| `external_id` | `text` NULL | ID zadania w zewnętrznym narzędziu |
-| `external_tool_id` | `uuid` NULL | FK → `ps_external_integrations.id` |
 | `sort_order` | `int` DEFAULT 0 | |
 | `notes` | `text` NULL | |
 | `created_at` | `timestamptz` | |
 | `updated_at` | `timestamptz` | |
 
-Indeksy: `(schedule_id)`, `(organization_id, tenant_id)`, `(planned_start_at, planned_end_at)`.
+Indeksy: `(schedule_id)`, `(task_id)`, `(planned_start_at)`.
 
 Constraint: `CHECK (planned_end_at >= planned_start_at)`.
 
-#### `ps_import_column_mappings` — zapamiętane mapowania importu harmonogramu
+#### `ps_import_column_mappings` — mapowania importu harmonogramu
 
-*Własna tabela modułu, nie współdzielona z `project_costing`.*
+Kolumny: id, organization_id, tenant_id, label, file_type (xlsx|csv), column_map jsonb, created_at, updated_at. `UNIQUE (organization_id, tenant_id, label)`.
 
-| Kolumna | Typ | Uwagi |
-|---------|-----|-------|
-| `id` | `uuid` PK | |
-| `organization_id` | `uuid` NOT NULL | |
-| `tenant_id` | `uuid` NOT NULL | |
-| `label` | `text` NOT NULL | |
-| `file_type` | `text` NOT NULL | `xlsx` \| `csv` |
-| `column_map` | `jsonb` NOT NULL | mapowanie nazw kolumn importu |
-| `created_at` | `timestamptz` | |
-| `updated_at` | `timestamptz` | |
+#### `ps_external_integrations` — integracje zewnętrzne (v2)
 
-`UNIQUE (organization_id, tenant_id, label)`.
-
-#### `ps_external_integrations` — połączenia z zewnętrznymi narzędziami (v2)
-
-| Kolumna | Typ | Uwagi |
-|---------|-----|-------|
-| `id` | `uuid` PK | |
-| `organization_id` | `uuid` NOT NULL | |
-| `tenant_id` | `uuid` NOT NULL | |
-| `provider_id` | `text` NOT NULL | np. `ms_project`, `custom_gantt` |
-| `label` | `text` NOT NULL | |
-| `inbound_webhook_secret` | `text` NULL | HMAC secret (nie eksponować w API response) |
-| `outbound_webhook_url` | `text` NULL | |
-| `config` | `jsonb` NULL | konfiguracja providera (bez secrets) |
-| `is_active` | `bool` DEFAULT true | |
-| `last_sync_at` | `timestamptz` NULL | |
-| `created_at` | `timestamptz` | |
-| `updated_at` | `timestamptz` | |
-
-`UNIQUE (organization_id, tenant_id, provider_id)`.
+Kolumny: id, organization_id, tenant_id, provider_id, label, inbound_webhook_secret, outbound_webhook_url, config jsonb, is_active, last_sync_at, created_at, updated_at. `UNIQUE (organization_id, tenant_id, provider_id)`.
 
 ---
 
@@ -180,208 +211,199 @@ Constraint: `CHECK (planned_end_at >= planned_start_at)`.
 
 ### 3.1 Porównanie opcji
 
-| Biblioteka | Licencja | Ver. | Ostatnia aktual. | React-native | Drag & drop | Zależności | Bundle (~) | Uwagi |
-|------------|----------|------|-----------------|--------------|-------------|-----------|-----------|-------|
-| **@svar-ui/react-gantt** | MIT | 2.8.1 | Oct 2026 | ✅ TS | ✅ [niezweryfikowane] | 17 (@svar-ui/*) | ~100–200 KB [niezweryfikowane] | React >=18, aktywna (relese tydzień temu), task tree [niezweryfikowane], dep arrows [niezweryfikowane] |
-| frappe-gantt | MIT | 1.2.2 | Feb 2026 | Nie (vanilla JS) | ✅ | 0 | ~50 KB | Drag&drop potwierdzone, React wrapper przez `useRef+useEffect` |
-| @wamra/gantt-task-react | MIT | 0.6.17 | Nov 2024 | ✅ | ✅ | @mui/material (~400 KB) | ~450 KB+ | Wymaga MUI — niekompatybilny ze stackiem OM (Tailwind) |
-| gantt-task-react | MIT | 0.3.9 | Jul 2022 | ✅ | ✅ | 0 | ~80 KB | **Unmaintained** od 2022 |
-| wx-react-gantt | **GPLv3** | 1.3.1 | — | ✅ | ✅ | — | — | **Nie używać** — GPLv3 niekompatybilne z projektem |
-| DHTMLX Gantt | Podwójna licencja | — | — | Nie | ✅ | — | ~200 KB | npm registry podaje „MIT" — **niereliable**; oficjalnie: GPL (standard) / Commercial (PRO). Wymagana weryfikacja z vendorem przed użyciem. |
-| Bryntum Gantt | Komercyjna | 7.3.7 | — | ✅ | ✅ | — | ~500 KB | npm registry podaje „MIT" — **niereliable**; oficjalnie licencja komercyjna. Wymagana weryfikacja z vendorem przed użyciem. |
-| svelte-gantt | MIT | 4.5.0 | — | Nie (Svelte) | ✅ | Svelte | — | Svelte — niekompatybilny z Next.js/React |
-
-> ⚠️ **DHTMLX i Bryntum**: metadane npm podają licencję MIT, co jest **niereliable** dla obu tych produktów komercyjnych/dual-licensed. Przed użyciem wymagana weryfikacja warunków licencyjnych bezpośrednio z vendorami (dhtmlx.com, bryntum.com).
+| Biblioteka | Licencja | Ver. | Ostatnia aktual. | React-native | WBS tree | Milestones | FS/SS/FF/SF | Bundle (~) | Uwagi |
+|------------|----------|------|-----------------|--------------|----------|------------|-------------|-----------|-------|
+| **@svar-ui/react-gantt** | MIT | 2.8.1 | Oct 2026 | ✅ TS | ✅ [niezwer.] | ✅ [niezwer.] | ✅ [niezwer.] | ~100–200 KB [niezwer.] | React >=18; aktywna (tydzień temu); zweryfikuj w docs svar.dev/react/gantt |
+| frappe-gantt | MIT | 1.2.2 | Feb 2026 | Nie (JS) | ❌ | ❌ | FS only | ~50 KB | Drag&drop ✅; brak WBS/milestones/SS/FF/SF — **niewystarczający** dla wymagań rev 5 |
+| DHTMLX Gantt | Podwójna licencja | — | — | Nie | ✅ | ✅ | ✅ | ~200 KB | npm MIT **niereliable**; weryfikacja z vendorem |
+| Bryntum Gantt | Komercyjna | 7.3.7 | — | ✅ | ✅ | ✅ | ✅ | ~500 KB | npm MIT **niereliable**; weryfikacja z vendorem |
+| wx-react-gantt | **GPLv3** | — | — | — | — | — | — | — | **Nie używać** |
 
 ### 3.2 Wybór i uzasadnienie
 
-**Wybrana biblioteka**: `@svar-ui/react-gantt` v2.8.1 (MIT, github.com/svar-widgets/react-gantt).
+**Rekomendacja: `@svar-ui/react-gantt` v2.8.1 (MIT, React-native TS)**.
 
-Uzasadnienie:
-- **React-native z TypeScript** — natywna integracja z Next.js/React 19 (`peerDependencies: react >=18`), brak wrappera; bezpieczeństwo typów od razu.
-- **MIT license** — weryfikowalna (github.com/svar-widgets/react-gantt README) [niezweryfikowane tylko: czy repo jest publiczne i czy README potwierdza MIT bez zastrzeżeń].
-- **Aktywne utrzymanie** — opublikowana tydzień temu (Oct 12 2026); frappe-gantt: Feb 2026.
-- **Projekt specjalizowany** — opis: „high-performance React Gantt chart component for building project timelines" z keywords gantt, timeline, task.
-- **Drag & drop** [niezweryfikowane z npm metadata — oczekiwane na podstawie opisu i przeznaczenia]: przesuwanie i zmiana rozpiętości batchów [do weryfikacji w dokumentacji svar.dev/react/gantt przed implementacją].
-- **Task tree / hierarchia** [niezweryfikowane]: prawdopodobna na podstawie dep `@svar-ui/react-tasklist` w paczce.
-- **Dependencies**: 17 paczek `@svar-ui/*` + `date-fns` — własne zależności ekosystemu SVAR, brak MUI; rozmiar bundle [niezweryfikowane: szacunkowo 100–200 KB gzip na podstawie 1.2 MB unpacked].
+Rev 5 wymaga WBS tree, milestones i FS/SS/FF/SF dependency links. `frappe-gantt` jest niewystarczający (brak WBS, milestones, obsługuje tylko FS). `@svar-ui/react-gantt` jako React-native, MIT, aktywna biblioteka jest najlepszym kandydatem.
 
-Kompromis: cechy drag&drop, rozmiar bundle i tree/hierarchy wymagają weryfikacji w dokumentacji (svar.dev/react/gantt) przed implementacją. Jeśli drag&drop okaże się niewystarczający — fallback: frappe-gantt (vanilla JS wrapper, ~50 KB, potwierdzone drag&drop, ale wymaga React wrappera).
+**Krytyczna weryfikacja przed implementacją**: WBS tree, milestones, FS/SS/FF/SF links — wszystkie zaznaczone [niezweryfikowane z npm metadata]. **Implementator MUSI zweryfikować pełny feature set w dokumentacji svar.dev/react/gantt oraz przykładach GitHub przed rozpoczęciem Gantt task w MVP.** Jeśli brakuje którejkolwiek cechy:
+- WBS tree: sprawdź `@svar-ui/react-tasklist` (dep w paczce) lub własna implementacja lewej kolumny WBS.
+- Milestones: diamond shape → custom task renderer.
+- SF/FF/SS: jeśli tylko FS — wystarczające dla v1 MVP; SF/FF/SS jako v2 enhancement.
 
-frappe-gantt pozostaje **opcją fallback**: lighter (~50 KB), drag&drop potwierdzone, ale vanilla JS wrapper przez `useRef+useEffect` — mniej idiomatyczne dla React/TS.
+DHTMLX i Bryntum: pełne wsparcie WBS/milestones/links, ale licencje wymagają weryfikacji z vendorami — nie rekomenduję bez weryfikacji kosztów.
 
-### 3.3 Kluczowe cechy wymagane w MVP
+### 3.3 Wymagania Gantt w MVP
 
-- Widok: Day / Week / Month (przełącznik).
-- Drag & drop przesuwanie batcha → `PATCH /api/project-schedule/batches/:id` (nowe daty).
-- Resize (zmiana rozpiętości) → ta sama ścieżka.
-- Strzałki zależności: `depends_on_batch_id` → wizualizacja.
-- Klik batcha → panel boczny (edycja etykiety, ilości, statusu, notat).
-- Kolory per `element_type_id` (custom class).
-- SSR: komponent renderowany wyłącznie client-side: `dynamic(() => import('./GanttChart'), { ssr: false })`.
+- WBS tree (lewa kolumna z wcięciem hierarchy).
+- Milestones (diamond / ikona, zero-duration).
+- Drag & drop: przesuwanie + resize zadań.
+- Strzałki zależności FS (minimum); SS/FF/SF w v1/v2.
+- Przełącznik Day / Week / Month.
+- SSR: `dynamic(() => import('./GanttChart'), { ssr: false })`.
 
 ---
 
 ## 4. Reguły wyliczeń — prognoza produkcji
 
-### 4.1 Pro-rata z batchów — reguła podziału
-
-Prognoza m³ i szt. per miesiąc, zakres 6 miesięcy od `today`:
+### 4.1 Pro-rata z batchów
 
 ```
 Dla batcha B [planned_start_at S, planned_end_at E]:
-  batch_days = E − S + 1                             (min 1 dzień)
-  Dla każdego miesiąca M w zakresie prognozy:
-    M_start = pierwszy dzień miesiąca M
-    M_end   = ostatni dzień miesiąca M
+  batch_days = E − S + 1   (min 1)
+  Dla miesiąca M:
     overlap_days = max(0, min(E, M_end) − max(S, M_start) + 1)
     raw_m3[M]  = B.quantity_m3  × (overlap_days / batch_days)
     raw_pcs[M] = B.quantity_pcs × (overlap_days / batch_days)
 ```
 
-### 4.2 Zaokrąglenie — metoda największej reszty (Largest Remainder Method)
+Agregacja tygodniowa: analogicznie z `[W_start, W_end]` (Mon–Sun).
 
-**m³ (3 miejsca dziesiętne)**: suma zaokrąglonych miesięcy musi być równa `B.quantity_m3` (3 d.p.).
-1. Oblicz `floor(raw_m3[M], 3)` per miesiąc.
-2. Reszta do rozdysponowania = `B.quantity_m3 − SUM(floor_m3[M])`.
-3. Posortuj miesiące malejąco wg `frac_m3[M] = raw_m3[M] − floor_m3[M]`.
-4. Dodaj `0.001` do górnych `k` miesięcy (gdzie `k = reszta × 1000`, zaokrąglone do int).
+### 4.2 Zaokrąglenie — Largest Remainder Method (LRM)
 
-**szt. (0 miejsc dziesiętnych)**: analogicznie z `floor(raw_pcs[M], 0)`:
-1. `floor_pcs[M] = floor(raw_pcs[M])`.
-2. Reszta = `B.quantity_pcs − SUM(floor_pcs[M])`.
-3. Posortuj wg `frac_pcs[M]`.
-4. Dodaj `1` do górnych `k` miesięcy (gdzie `k = reszta`).
+**m³ (3 d.p.)**: `SUM(monthly_m3) = B.quantity_m3` dokładnie.
+1. `floor_m3[M] = floor(raw_m3[M], 3)`.
+2. Reszta = `B.quantity_m3 − SUM(floor_m3[M])`.
+3. Sort malejąco wg `frac = raw_m3[M] − floor_m3[M]`; dodaj `0.001` do top-k miesięcy.
 
-**Wynik**: `SUM(allocated_m3[M]) = B.quantity_m3` i `SUM(allocated_pcs[M]) = B.quantity_pcs` dokładnie.
+**szt. (0 d.p.)**: analogicznie z `floor(..., 0)` i `+1` per pozycja.
 
-### 4.3 Agregacja per miesiąc
+**Tygodnie**: ten sam algorytm LRM per tydzień; `SUM(weekly) = B.quantity_m3/pcs` dokładnie.
+
+### 4.3 Prognoza z ważeniem prawdopodobieństwem
 
 ```
-monthly_m3[M]  = SUM(allocated_m3[M]  FOR all B WHERE B.status IN ('planned','in_progress'))
-monthly_pcs[M] = SUM(allocated_pcs[M] FOR all B WHERE B.status IN ('planned','in_progress'))
+weighted_m3[M]  = monthly_m3[M]  × probability / 100
+weighted_pcs[M] = monthly_pcs[M] × probability / 100
 ```
 
-Filtr: `ps_schedules.status = 'active'` i (gdy kontekst `project_costing`) `is_active_version = true` po stronie kalkulacji — sprawdzane przez query param `activeOnly=true`.
+`probability` przekazywane przez konsumenta (np. `project_costing` subskrybuje `customers.deal.updated` i dostarcza `deal.probability` do query). Endpoint `/forecast` akceptuje `?probability=0–100` (opcjonalny, default = 100 = bez ważenia).
 
 ### 4.4 Endpoint `/forecast`
 
-`GET /api/project-schedule/schedules/:id/forecast?months=6`
+`GET /api/project-schedule/schedules/:id/forecast?months=6&weeks=true&probability=75`
 
-Odpowiedź: `MonthlyForecast[]` z `month` (YYYY-MM), `quantityM3`, `quantityPcs`. Precyzyjna pro-rata z §4.1–4.2; analytics.ts jako uzupełniające źródło danych dla widgetów dashboard.
+Odpowiedź: `{ monthly: MonthlyForecast[], weekly: WeeklyForecast[] }`.
+
+```typescript
+export type MonthlyForecast = { month: string; quantityM3: number; quantityPcs: number; weightedM3: number; weightedPcs: number }
+export type WeeklyForecast  = { week: string; quantityM3: number; quantityPcs: number; weightedM3: number; weightedPcs: number }
+```
 
 ---
 
-## 5. Kontrakt z `project_costing` (i innymi modułami)
+## 5. Kontrakt z `project_costing`
 
-### 5.1 Typy wspólne — `types.ts`
+### 5.1 Typy wspólne (`types.ts`)
 
 ```typescript
 // apps/mercato/src/modules/project_schedule/types.ts
 export type ScheduleBatchSummary = {
-  scheduleId: string
-  calculationId: string | null
-  dealId: string
-  totalQuantityM3: number | null
-  totalQuantityPcs: number | null
-  productionStartAt: string | null   // ISO date
-  productionEndAt: string | null
+  scheduleId: string; calculationId: string | null; dealId: string
+  totalQuantityM3: number | null; totalQuantityPcs: number | null
+  productionStartAt: string | null; productionEndAt: string | null
   batchCount: number
 }
-
-export type MonthlyForecast = {
-  month: string         // 'YYYY-MM'
-  quantityM3: number    // 3 d.p.
-  quantityPcs: number   // 0 d.p.
-}
+export type MonthlyForecast = { month: string; quantityM3: number; quantityPcs: number; weightedM3: number; weightedPcs: number }
+export type WeeklyForecast  = { week: string; quantityM3: number; quantityPcs: number; weightedM3: number; weightedPcs: number }
 ```
 
 ### 5.2 API konsumowane przez `project_costing`
 
 ```
-GET /api/project-schedule/element-types?segmentCode=&isActive=   → lista typów elementów
-GET /api/project-schedule/schedules?calculationId={id}&dealId={id}
-GET /api/project-schedule/schedules/:id/summary    → ScheduleBatchSummary
-GET /api/project-schedule/schedules/:id/forecast   → MonthlyForecast[]
-GET /api/project-schedule/batches?scheduleId={id}&calculationId={id}
+GET /api/project-schedule/element-types?segmentCode=&isActive=
+GET /api/project-schedule/schedules?calculationId=&dealId=
+GET /api/project-schedule/schedules/:id/summary
+GET /api/project-schedule/schedules/:id/forecast?months=6&probability=
+GET /api/project-schedule/batches?scheduleId=&calculationId=
 ```
 
-`project_costing` wywołuje przez internal server-side fetch lub DI service — nigdy przez `@import` z modułu `project_schedule`.
-
-### 5.3 Zdarzenia emitowane przez `project_schedule`
+### 5.3 Zdarzenia
 
 ```
-project_schedule.schedule.created      (clientBroadcast: true)
-project_schedule.schedule.activated    (clientBroadcast: true)
+project_schedule.schedule.created       (clientBroadcast: true)
+project_schedule.schedule.activated     (clientBroadcast: true)
 project_schedule.schedule.locked
-project_schedule.schedule.archived
+project_schedule.schedule.baseline_captured  (clientBroadcast: true)
+project_schedule.task.created
+project_schedule.task.updated           (clientBroadcast: true)
+project_schedule.task.deleted
 project_schedule.batch.created
-project_schedule.batch.updated         (clientBroadcast: true)
+project_schedule.batch.updated          (clientBroadcast: true)
 project_schedule.batch.deleted
 project_schedule.batch.status_changed
-project_schedule.import.completed      (clientBroadcast: true)
-project_schedule.sync.webhook_received (v2)
+project_schedule.import.completed       (clientBroadcast: true)
+project_schedule.sync.webhook_received  (v2)
 ```
 
-`project_costing` subskrybuje `project_schedule.batch.updated` i `schedule.activated` przez `subscribers/` do aktualizacji `total_quantity_m3/pcs`, `production_start_at/end_at` w `pc_calculations`.
+### 5.4 Brak odwrotnej zależności
 
-### 5.4 Zasada braku odwrotnej zależności
-
-- `project_schedule` **nie importuje** żadnego kodu z `project_costing`.
-- `project_schedule` przechowuje `calculation_id` jako opaque UUID FK-id.
-- Element types (`ps_element_types`) należą do `project_schedule`; `project_costing` czyta je przez API i przechowuje `element_type_id` jako FK-id UUID.
-- Przy usunięciu kalkulacji: `ps_schedules.calculation_id → NULL` (ON DELETE SET NULL lub serwis nulluje przy archiwizacji).
+`project_schedule` nie importuje kodu z `project_costing`. `calculation_id` i `calculation_line_id` to opaque UUID FK-id. `ps_element_types` to niezależny słownik (nie `pc_`). `segment_code` to opaque string.
 
 ---
 
 ## 6. API modułu `project_schedule`
 
-Prefix: `/api/project-schedule/`. Konwencje OM, optimistic locking.
+Prefix: `/api/project-schedule/`. Optimistic locking.
 
 ### 6.1 Typy elementów
 
 ```
-GET    /api/project-schedule/element-types?segmentCode=&isActive=
-POST   /api/project-schedule/element-types
-PATCH  /api/project-schedule/element-types/:id
-DELETE /api/project-schedule/element-types/:id
+GET/POST  /api/project-schedule/element-types?segmentCode=
+PATCH/DELETE /api/project-schedule/element-types/:id
 ```
 
 ### 6.2 Harmonogramy
 
 ```
-GET/POST  /api/project-schedule/schedules?dealId=&calculationId=&status=
-GET/PATCH/DELETE /api/project-schedule/schedules/:id
+GET/POST  /api/project-schedule/schedules?dealId=&calculationId=&scheduleType=
+GET/PATCH /api/project-schedule/schedules/:id
+DELETE    /api/project-schedule/schedules/:id   (tylko draft)
 
-POST /api/project-schedule/schedules/:id/activate
-POST /api/project-schedule/schedules/:id/lock
-POST /api/project-schedule/schedules/:id/duplicate
-GET  /api/project-schedule/schedules/:id/summary
-GET  /api/project-schedule/schedules/:id/forecast?months=6
-GET  /api/project-schedule/schedules/:id/export?format=xlsx|csv
-POST /api/project-schedule/schedules/:id/import
+POST .../activate | .../lock | .../duplicate
+POST .../capture-baseline   (offer → copies baseline_start/end do zadań)
+POST .../create-execution   (tworzy execution schedule z offer jako kopię)
+
+GET .../summary
+GET .../forecast?months=6&weeks=true&probability=
+GET .../export?format=xlsx|csv
+POST .../import
 ```
 
-### 6.3 Batche
+### 6.3 Zadania WBS
 
 ```
-GET/POST /api/project-schedule/batches?scheduleId=&status=
-PATCH/DELETE /api/project-schedule/batches/:id
-POST /api/project-schedule/batches/batch    (bulk upsert — drag&drop save)
+GET/POST  /api/project-schedule/tasks?scheduleId=&parentTaskId=
+PATCH/DELETE /api/project-schedule/tasks/:id
+POST      /api/project-schedule/tasks/batch    (bulk upsert — drag&drop save)
 ```
 
-### 6.4 Mapowania importu
+### 6.4 Zależności
 
 ```
-GET/POST /api/project-schedule/import-column-mappings
-PATCH/DELETE /api/project-schedule/import-column-mappings/:id
+GET/POST  /api/project-schedule/task-dependencies?scheduleId=&predecessorId=&successorId=
+PATCH/DELETE /api/project-schedule/task-dependencies/:id
 ```
 
-### 6.5 Integracje zewnętrzne (v2)
+Walidacja cykli: `POST` i `PATCH` zwracają 422 `{ code: 'DEPENDENCY_CYCLE' }` przy wykryciu cyklu.
+
+### 6.5 Batche produkcyjne
 
 ```
-GET/POST /api/project-schedule/external-integrations
-PATCH/DELETE /api/project-schedule/external-integrations/:id
+GET/POST  /api/project-schedule/production-batches?scheduleId=&taskId=
+PATCH/DELETE /api/project-schedule/production-batches/:id
+POST      /api/project-schedule/production-batches/batch
+```
+
+### 6.6 Import / mapowania
+
+```
+GET/POST/PATCH/DELETE /api/project-schedule/import-column-mappings[/:id]
+```
+
+### 6.7 Integracje (v2)
+
+```
+GET/POST/PATCH/DELETE /api/project-schedule/external-integrations[/:id]
 POST /api/project-schedule/schedules/:id/sync/push
 POST /api/project-schedule/webhook/:integrationId
 POST /api/project-schedule/schedules/:id/import-ms-project
@@ -393,90 +415,67 @@ POST /api/project-schedule/schedules/:id/import-ms-project
 
 ### 7.1 Zakładka „Harmonogram" na karcie Deala (MVP)
 
-Spot: `detail:customers.deal:tabs` (oddzielna zakładka od `project_costing`, inny `groupId`).
+Spot: `detail:customers.deal:tabs` (oddzielna zakładka od project_costing).
 
-Widget: `project_schedule/widgets/DealScheduleTab.tsx`.
+Widget: `DealScheduleTab.tsx`.
 
 Zawartość:
-- Przełącznik widoku: Gantt / Lista batchów.
-- Gantt (§7.2): interaktywny drag & drop od MVP.
-- Panel boczny: edycja wybranego batcha (etykieta, typ elementu, m³/szt., daty, status).
-- Przyciski: „Dodaj batch", „Importuj XLSX" (v1), „Eksportuj XLSX" (v1), status harmonogramu.
-- Miniatura prognozy: sumy m³/szt. podział na 6 miesięcy.
+- Selektor harmonogramu (offer/execution) + status badge.
+- Przełącznik Gantt / Lista WBS.
+- Gantt z WBS tree, milestones, dependency arrows (§3).
+- Panel boczny edycji zadania: label, type, element_type, daty, progress, status, notes, dependency arrows.
+- Sekcja batchów powiązanych z zadaniem (lista + CRUD).
+- Przyciski: „Dodaj zadanie", „Dodaj zależność", „Importuj XLSX" (v1), „Eksportuj" (v1).
+- Miniatura prognozy (6 miesięcy, m³/szt.).
 
-### 7.2 Komponent `GanttChart.tsx` (MVP — @svar-ui/react-gantt)
+### 7.2 GanttChart.tsx — `@svar-ui/react-gantt`
 
 ```typescript
-// components/GanttChart.tsx
-'use client'
+// components/GanttChart.tsx  — 'use client'
+// Import przez: dynamic(() => import('./GanttChart'), { ssr: false })
 import { Gantt } from '@svar-ui/react-gantt'
-import type { GanttTask } from '@svar-ui/react-gantt'
-
-type GanttChartProps = {
-  tasks: GanttTask[]
-  scales?: unknown
-  onTaskUpdate: (task: GanttTask) => void
-  onTaskClick?: (task: GanttTask) => void
-  readOnly?: boolean
-}
-
-// GanttChart renderowany wyłącznie client-side przez:
-// const DealScheduleTab = dynamic(() => import('./DealScheduleTab'), { ssr: false })
-export function GanttChart({ tasks, onTaskUpdate, onTaskClick, readOnly }: GanttChartProps) {
-  // Użycie @svar-ui/react-gantt API — dostosować do faktycznego API biblioteki
-  // [do weryfikacji w dokumentacji svar.dev/react/gantt przed implementacją]
-  return (
-    <Gantt
-      tasks={tasks}
-      onTaskUpdate={readOnly ? undefined : onTaskUpdate}
-      onClick={onTaskClick}
-    />
-  )
-}
+// API @svar-ui/react-gantt wymaga weryfikacji w docs svar.dev/react/gantt przed implementacją
+// Wymagane: WBS tree (lewa kolumna hierarchy), milestones, FS dependency links,
+//           drag&drop przesuwanie/resize, onTaskUpdate callback
 ```
 
-> **Uwaga implementacyjna**: dokładne API `@svar-ui/react-gantt` (nazwy propsów, event handlery) wymagają weryfikacji w dokumentacji svar.dev/react/gantt przed implementacją. Komponent musi być renderowany wyłącznie client-side przez `dynamic(..., { ssr: false })` z powodu wymagań DOM biblioteki [niezweryfikowane dla @svar-ui — założone na podstawie typowego zachowania bibliotek Gantt].
+Zaktualizuj API call po weryfikacji docs: propsName onTaskUpdate/onChange, format zadania (id, start, end, parent, type: 'milestone'|'task', dependencies).
 
-Drag&drop callback → `PATCH /api/project-schedule/batches/:id` z nowymi datami przez `useGuardedMutation`.
+Drag&drop callback → `PATCH /api/project-schedule/tasks/:id`.
 
 ### 7.3 Strony backend
 
-| URL | Opis |
-|-----|------|
-| `/project-schedule/element-types` | Lista typów elementów per segment |
-| `/project-schedule/schedules` | Lista harmonogramów cross-deal |
-| `/project-schedule/schedules/[id]` | Widok Gantt standalone |
-| `/project-schedule/settings` | Ustawienia (v2: external integrations) |
+`/project-schedule/element-types`, `/project-schedule/schedules`, `/project-schedule/schedules/[id]`, `/project-schedule/settings`.
 
 ---
 
 ## 8. Import / Eksport (v1)
 
-### 8.1 Formaty
+### 8.1 Formaty XLSX/CSV (`exceljs`)
 
-**XLSX** (`exceljs`): kolumny `label`, `element_type_code`, `quantity_m3`, `quantity_pcs`, `planned_start` (YYYY-MM-DD), `planned_end`, `status`, `depends_on`. Kompatybilny z CSV eksportem z MS Project.
+Kolumny harmonogramu XLSX: `wbs_code`, `label`, `parent_wbs_code`, `is_milestone`, `element_type_code`, `planned_start` (YYYY-MM-DD), `planned_end`, `duration_days`, `predecessors` (wbs_code csv, default FS; format: `1.2FS+2` dla FS z lagiem 2 dni), `status`, `notes`.
 
-**CSV** (UTF-8 BOM, separator `;`): te same kolumny.
+Batche: opcjonalny drugi arkusz.
 
-Kreator mapowania: `POST /api/project-schedule/import-column-mappings` zapisuje do `ps_import_column_mappings`.
+MS Project CSV export compatibility: kolumny `Name`, `Duration`, `Start`, `Finish`, `Predecessors`, `WBS`.
 
 ### 8.2 MS Project XML (v2)
 
-Import pliku `.mpp` → XML. Złożony format — v2 po weryfikacji z Markiem (patrz §11 Pytania otwarte).
+Parser `xml2js`; elementy `<Task><WBS>`, `<Start>`, `<Finish>`, `<Predecessors>`. Złożony format — v2 po potwierdzeniu z Markiem.
 
-### 8.3 Limity importu
+### 8.3 Limity
 
-Max **5000 wierszy** / **10 MB** per import. Timeout 30 s.
+Max 5000 zadań / 10 MB. Timeout 30 s.
 
 ---
 
 ## 9. Uprawnienia (ACL)
 
-| Feature ID | Opis |
-|-----------|------|
-| `project_schedule.view` | Podgląd harmonogramów |
-| `project_schedule.edit` | Edycja batchów, drag & drop, zarządzanie typami elementów |
-| `project_schedule.admin` | Ustawienia, integracje zewnętrzne |
+| Feature | Opis |
+|---------|------|
+| `project_schedule.view` | Podgląd |
+| `project_schedule.edit` | Edycja zadań, drag & drop, batchów, zależności |
+| `project_schedule.admin` | Ustawienia, element types, integracje zewnętrzne |
 | `project_schedule.import` | Import XLSX/CSV |
 | `project_schedule.export` | Eksport XLSX/CSV |
 
@@ -491,203 +490,210 @@ entities: [
   {
     entityId: 'project_schedule:batches',
     requiredFeatures: ['project_schedule.view'],
-    entityConfig: {
-      tableName: 'ps_schedule_batches',
-      dateField: 'planned_start_at',
-      defaultScopeFields: ['tenant_id', 'organization_id'],
-    },
+    entityConfig: { tableName: 'ps_production_batches', dateField: 'planned_start_at',
+                    defaultScopeFields: ['tenant_id', 'organization_id'] },
     fieldMappings: {
-      id:             { dbColumn: 'id',                type: 'uuid' },
-      scheduleId:     { dbColumn: 'schedule_id',       type: 'uuid' },
-      elementTypeId:  { dbColumn: 'element_type_id',   type: 'uuid' },
-      quantityM3:     { dbColumn: 'quantity_m3',       type: 'numeric' },
-      quantityPcs:    { dbColumn: 'quantity_pcs',      type: 'numeric' },
-      plannedStartAt: { dbColumn: 'planned_start_at',  type: 'timestamp' },
-      plannedEndAt:   { dbColumn: 'planned_end_at',    type: 'timestamp' },
-      status:         { dbColumn: 'status',            type: 'text' },
+      id: { dbColumn: 'id', type: 'uuid' },
+      scheduleId: { dbColumn: 'schedule_id', type: 'uuid' },
+      taskId: { dbColumn: 'task_id', type: 'uuid' },
+      elementTypeId: { dbColumn: 'element_type_id', type: 'uuid' },
+      quantityM3: { dbColumn: 'quantity_m3', type: 'numeric' },
+      quantityPcs: { dbColumn: 'quantity_pcs', type: 'numeric' },
+      plannedStartAt: { dbColumn: 'planned_start_at', type: 'timestamp' },
+      plannedEndAt: { dbColumn: 'planned_end_at', type: 'timestamp' },
+      status: { dbColumn: 'status', type: 'text' },
+    },
+  },
+  {
+    entityId: 'project_schedule:tasks',
+    requiredFeatures: ['project_schedule.view'],
+    entityConfig: { tableName: 'ps_schedule_tasks', dateField: 'planned_start_at',
+                    defaultScopeFields: ['tenant_id', 'organization_id'] },
+    fieldMappings: {
+      id: { dbColumn: 'id', type: 'uuid' },
+      scheduleId: { dbColumn: 'schedule_id', type: 'uuid' },
+      isMilestone: { dbColumn: 'is_milestone', type: 'boolean' },
+      progressPct: { dbColumn: 'progress_pct', type: 'numeric' },
+      plannedStartAt: { dbColumn: 'planned_start_at', type: 'timestamp' },
+      plannedEndAt: { dbColumn: 'planned_end_at', type: 'timestamp' },
+      baselineStartAt: { dbColumn: 'baseline_start_at', type: 'timestamp' },
+      baselineEndAt: { dbColumn: 'baseline_end_at', type: 'timestamp' },
+      status: { dbColumn: 'status', type: 'text' },
     },
   },
 ]
 ```
 
-Widget dashboardu „Prognoza produkcji 6 miesięcy": rekomendowany przez dedykowany endpoint `GET /api/project-schedule/forecast?months=6` (precyzyjna pro-rata z §4); analytics.ts jako uzupełniające źródło dla widgetów opartych na silniku dashboard.
+Prognoza produkcji z dokładnymi sumarycznymi wartościami: rekomendowany endpoint `GET /api/project-schedule/schedules/:id/forecast` (precyzyjna pro-rata LRM); analytics.ts jako uzupełnienie dla dashboard queries.
 
 ---
 
 ## 11. Integracja zewnętrzna (v2)
 
-### 11.1 Interfejs providera
+### 11.1 Provider interface
 
 ```typescript
-// lib/external/provider.interface.ts
 export interface ScheduleExternalProvider {
-  providerId: string
-  label: string
+  providerId: string; label: string
   push(schedule: SchedulePushPayload, ctx: ProviderContext): Promise<void>
-  mapInbound(payload: unknown): ScheduleBatchImport[]
+  mapInbound(payload: unknown): ScheduleTaskImport[]
 }
 ```
 
-### 11.2 Inbound Webhook
+### 11.2 Webhooks
 
-`POST /api/project-schedule/webhook/:integrationId` — Standard Webhooks HMAC (SHA-256). Idempotentność przez `external_id`: batch istnieje → update, else → create.
+- **Inbound**: Standard Webhooks HMAC SHA-256; idempotentność przez `external_id`.
+- **Outbound**: po `task.updated` → POST do `outbound_webhook_url`; retry 3× przez `queue`.
 
-### 11.3 Outbound Webhook
+### 11.3 Daty-change webhooks (outbound, v2)
 
-Po `project_schedule.batch.updated` → `POST` do `outbound_webhook_url` (retry 3× exponential backoff przez `queue`).
+Przy każdej zmianie `planned_start_at`/`planned_end_at` zadania (drag&drop) → natychmiastowy event `project_schedule.task.updated` z `{ taskId, newStart, newEnd }` → outbound webhook.
 
 ---
 
 ## 12. Fazy i szacowanie wysiłku
 
-### Faza MVP (~11 dni roboczych)
+### Faza MVP (~15 dni roboczych)
 
 | Zadanie | Rozmiar |
 |---------|---------|
-| `ps_element_types` — tabela, API CRUD, seed prefabrykacja | M (1 dzień) |
-| `ps_schedules` + `ps_schedule_batches` — migracje | S (1 dzień) |
-| API CRUD: schedules, batches, bulk upsert | M (1.5 dnia) |
-| ACL features + setup.ts | S (0.5 dnia) |
-| Analytics.ts | S (0.5 dnia) |
-| Endpoint `/summary` + `/forecast` (pro-rata + LRM rounding) | M (1.5 dnia) |
-| `GanttChart.tsx` (@svar-ui/react-gantt, drag & drop, dep arrows) | L (3 dni) |
-| `DealScheduleTab` widget + zakładka deala + panel boczny + miniatura | M (2 dni) |
+| `ps_element_types` — tabela, API CRUD, seed precast_concrete | M (1 dzień) |
+| `ps_schedules` (z schedule_type + offer_schedule_id) — migracje | S (0.5 dnia) |
+| `ps_schedule_tasks` (WBS, parent_task_id, is_milestone, baseline cols) — migracje + API | M (1.5 dnia) |
+| `ps_task_dependencies` (FS/SS/FF/SF + lag, walidacja cykli) — migracje + API | M (1.5 dnia) |
+| `ps_production_batches` (task_id, calculation_line_id) — migracje + API | S (0.5 dnia) |
+| Pozostałe API: schedules CRUD, bulk tasks, forecast endpoint (pro-rata LRM + prob. weighting) | M (2 dni) |
+| ACL features + setup.ts + analytics.ts | S (1 dzień) |
+| `GanttChart.tsx` (@svar-ui/react-gantt: WBS tree, milestones, dep arrows, drag & drop) | L (4 dni) |
+| `DealScheduleTab` widget + panel boczny + miniatura prognozy | M (3 dni) |
 
-**Suma MVP**: 1+1+1.5+0.5+0.5+1.5+3+2 = **11 dni roboczych**.
+**Suma MVP**: 1+0.5+1.5+1.5+0.5+2+1+4+3 = **15 dni roboczych**.
 
-### Faza v1 (~3 dni robocze, po MVP)
+### Faza v1 (~5 dni roboczych)
 
 | Zadanie | Rozmiar |
 |---------|---------|
-| `ps_import_column_mappings` + Import XLSX/CSV + kreator mapowania | M (1.5 dnia) |
-| Zdarzenia + subscriber w `project_costing` (update sum) | S (1 dzień) |
-| Backend strony: lista cross-deal, standalone Gantt, element-types | S (0.5 dnia) |
+| `ps_import_column_mappings` + Import/eksport XLSX/CSV (zadania + batche) | M (1.5 dnia) |
+| Baseline capture (offer → execution, `create-execution` endpoint) | M (1.5 dnia) |
+| Zdarzenia + subscriber w `project_costing` (update sum w pc_calculations) | S (1 dzień) |
+| Backend strony: lista harmonogramów, element-types | S (0.5 dnia) |
+| i18n PL/EN + testy serwisów (cycle detection, LRM rounding) | S (0.5 dnia) |
 
-**Suma v1**: 1.5+1+0.5 = **3 dni robocze**.
+**Suma v1**: 1.5+1.5+1+0.5+0.5 = **5 dni roboczych**.
 
-### Faza v2 (~7 dni roboczych, po v1)
+### Faza v2 (~10 dni roboczych)
 
 | Zadanie | Rozmiar |
 |---------|---------|
 | `ps_external_integrations` + provider interface + registry | M (1.5 dnia) |
 | Inbound webhook (Standard Webhooks HMAC, idempotentność) | M (1.5 dnia) |
-| Outbound webhook (queue retry, payload formatter) | M (1.5 dnia) |
+| Outbound webhook (date-change, queue retry) | M (1.5 dnia) |
 | Import MS Project XML | L (2.5 dnia) |
+| Algorytm CPM (critical path): forward/backward pass, float, pola ES/EF/LS/LF | L (3 dni) |
 
-**Suma v2**: 1.5+1.5+1.5+2.5 = **7 dni roboczych**.
+**Suma v2**: 1.5+1.5+1.5+2.5+3 = **10 dni roboczych**.
 
-**Łącznie `project_schedule`**: 11+3+7 = **21 dni roboczych**.
+**Łącznie `project_schedule`**: 15+5+10 = **30 dni roboczych**.
 
 ---
 
-## 13. Ryzyka
+## 13. Podsumowanie zbiorcze (oba moduły)
+
+| Moduł | MVP | v1 | v2 | Suma |
+|-------|-----|----|----|------|
+| `project_costing` | 17 d | 17 d | 14 d | 48 d |
+| `project_schedule` | 15 d | 5 d | 10 d | 30 d |
+| **Łącznie** | **32 d** | **22 d** | **24 d** | **78 d** |
+
+---
+
+## 14. Ryzyka
 
 | # | Ryzyko | P-stwo | Wpływ | Mitygacja |
 |---|--------|--------|-------|-----------|
-| R1 | `@svar-ui/react-gantt` — cechy drag&drop / rozmiar bundle do weryfikacji [niezweryfikowane z npm metadata] | Średnie | Wysoki | Weryfikacja w docs svar.dev/react/gantt przed implementacją; fallback: frappe-gantt (~50 KB, drag&drop potwierdzone) |
-| R2 | `@svar-ui/react-gantt` wymaga DOM — SSR Next.js | Średnie | Średni | `dynamic(() => import('./GanttChart'), { ssr: false })` [niezweryfikowane czy konieczne — założone] |
-| R3 | Kolizja zakładek deala (costing + schedule) — oba używają `detail:customers.deal:tabs` | Niskie | Niski | Różne `groupId` w widget registration; priorytet steruje kolejnością |
-| R4 | Circular dependency: `ps_schedules.calculation_id` nullowany przy archiwizacji kalkulacji | Niskie | Średni | ON DELETE SET NULL na FK lub serwis nulluje przy archiwizacji |
-| R5 | LRM rounding przy bardzo krótkich batchach (<3 dni): jeden miesiąc dostaje całość | Niskie | Niski | Min batch duration = 1 dzień; rounding artefakty nie sumują się do błędu globalnego |
-| R6 | Import MS Project XML — wiele wersji formatu | Wysokie | Niski | v2 po potwierdzeniu z Markiem; v1 = CSV/XLSX tylko |
-| R7 | DHTMLX/Bryntum: npm podaje MIT ale prawdziwa licencja jest komercyjna | N/A | — | Wybrano @svar-ui/react-gantt — ryzyko usunięte |
+| R1 | @svar-ui/react-gantt: WBS tree / milestones / SS/FF/SF — niezweryfikowane z npm | Średnie | Wysoki | **Weryfikacja docs svar.dev/react/gantt przed implementacją** (milestone zadania w MVP) |
+| R2 | SSR Next.js + @svar-ui/react-gantt — wymaga DOM | Średnie | Średni | `dynamic(..., { ssr: false })` |
+| R3 | Walidacja cykli w dużych WBS (setki zależności) — wydajność DFS | Niskie | Niski | DFS O(V+E); dla typowych budowlanych WBS (<200 zadań) bez problemu |
+| R4 | LRM rounding przy bardzo krótkich batchach (<3 dni) | Niskie | Niski | Min 1 dzień; residual absorbowany przez miesiąc/tydzień z max overlap |
+| R5 | Baseline capture: jeśli execution schedule nie istnieje — brak baseline | Niskie | Niski | `capture-baseline` wymaga istnienia execution schedule lub tworzy je implicitly |
+| R6 | calculation_line_id = opaque UUID: przy usunięciu linii kalkulacji batch ma orphaned FK | Niskie | Niski | ON DELETE SET NULL lub serwis nulluje przy archiwizacji linii |
+| R7 | MS Project XML — wiele wersji formatu; pola zróżnicowane | Wysokie | Niski | v2 po potwierdzeniu z Markiem; v1 = XLSX/CSV |
+| R8 | Kolizja zakładek deala (project_costing + project_schedule) | Niskie | Niski | Różne groupId; priorytet steruje kolejnością |
 
 ---
 
-## 14. Pytania otwarte do Marka
+## 15. Pytania otwarte do Marka
 
-1. **Zależności Gantt — rescheduling**: Czy przy przesunięciu batcha poprzednika system ma automatycznie przesuwać batche potomne (automatic rescheduling), czy tylko wizualizacja strzałki bez auto-update?
+1. **Rescheduling automatyczny**: Przy przesunięciu zadania poprzednika czy system ma automatycznie przesuwać zadania potomne (automatic rescheduling), czy tylko wizualizacja strzałki bez auto-update?
 
 2. **Cross-deal Gantt**: Czy potrzebny jest widok Gantt agregujący harmonogramy wielu deali jednocześnie (planowanie zasobów produkcyjnych firmy)?
 
-3. **MS Project XML — aktywne użycie**: Czy firma aktywnie używa MS Project? Czy wystarczy jednorazowy import CSV/XLSX kompatybilny z MS Project, czy potrzebna jest dwustronna synchronizacja w v2?
+3. **MS Project XML**: Czy firma aktywnie używa MS Project? Czy wystarczy import CSV/XLSX kompatybilny z MS Project?
 
-4. **Format importu XLSX**: Jaki format pliku XLSX exportuje wewnętrzny system firmy lub narzędzie używane przez Marka (jeśli istnieje)?
+4. **Offer → Execution transition**: Kto inicjuje przejście z harmonogramu ofertowego (`offer`) do wykonawczego (`execution`)? Czy to akceptacja oferty (`accepted`) wyzwala `create-execution` automatycznie?
+
+5. **SS/FF/SF dependencies**: Czy w v1 wystarczą tylko FS (Finish-to-Start), czy od razu potrzebne SS/FF/SF?
 
 ---
 
-## 15. Rozwiązane założenia autonomiczne
+## 16. Rozwiązane założenia autonomiczne
 
 | # | Założenie | Uzasadnienie |
 |---|-----------|--------------|
-| A1 | Biblioteka Gantt: `@svar-ui/react-gantt` v2.8.1 (MIT) | React-native TS, aktywna (Oct 2026), MIT; drag&drop [niezweryfikowane — do sprawdzenia w docs przed implementacją]; fallback: frappe-gantt |
-| A2 | SSR: Gantt tylko client-side `dynamic(..., { ssr: false })` | Biblioteki Gantt typowo wymagają DOM [niezweryfikowane dla @svar-ui] |
-| A3 | `project_schedule` nie zależy od `project_costing`; zależność jest `project_costing → project_schedule` | Unika circular dependency; costing czyta schedule przez HTTP API i events |
-| A4 | Prognoza: dedykowany endpoint `/forecast` zamiast wyłącznie dashboard query | Precyzja LRM niemożliwa w silniku analytics (brak operatora overlap) |
-| A5 | Import MS Project XML w v2 po weryfikacji z Markiem | XML MS Project złożony — v1 = CSV/XLSX |
-| A6 | `ps_import_column_mappings` — własna tabela modułu | Nie dzielona z `project_costing`; moduły są niezależne |
-| A7 | `ps_element_types` — własna tabela modułu (nie `pc_element_types`) | `project_schedule` nie zależy od `project_costing`; costing używa `element_type_id` jako FK-id UUID do `ps_element_types` |
-| A8 | LRM rounding dla pcs (integers) i m3 (3 d.p.) | Gwarantuje `SUM(monthly) = batch_total` dokładnie |
-| A9 | `ps_schedules` bez pola `currency` | Waluta jest własnością kalkulacji (`pc_calculations.currency`); harmonogram przechowuje ilości, nie wartości |
+| A1 | @svar-ui/react-gantt v2.8.1 (MIT); weryfikacja WBS/milestones/links wymagana przed impl. | React-native TS, aktywna (Oct 2026); frappe-gantt niewystarczający (brak WBS/milestones) |
+| A2 | SSR: `dynamic(..., { ssr: false })` | Biblioteki Gantt wymagają DOM |
+| A3 | `project_schedule` nie zależy od `project_costing` | Brak circular dependency |
+| A4 | Prognoza: endpoint `/forecast` z LRM + probability param | Precyzja LRM; probability = param (nie hardcoded) |
+| A5 | MS Project XML w v2 po potwierdzeniu | Złożony format |
+| A6 | `ps_import_column_mappings` — własna tabela | Niezależność modułów |
+| A7 | `ps_element_types` — własna tabela; costing czyta przez API | Brak circular dependency |
+| A8 | LRM rounding m³ (3 d.p.) i szt. (int) per miesiąc i tydzień | `SUM(periodic) = batch_total` dokładnie |
+| A9 | `ps_schedules` bez `currency` | Waluta = własność kalkulacji |
+| A10 | Walidacja cykli: DFS synchroniczny | Typowe WBS < 200 zadań; wystarczające |
+| A11 | `calculation_line_id` w `ps_production_batches` = opaque UUID | `project_schedule` nie zależy od `project_costing` |
+| A12 | `schedule_type: offer|execution`; baseline w polach `baseline_start/end_at` na `ps_schedule_tasks` | Upraszcza model; bez osobnej tabeli snapshot |
 
 ---
 
-## 16. Migracje i backward compatibility
+## 17. Migracje i backward compatibility
 
-Moduł dodaje wyłącznie nowe tabele (`ps_*`). Zero zmian w `packages/core`.
-
-Kolejność migracji: `ps_element_types` → `ps_schedules` → `ps_schedule_batches` → `ps_import_column_mappings` → `ps_external_integrations`.
+Nowe tabele `ps_*` only. Kolejność: `ps_element_types` → `ps_schedules` → `ps_schedule_tasks` → `ps_task_dependencies` → `ps_production_batches` → `ps_import_column_mappings` → `ps_external_integrations`.
 
 ---
 
-## 17. Szkielet plików modułu
+## 18. Szkielet plików modułu
 
 ```
 apps/mercato/src/modules/project_schedule/
-├── index.ts
-├── acl.ts
-├── analytics.ts
-├── events.ts
-├── setup.ts                          # seed: ps_element_types dla precast_concrete
-├── di.ts
-├── types.ts                          # ScheduleBatchSummary, MonthlyForecast
+├── acl.ts, analytics.ts, events.ts, index.ts, setup.ts, di.ts, types.ts
 ├── api/
-│   ├── element-types/route.ts
-│   ├── element-types/[id]/route.ts
-│   ├── schedules/route.ts
-│   ├── schedules/[id]/route.ts
-│   ├── schedules/[id]/activate/route.ts
-│   ├── schedules/[id]/lock/route.ts
-│   ├── schedules/[id]/duplicate/route.ts
-│   ├── schedules/[id]/summary/route.ts
-│   ├── schedules/[id]/forecast/route.ts
-│   ├── schedules/[id]/export/route.ts
-│   ├── schedules/[id]/import/route.ts
-│   ├── schedules/[id]/sync/push/route.ts
-│   ├── batches/route.ts
-│   ├── batches/[id]/route.ts
-│   ├── batches/batch/route.ts
-│   ├── import-column-mappings/route.ts
-│   ├── import-column-mappings/[id]/route.ts
-│   ├── external-integrations/route.ts
-│   ├── external-integrations/[id]/route.ts
-│   └── webhook/[integrationId]/route.ts
-├── backend/
-│   └── project-schedule/
-│       ├── element-types/page.tsx
-│       ├── schedules/page.tsx
-│       ├── schedules/[id]/page.tsx
-│       └── settings/page.tsx
+│   ├── element-types/[id]?/route.ts
+│   ├── schedules/[id]?/{activate,lock,duplicate,capture-baseline,create-execution,
+│   │                    summary,forecast,export,import}/route.ts
+│   ├── tasks/[id]?/batch/route.ts
+│   ├── task-dependencies/[id]?/route.ts
+│   ├── production-batches/[id]?/batch/route.ts
+│   ├── import-column-mappings/[id]?/route.ts
+│   └── external-integrations/[id]?/webhook/[integrationId]/route.ts
+├── backend/project-schedule/
+│   ├── element-types/, schedules/[id]/, settings/
 ├── components/
-│   ├── GanttChart.tsx               # @svar-ui/react-gantt wrapper (client-only)
-│   ├── BatchSidePanel.tsx
+│   ├── GanttChart.tsx          # @svar-ui/react-gantt wrapper (client-only)
+│   ├── WBSTreeColumn.tsx
+│   ├── TaskSidePanel.tsx
 │   ├── BatchListView.tsx
 │   └── ForecastMiniature.tsx
-├── data/
-│   ├── entities.ts
-│   └── validators.ts
+├── data/entities.ts + validators.ts
 ├── i18n/pl.json + en.json
 ├── migrations/Migration20261019*.ts
-├── widgets/
-│   ├── index.ts
-│   └── DealScheduleTab.tsx
+├── subscribers/calculationActivated.ts
+├── widgets/DealScheduleTab.tsx
 └── lib/
     ├── schedule.service.ts
-    ├── forecast.ts                   # pro-rata + LRM rounding
+    ├── forecast.ts              # pro-rata LRM + probability weighting
     ├── import.service.ts
-    └── external/
-        ├── provider.interface.ts
-        └── registry.ts
+    ├── cycle-detection.ts       # DFS cycle check
+    └── external/provider.interface.ts + registry.ts
 ```
 
 ---
@@ -696,5 +702,6 @@ apps/mercato/src/modules/project_schedule/
 
 | Data | Zmiana |
 |------|--------|
-| 2026-10-19 | v1 (rev 3) — inicjalna spec wydzielona z `project-costing-offer-calculator.md` |
-| 2026-10-19 | v2 (rev 4) — Gantt przeniesiony do MVP (Marek: „od razu"); dodano `ps_element_types` (własna tabela, nie `pc_`); dodano `ps_import_column_mappings` (nie dzielone z `pc_`); usunięto `ps_schedules.currency`; poprawiono kierunek zależności w A3; dodano `@svar-ui/react-gantt` do porównania (MIT, Oct 2026, React-native TS, rekomendowany z uwagą weryfikacji; frappe-gantt = fallback); GanttChart.tsx zaktualizowany; pro-rata rounding: LRM (largest remainder method) dla szt. i m3; poprawiono wx-react-gantt = GPLv3; uwaga o DHTMLX/Bryntum: npm MIT niereliable — weryfikacja z vendorami; effort: MVP 11d, v1 3d, v2 7d = 21d |
+| 2026-10-19 | v1 (rev 3) — inicjalna spec |
+| 2026-10-19 | v2 (rev 4) — Gantt MVP, @svar-ui, ps_element_types, ps_import_column_mappings, LRM |
+| 2026-10-19 | v3 (rev 5) — schedule_type (offer/execution); ps_schedule_tasks (WBS, parent_task_id, is_milestone, baseline_start/end_at, progress_pct); ps_task_dependencies (FS/SS/FF/SF + lag, cycle validation); ps_production_batches (task_id, calculation_line_id opaque); ps_schedules.offer_schedule_id; baseline_captured_at; capture-baseline + create-execution endpoints; GanttChart wymaga WBS tree+milestones+deps (frappe-gantt niewystarczający — weryfikacja @svar-ui przed impl.); prognoza tygodniowa + probability weighting; analytics: ps_schedule_tasks entity dodana; effort: MVP 15d, v1 5d, v2 10d = 30d; combined: 32+22+24=78d |
