@@ -6,6 +6,7 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-19 |
+| **Rewizja** | 2026-10-19 (v2 — zmiany po przeglądzie Marka) |
 | **Moduł** | `project_costing` (`apps/mercato/src/modules/project_costing`) |
 | **Nisza v1** | Prefabrykacja żelbetowa |
 | **Docelowo** | Cała branża budowlana (multi-segment) |
@@ -16,9 +17,9 @@
 
 ## Streszczenie
 
-Moduł `project_costing` dodaje kalkulator kosztów ofertowych przypiętych do Deali w Open Mercato CRM. Działa jak uproszczony Excel: siatka linii kosztowych z edycją inline, import/eksport XLSX/CSV, szablony per segment, wersjonowanie kalkulacji oraz zakładka „Kalkulacja" wstrzykiwana na kartę deala. Wyniki (cena oferty, koszt, marża %) zasilają pole `value_amount` deala i silnik dashboardów, umożliwiając widgety TOP/BOTTOM marża i prognozę produkcji na 6 miesięcy.
+Moduł `project_costing` dodaje kalkulator kosztów ofertowych przypiętych do Deali w Open Mercato CRM. Działa jak uproszczony Excel: siatka linii kosztowych z edycją inline, import/eksport XLSX/CSV (`exceljs`), szablony per segment, wersjonowanie kalkulacji, harmonogram produkcji (batche), abstrakcja źródeł cennikowych oraz zakładka „Kalkulacja" wstrzykiwana na kartę deala. Wyniki zasilają pole `value_amount` deala przez istniejący command bus i analitykę dashboardów (TOP/BOTTOM marża, prognoza produkcji 6 miesięcy z batchów harmonogramu). Widoczność kosztów/marż/cen jest konfigurowalna per organizacja/tenant z wymuszeniem server-side. PDF oferty generowany server-side i przechowywany jako attachment.
 
-Moduł żyje wyłącznie w `apps/mercato/src/modules/project_costing` – zero zmian w `packages/core`. Integracja wyłącznie przez punkty rozszerzeń OM: injection spots, events, interceptors, `analytics.ts`.
+Moduł żyje wyłącznie w `apps/mercato/src/modules/project_costing` – zero zmian w `packages/core`. Integracja wyłącznie przez punkty rozszerzeń OM: injection spots, events, command bus, `analytics.ts`.
 
 ---
 
@@ -26,49 +27,78 @@ Moduł żyje wyłącznie w `apps/mercato/src/modules/project_costing` – zero z
 
 ### 1.1 Problem
 
-Firmy z branży budowlanej (v1: prefabrykacja żelbetowa) liczą wyceny w Excelu, a wyniki przepisują ręcznie do CRM-u. Brak powiązania kalkulacji z Dealem i brak historii wersji.
+Firmy z branży budowlanej (v1: prefabrykacja żelbetowa) liczą wyceny w Excelu, a wyniki przepisują ręcznie do CRM-u. Brak powiązania kalkulacji z Dealem, brak historii wersji, brak kontroli widoczności marż między rolami.
 
 ### 1.2 Propozycja wartości
 
 - Kalkulacja kosztów bezpośrednio na karcie Deala (zakładka „Kalkulacja").
-- Import z istniejących arkuszy XLSX/CSV z kreatorem mapowania kolumn.
-- Automatyczne wyliczenie marży, narzutu, przeliczenie wartości Deala.
-- Szablony per segment (prefabrykacja: stropy/ściany/słupy/belki × m³, z typowymi stawkami materiałów i robocizny).
-- Wersjonowanie kalkulacji (historia, oznaczenie wysłanej klientowi, porównanie).
-- Dashboardy: ranking deali wg marży (TOP/BOTTOM) i prognoza produkcji na 6 miesięcy.
+- Import z istniejących arkuszy XLSX/CSV z kreatorem mapowania kolumn (zapamiętywane mappingi).
+- Wyliczenie marży, narzutu, przychodu – zasilenie `value_amount` deala przez command bus.
+- Szablony per segment, wersjonowanie kalkulacji (wysłana/zablokowana/historia).
+- Harmonogram produkcji (batche per typ elementu) → prognoza m³/szt. na 6 miesięcy w dashboardach.
+- Abstrakcja źródeł cennikowych z proweniencją każdej ceny (własny cennik v1, adaptery v2).
+- Konfigurowalny poziom widoczności kosztów/marż/cen per rola – wymuszenie server-side.
+- PDF oferty dla generalnego wykonawcy (logo, pozycje, warunki, ważność) – wersjonowany, jako attachment.
 
-### 1.3 Zakres (w spec, poza scope implementacji)
+### 1.3 Zakres spec
 
-Spec **nie** scaffolduje kodu aplikacji. Definiuje model, API, UI, ACL i integracje wymagane do implementacji.
+Spec **nie** scaffolduje kodu aplikacji. Definiuje model, API, UI, ACL, PDF, harmonogram i integracje wymagane do implementacji.
 
 ---
 
 ## 2. Model danych
 
-### 2.1 Tabele i kolumny
+### 2.1 Konwencje globalne
 
-> Wszystkie tabele: wielodostępność przez `organization_id` + `tenant_id`. UUID PK, brak bezpośrednich relacji ORM między modułami (tylko FK-id).
+- Wielodostępność: każda tabela zawiera `organization_id` + `tenant_id`. Wszystkie zapytania filtrują przez obie wartości pobierane z kontekstu żądania.
+- UUID PK: `gen_random_uuid()`.
+- Brak bezpośrednich relacji ORM między modułami – tylko FK-id (wartości UUID bez dekoratora ORM `@ManyToOne`).
+- `updated_at` na każdej tabeli edytowalnej przez użytkownika (optimistic locking).
+
+### 2.2 Tabele
+
+#### `pc_settings` — ustawienia modułu per tenant
+
+| Kolumna | Typ | Uwagi |
+|---------|-----|-------|
+| `id` | `uuid` PK | |
+| `organization_id` | `uuid` NOT NULL | |
+| `tenant_id` | `uuid` NOT NULL | |
+| `key` | `text` NOT NULL | klucz ustawienia |
+| `value` | `jsonb` NOT NULL | wartość |
+| `created_at` | `timestamptz` | |
+| `updated_at` | `timestamptz` | |
+
+`UNIQUE (organization_id, tenant_id, key)`.
+
+Kluczowe ustawienia (seed w `setup.ts`):
+- `visibility.costs_visible_features` — tablica feature ID uprawnionych do widzenia kosztów (domyślnie `["project_costing.view_costs"]`).
+- `visibility.margin_visible_features` — feature ID dla marży (domyślnie `["project_costing.view_margin"]`).
+- `visibility.prices_visible_features` — feature ID dla cen sprzedaży (domyślnie `["project_costing.view_prices"]`).
+- `pdf.company_name`, `pdf.logo_url`, `pdf.footer_text`, `pdf.validity_days` — dane do szablonu PDF.
+- `default_currency` — domyślna waluta kalkulacji (domyślnie `'PLN'`).
+- `default_overhead_rate` — domyślny narzut (domyślnie `0.10`).
 
 #### `pc_cost_categories` — słownik kategorii kosztów
 
 | Kolumna | Typ | Uwagi |
 |---------|-----|-------|
-| `id` | `uuid` PK | gen_random_uuid() |
-| `organization_id` | `uuid` NOT NULL | tenant scope |
-| `tenant_id` | `uuid` NOT NULL | tenant scope |
+| `id` | `uuid` PK | |
+| `organization_id` | `uuid` NOT NULL | |
+| `tenant_id` | `uuid` NOT NULL | |
 | `code` | `text` NOT NULL | unikalny per org+tenant, np. `production`, `transport`, `assembly`, `material`, `labour`, `equipment`, `subcontractor` |
-| `label` | `text` NOT NULL | etykieta i18n (klucz lub tekst) |
-| `segment_id` | `uuid` NULL FK → `pc_segments.id` | NULL = wspólna dla wszystkich segmentów |
-| `sort_order` | `int` DEFAULT 0 | kolejność w siatce |
+| `label` | `text` NOT NULL | |
+| `segment_id` | `uuid` NULL | FK → `pc_segments.id`; NULL = wspólna dla wszystkich segmentów |
+| `sort_order` | `int` DEFAULT 0 | |
 | `is_active` | `bool` DEFAULT true | |
 | `created_at` | `timestamptz` | |
 | `updated_at` | `timestamptz` | |
 
-Indeksy: `(organization_id, tenant_id)`, `UNIQUE (organization_id, tenant_id, code)`.
+`UNIQUE (organization_id, tenant_id, code)`. Indeks: `(organization_id, tenant_id)`.
 
-Seed domyślny (setup.ts): `production`, `transport`, `assembly` dla każdego nowego tenanta.
+Seed domyślny: `production`, `transport`, `assembly`.
 
-#### `pc_segments` — segmenty branżowe (konfiguracja)
+#### `pc_segments` — segmenty branżowe
 
 | Kolumna | Typ | Uwagi |
 |---------|-----|-------|
@@ -82,9 +112,9 @@ Seed domyślny (setup.ts): `production`, `transport`, `assembly` dla każdego no
 | `created_at` | `timestamptz` | |
 | `updated_at` | `timestamptz` | |
 
-Indeksy: `(organization_id, tenant_id)`, `UNIQUE (organization_id, tenant_id, code)`.
+`UNIQUE (organization_id, tenant_id, code)`.
 
-Seed: `precast_concrete` (prefabrykacja żelbetowa) – v1.
+Seed: segment `precast_concrete` (prefabrykacja żelbetowa) dla v1.
 
 #### `pc_element_types` — typy elementów per segment
 
@@ -102,31 +132,54 @@ Seed: `precast_concrete` (prefabrykacja żelbetowa) – v1.
 | `created_at` | `timestamptz` | |
 | `updated_at` | `timestamptz` | |
 
-Seed dla `precast_concrete`: strop, ściana, słup, belka, klatka schodowa.
+Seed dla `precast_concrete`: strop (`floor_slab`), ściana (`wall`), słup (`column`), belka (`beam`), klatka schodowa (`staircase`).
 
-#### `pc_price_catalog` — własny cennik firmy
+#### `pc_price_sources` — rejestr źródeł cennikowych (provider registry)
 
 | Kolumna | Typ | Uwagi |
 |---------|-----|-------|
 | `id` | `uuid` PK | |
 | `organization_id` | `uuid` NOT NULL | |
 | `tenant_id` | `uuid` NOT NULL | |
+| `provider_id` | `text` NOT NULL | identyfikator providera, np. `company_catalog`, `sekocenbud`, `intercenbud` |
+| `label` | `text` NOT NULL | etykieta dla UI |
+| `price_list_version` | `text` NULL | np. `Q3/2026`, `2026-10` |
+| `price_list_date` | `date` NULL | data obowiązywania |
+| `region` | `text` NULL | np. `PL-MZ` (ISO 3166-2) |
+| `is_active` | `bool` DEFAULT true | |
+| `meta` | `jsonb` NULL | dodatkowe metadane providera |
+| `created_at` | `timestamptz` | |
+| `updated_at` | `timestamptz` | |
+
+`UNIQUE (organization_id, tenant_id, provider_id, price_list_version)`.
+
+Seed: jeden wpis `provider_id = 'company_catalog'` dla własnego cennika.
+
+#### `pc_price_catalog` — własny cennik firmy (i przyszłe proweniencje)
+
+| Kolumna | Typ | Uwagi |
+|---------|-----|-------|
+| `id` | `uuid` PK | |
+| `organization_id` | `uuid` NOT NULL | |
+| `tenant_id` | `uuid` NOT NULL | |
+| `price_source_id` | `uuid` NOT NULL | FK → `pc_price_sources.id` |
 | `segment_id` | `uuid` NULL | NULL = wspólna pozycja |
 | `cost_category_id` | `uuid` NULL | FK → `pc_cost_categories.id` |
-| `code` | `text` NOT NULL | SKU/kod pozycji cennikowej |
+| `external_code` | `text` NULL | kod zewnętrzny (np. KNR 4-01/1234) – mapowanie z cennika zewnętrznego |
+| `code` | `text` NOT NULL | wewnętrzny kod pozycji |
 | `label` | `text` NOT NULL | |
+| `description` | `text` NULL | |
 | `unit_id` | `uuid` NULL | FK-id → dictionaries `unit` |
 | `unit_cost` | `numeric(14,4)` NULL | koszt jedn. (zakup) |
 | `unit_price` | `numeric(14,4)` NULL | cena jedn. (sprzedaż) |
-| `currency` | `char(3)` NOT NULL DEFAULT `'PLN'` | ISO 4217 |
+| `currency` | `char(3)` NOT NULL DEFAULT `'PLN'` | |
 | `valid_from` | `date` NULL | |
 | `valid_to` | `date` NULL | |
-| `source` | `text` DEFAULT `'manual'` | `manual` \| `csv_import` \| `xlsx_import` |
 | `is_active` | `bool` DEFAULT true | |
 | `created_at` | `timestamptz` | |
 | `updated_at` | `timestamptz` | |
 
-Indeksy: `(organization_id, tenant_id)`, `(organization_id, tenant_id, code)`, `(segment_id)`.
+Indeksy: `(organization_id, tenant_id)`, `(price_source_id)`, `(organization_id, tenant_id, code)`.
 
 #### `pc_calculation_templates` — szablony kalkulacji per segment
 
@@ -149,20 +202,19 @@ Indeksy: `(organization_id, tenant_id)`, `(organization_id, tenant_id, code)`, `
 |---------|-----|-------|
 | `id` | `uuid` PK | |
 | `template_id` | `uuid` NOT NULL | FK → `pc_calculation_templates.id` |
-| `organization_id` | `uuid` NOT NULL | multi-tenant scope (dla indeksów) |
+| `organization_id` | `uuid` NOT NULL | |
 | `tenant_id` | `uuid` NOT NULL | |
 | `cost_category_id` | `uuid` NOT NULL | FK → `pc_cost_categories.id` |
 | `element_type_id` | `uuid` NULL | FK → `pc_element_types.id` |
-| `label` | `text` NOT NULL | opis pozycji |
-| `quantity` | `numeric(14,4)` DEFAULT 1 | ilość domyślna |
+| `label` | `text` NOT NULL | |
+| `quantity` | `numeric(14,4)` DEFAULT 1 | |
 | `unit_id` | `uuid` NULL | FK-id → dictionaries `unit` |
 | `unit_cost` | `numeric(14,4)` NULL | koszt jedn. domyślny |
 | `unit_price` | `numeric(14,4)` NULL | cena jedn. domyślna |
 | `sort_order` | `int` DEFAULT 0 | |
+| `catalog_entry_id` | `uuid` NULL | FK → `pc_price_catalog.id` |
 
-Indeksy: `(template_id)`, `(organization_id, tenant_id)`.
-
-#### `pc_calculations` — kalkulacja (głowa) powiązana z Dealem
+#### `pc_calculations` — kalkulacja (głowa), powiązana z Dealem
 
 | Kolumna | Typ | Uwagi |
 |---------|-----|-------|
@@ -171,40 +223,45 @@ Indeksy: `(template_id)`, `(organization_id, tenant_id)`.
 | `tenant_id` | `uuid` NOT NULL | |
 | `deal_id` | `uuid` NOT NULL | FK-id → `customer_deals.id` |
 | `segment_id` | `uuid` NULL | FK → `pc_segments.id` |
-| `code` | `text` NOT NULL | numer kalkulacji, unik. per tenant+deal (np. `K/2026/001`) |
+| `code` | `text` NOT NULL | np. `K/2026/001` |
 | `label` | `text` NOT NULL | tytuł wersji |
 | `status` | `text` NOT NULL DEFAULT `'draft'` | `draft` \| `active` \| `sent` \| `locked` \| `archived` |
-| `version` | `int` NOT NULL DEFAULT 1 | numer wersji (auto-increment per deal) |
-| `is_active_version` | `bool` NOT NULL DEFAULT false | **tylko jedna** kalkulacja per deal może być `true` |
-| `currency` | `char(3)` NOT NULL DEFAULT `'PLN'` | |
-| `overhead_rate` | `numeric(6,4)` DEFAULT 0 | narzut jako ułamek (0.10 = 10%) |
-| `markup_rate` | `numeric(6,4)` DEFAULT 0 | marża target (informacyjna, wyliczona vs zadana) |
-| `total_cost` | `numeric(14,2)` NULL | suma kosztów (denormalizacja, odświeżana przez recalc) |
-| `total_price` | `numeric(14,2)` NULL | suma cen (dochód) |
-| `total_margin` | `numeric(14,2)` NULL | zysk = total_price − total_cost |
-| `margin_rate` | `numeric(6,4)` NULL | marża % = total_margin / total_price |
-| `total_quantity_m3` | `numeric(14,3)` NULL | łączna ilość w m³ (prognoza produkcji) |
-| `total_quantity_pcs` | `numeric(14,0)` NULL | łączna ilość szt. (prognoza produkcji) |
-| `production_start_at` | `date` NULL | planowany start produkcji |
-| `production_end_at` | `date` NULL | planowany koniec produkcji |
-| `notes` | `text` NULL | notatki |
-| `sent_at` | `timestamptz` NULL | data wysłania klientowi |
-| `locked_at` | `timestamptz` NULL | data zablokowania |
-| `template_id` | `uuid` NULL | FK → `pc_calculation_templates.id` (skąd wygenerowano) |
+| `version` | `int` NOT NULL DEFAULT 1 | numer wersji per deal (auto-increment) |
+| `is_active_version` | `bool` NOT NULL DEFAULT false | tylko jedna per deal może być `true` |
+| `currency` | `char(3)` NOT NULL DEFAULT `'PLN'` | waluta kalkulacji = waluta deala (patrz §3.7) |
+| `overhead_rate` | `numeric(6,4)` DEFAULT 0 | narzut jako ułamek, np. 0.10 = 10% |
+| `target_margin_rate` | `numeric(6,4)` NULL | docelowa marża % (informacyjna / dla obliczenia sugerowanej ceny) |
+| `subtotal_cost` | `numeric(14,2)` NULL | suma kosztów linii (przed narzutem) |
+| `overhead_amount` | `numeric(14,2)` NULL | wartość narzutu = subtotal_cost × overhead_rate |
+| `full_cost` | `numeric(14,2)` NULL | subtotal_cost + overhead_amount |
+| `subtotal_price` | `numeric(14,2)` NULL | suma cen linii |
+| `total_margin` | `numeric(14,2)` NULL | subtotal_price − full_cost |
+| `margin_rate` | `numeric(6,4)` NULL | total_margin / subtotal_price |
+| `total_quantity_m3` | `numeric(14,3)` NULL | suma ilości w m³ (prognoza, pochodna z harmonogramu) |
+| `total_quantity_pcs` | `numeric(14,0)` NULL | suma ilości szt. |
+| `production_start_at` | `date` NULL | najwcześniejszy start z batchów (derived, informacyjny) |
+| `production_end_at` | `date` NULL | najpóźniejszy koniec z batchów (derived, informacyjny) |
+| `notes` | `text` NULL | |
+| `sent_at` | `timestamptz` NULL | |
+| `locked_at` | `timestamptz` NULL | |
+| `template_id` | `uuid` NULL | FK → `pc_calculation_templates.id` |
 | `created_by` | `uuid` NULL | FK-id → users |
+| `unlocked_by` | `uuid` NULL | FK-id → users (ostatni admin, który odblokował) |
+| `unlocked_at` | `timestamptz` NULL | |
+| `unlock_reason` | `text` NULL | |
 | `created_at` | `timestamptz` | |
-| `updated_at` | `timestamptz` | **wymagane dla optimistic locking** |
+| `updated_at` | `timestamptz` | wymagane dla optimistic locking |
 
-Indeksy: `(organization_id, tenant_id)`, `(deal_id)`, `(deal_id, is_active_version)`, `UNIQUE (organization_id, tenant_id, code)`.
+`UNIQUE (organization_id, tenant_id, code)`. Indeksy: `(deal_id)`, `(deal_id, is_active_version)`.
 
-Ograniczenia: `CHECK (status IN ('draft','active','sent','locked','archived'))`.
+Partial unique index dla `is_active_version`:
+```sql
+CREATE UNIQUE INDEX pc_calculations_active_unique
+  ON pc_calculations (deal_id, organization_id, tenant_id)
+  WHERE is_active_version = true;
+```
 
-> **Reguła aktywnej kalkulacji**: Constraint bazy (`is_active_version` może być `true` tylko raz per `deal_id` + `organization_id` + `tenant_id`) wymuszony przez unikalny partial index:
-> ```sql
-> CREATE UNIQUE INDEX pc_calculations_active_unique
->   ON pc_calculations (deal_id, organization_id, tenant_id)
->   WHERE is_active_version = true;
-> ```
+Constraint: `CHECK (status IN ('draft','active','sent','locked','archived'))`.
 
 #### `pc_calculation_lines` — linie kalkulacji
 
@@ -216,23 +273,87 @@ Ograniczenia: `CHECK (status IN ('draft','active','sent','locked','archived'))`.
 | `tenant_id` | `uuid` NOT NULL | |
 | `cost_category_id` | `uuid` NOT NULL | FK → `pc_cost_categories.id` |
 | `element_type_id` | `uuid` NULL | FK → `pc_element_types.id` |
-| `label` | `text` NOT NULL | opis pozycji (edytowalny inline) |
-| `quantity` | `numeric(14,4)` NOT NULL DEFAULT 1 | ilość |
-| `unit_id` | `uuid` NULL | FK-id → dictionaries `unit` (m³, szt., mb…) |
+| `label` | `text` NOT NULL | opis pozycji |
+| `quantity` | `numeric(14,4)` NOT NULL DEFAULT 1 | |
+| `unit_id` | `uuid` NULL | FK-id → dictionaries `unit` |
 | `unit_cost` | `numeric(14,4)` NOT NULL DEFAULT 0 | koszt jednostkowy netto |
-| `unit_price` | `numeric(14,4)` NOT NULL DEFAULT 0 | cena jednostkowa netto |
-| `line_cost` | `numeric(14,2)` GENERATED | `quantity × unit_cost` – wyliczone przez API (nie DB generated) |
-| `line_price` | `numeric(14,2)` GENERATED | `quantity × unit_price` |
-| `line_margin` | `numeric(14,2)` GENERATED | `line_price − line_cost` |
+| `unit_price` | `numeric(14,4)` NOT NULL DEFAULT 0 | cena jednostkowa netto (może być 0 jeśli rola nie widzi cen) |
+| `price_override` | `bool` NOT NULL DEFAULT false | `true` = cena wpisana ręcznie (nie z cennika); blokuje automatyczne przeliczenie z cennika |
+| `line_cost` | `numeric(14,2)` NULL | denormalizacja: quantity × unit_cost |
+| `line_price` | `numeric(14,2)` NULL | denormalizacja: quantity × unit_price |
+| `line_margin` | `numeric(14,2)` NULL | line_price − line_cost |
 | `sort_order` | `int` DEFAULT 0 | |
 | `notes` | `text` NULL | |
-| `catalog_entry_id` | `uuid` NULL | FK → `pc_price_catalog.id` (skąd pobrano cenę) |
+| `catalog_entry_id` | `uuid` NULL | FK → `pc_price_catalog.id` |
+| `price_source_id` | `uuid` NULL | FK → `pc_price_sources.id` (proweniencja) |
+| `price_source_item_code` | `text` NULL | kod pozycji w źródle cennikowym |
+| `price_captured_at` | `timestamptz` NULL | timestamp pobrania ceny ze źródła |
+| `price_captured_unit_cost` | `numeric(14,4)` NULL | zarchiwizowana cena zakupu ze źródła |
+| `price_captured_unit_price` | `numeric(14,4)` NULL | zarchiwizowana cena sprzedaży ze źródła |
+| `import_error` | `bool` DEFAULT false | flaga błędnego wiersza z importu |
 | `created_at` | `timestamptz` | |
 | `updated_at` | `timestamptz` | |
 
 Indeksy: `(calculation_id)`, `(organization_id, tenant_id, cost_category_id)`.
 
-> `line_cost`, `line_price`, `line_margin` — wartości denormalizowane. Wyliczane i zapisywane przez endpoint `POST /api/project-costing/calculations/:id/recalc`. Nie używamy `GENERATED ALWAYS AS` w Postgresie, bo biblioteka ORM musi je widzeć jako zwykłe kolumny; obliczenia są w warstwie serwisowej.
+#### `pc_production_batches` — harmonogram produkcji (Gantt-like)
+
+| Kolumna | Typ | Uwagi |
+|---------|-----|-------|
+| `id` | `uuid` PK | |
+| `calculation_id` | `uuid` NOT NULL | FK → `pc_calculations.id` |
+| `organization_id` | `uuid` NOT NULL | |
+| `tenant_id` | `uuid` NOT NULL | |
+| `element_type_id` | `uuid` NULL | FK → `pc_element_types.id` |
+| `label` | `text` NOT NULL | opis etapu/partii |
+| `quantity_m3` | `numeric(14,3)` NULL | ilość m³ w tym batchu |
+| `quantity_pcs` | `numeric(14,0)` NULL | ilość szt. w tym batchu |
+| `planned_start_at` | `date` NOT NULL | planowany start |
+| `planned_end_at` | `date` NOT NULL | planowany koniec |
+| `actual_start_at` | `date` NULL | rzeczywisty start (dla śledzenia) |
+| `actual_end_at` | `date` NULL | rzeczywisty koniec |
+| `status` | `text` NOT NULL DEFAULT `'planned'` | `planned` \| `in_progress` \| `done` \| `cancelled` |
+| `external_id` | `text` NULL | ID zadania w zewnętrznym narzędziu (MS Project, Gantt) |
+| `external_tool` | `text` NULL | np. `ms_project`, `custom_gantt` |
+| `sort_order` | `int` DEFAULT 0 | |
+| `notes` | `text` NULL | |
+| `created_at` | `timestamptz` | |
+| `updated_at` | `timestamptz` | |
+
+Indeksy: `(calculation_id)`, `(organization_id, tenant_id)`, `(planned_start_at, planned_end_at)`.
+
+#### `pc_schedule_audit_log` — log odblokowania kalkulacji
+
+| Kolumna | Typ | Uwagi |
+|---------|-----|-------|
+| `id` | `uuid` PK | |
+| `calculation_id` | `uuid` NOT NULL | FK → `pc_calculations.id` |
+| `organization_id` | `uuid` NOT NULL | |
+| `tenant_id` | `uuid` NOT NULL | |
+| `action` | `text` NOT NULL | `locked` \| `unlocked` \| `sent` \| `activated` |
+| `performed_by` | `uuid` NOT NULL | FK-id → users |
+| `reason` | `text` NULL | obowiązkowy przy `unlocked` |
+| `previous_status` | `text` NULL | |
+| `new_status` | `text` NULL | |
+| `created_at` | `timestamptz` | |
+
+Indeks: `(calculation_id)`, `(organization_id, tenant_id)`.
+
+#### `pc_calculation_pdf_attachments` — PDF oferty powiązany z wersją kalkulacji
+
+| Kolumna | Typ | Uwagi |
+|---------|-----|-------|
+| `id` | `uuid` PK | |
+| `calculation_id` | `uuid` NOT NULL | FK → `pc_calculations.id` |
+| `organization_id` | `uuid` NOT NULL | |
+| `tenant_id` | `uuid` NOT NULL | |
+| `attachment_id` | `uuid` NOT NULL | FK-id → `attachments` module |
+| `generated_at` | `timestamptz` NOT NULL | |
+| `generated_by` | `uuid` NULL | FK-id → users |
+| `is_latest` | `bool` NOT NULL DEFAULT true | tylko jeden `true` per `calculation_id` |
+| `template_version` | `text` NULL | wersja szablonu PDF |
+
+Partial unique index: `(calculation_id) WHERE is_latest = true`.
 
 #### `pc_import_column_mappings` — zapamiętane mapowania importu
 
@@ -241,23 +362,19 @@ Indeksy: `(calculation_id)`, `(organization_id, tenant_id, cost_category_id)`.
 | `id` | `uuid` PK | |
 | `organization_id` | `uuid` NOT NULL | |
 | `tenant_id` | `uuid` NOT NULL | |
-| `label` | `text` NOT NULL | nazwa mapowania (np. „Excel Marek") |
+| `label` | `text` NOT NULL | |
 | `file_type` | `text` NOT NULL | `xlsx` \| `csv` |
 | `column_map` | `jsonb` NOT NULL | `{ "label": "Nazwa", "quantity": "Ilość", ... }` |
 | `created_at` | `timestamptz` | |
 | `updated_at` | `timestamptz` | |
 
-### 2.2 Waluta i zaokrąglenia
+### 2.3 Waluta i zaokrąglenia
 
-- Każda kalkulacja ma jedną walutę (`currency`), domyślnie z ustawień tenanta (pole z `currencies` module lub DEFAULT `'PLN'`).
+- Waluta kalkulacji = waluta deala (patrz §3.7 — założenie rozwiązane autonomicznie).
 - Wszystkie wartości pieniężne: `numeric(14,2)` (zaokrąglenie bankierskie HALF_EVEN po każdej operacji).
-- Ceny jednostkowe: `numeric(14,4)` (4 miejsca do wejścia, 2 do sum).
+- Ceny jednostkowe: `numeric(14,4)`.
 - Ilości: `numeric(14,4)` (m³, mb, kg mogą mieć 3+ miejsca).
-- Kursy walut: brak konwersji w v1 (kalkulacja jednowalutowa). W v2: integracja z modułem `currencies`.
-
-### 2.3 Multi-tenant scoping
-
-Każda tabela zawiera `organization_id` + `tenant_id`. Wszystkie zapytania filtrują przez obie wartości pobierane z kontekstu żądania (`organizationId`, `tenantId` z DI). Brak cross-tenant leakage.
+- Brak konwersji walutowej w v1 (jednowalutowe). V2: integracja z modułem `currencies`.
 
 ---
 
@@ -266,237 +383,373 @@ Każda tabela zawiera `organization_id` + `tenant_id`. Wszystkie zapytania filtr
 ### 3.1 Wycena linii
 
 ```
-line_cost  = quantity × unit_cost      (zaokrągl(·, 2, HALF_EVEN))
-line_price = quantity × unit_price     (zaokrągl(·, 2, HALF_EVEN))
+line_cost  = ROUND(quantity × unit_cost,  2, HALF_EVEN)
+line_price = ROUND(quantity × unit_price, 2, HALF_EVEN)
 line_margin = line_price − line_cost
 ```
 
 ### 3.2 Sumy per kategoria
 
 ```
-category_total_cost  = SUM(line_cost  WHERE cost_category_id = cat)
-category_total_price = SUM(line_price WHERE cost_category_id = cat)
-category_margin      = category_total_price − category_total_cost
+category_subtotal_cost  = SUM(line_cost  WHERE cost_category_id = cat)
+category_subtotal_price = SUM(line_price WHERE cost_category_id = cat)
+category_margin         = category_subtotal_price − category_subtotal_cost
 ```
 
-### 3.3 Sumy kalkulacji (przed narzutem)
+### 3.3 Narzut i pełny koszt
 
 ```
-subtotal_cost  = SUM(line_cost)
-subtotal_price = SUM(line_price)
+subtotal_cost  = SUM(line_cost)      -- suma kosztów wszystkich linii
+overhead_amount = ROUND(subtotal_cost × overhead_rate, 2, HALF_EVEN)
+full_cost       = subtotal_cost + overhead_amount
 ```
 
-### 3.4 Narzut (`overhead_rate`)
+**Narzut** (*overhead*): procent doliczany DO kosztu zakupu, reprezentuje koszty pośrednie (amortyzacja form, koszty ogólnozakładowe). Nie zmienia ceny oferty automatycznie — podnosi próg rentowności.
 
-Narzut **dodawany do kosztu** (podnosi próg rentowności):
+### 3.4 Cena oferty i marża
 
+Dwa tryby wyznaczania ceny (wzajemnie wykluczające się, wybór w nagłówku kalkulacji):
+
+**Tryb A — cena z linii** (domyślny):
 ```
-overhead_amount = subtotal_cost × overhead_rate
-total_cost      = subtotal_cost + overhead_amount
+subtotal_price = SUM(line_price)                       -- cena oferty = suma cen linii
+total_margin   = subtotal_price − full_cost
+margin_rate    = total_margin / subtotal_price          (gdy subtotal_price > 0, else 0)
+```
+Sugerowana cena dla docelowej marży (pole informacyjne, nie aplikowane automatycznie):
+```
+suggested_price = full_cost / (1 − target_margin_rate)  (gdy target_margin_rate < 1)
 ```
 
-Cena oferty nie zmienia się automatycznie przy zmianie narzutu – to tylko informacja o realnym koszcie. Marża oblicza się od finalnej ceny:
-
+**Tryb B — cena z docelowej marży**:
+Jeśli użytkownik wpisuje `target_margin_rate` i aktywuje tryb B, system wylicza:
 ```
-total_price    = subtotal_price            (cena oferty bez narzutu – wg woli użytkownika)
-total_margin   = total_price − total_cost  (zysk netto po narzucie)
-margin_rate    = total_margin / total_price  (gdy total_price > 0, else 0)
+subtotal_price = full_cost / (1 − target_margin_rate)
 ```
+i zapisuje jako nową sumę (aktualizuje `unit_price` proporcjonalnie lub jako całościową cenę oferty bez redystrybucji na linie).
 
-> **Rozróżnienie: narzut vs marża**
+> **Nazewnictwo (konsekwentne w całej spec)**:
+> - `overhead_rate` — narzut (% od kosztu, dodawany do kosztu)
+> - `full_cost` — pełny koszt po narzucie
+> - `subtotal_price` — przychód/cena oferty
+> - `total_margin` — zysk bezwzględny
+> - `margin_rate` — marża % (zysk / cena)
+> - `target_margin_rate` — docelowa marża % (input użytkownika, tryb B)
 >
-> - **Narzut** (*markup*): procent doliczany DO kosztu (koszt × (1 + narzut) = cena minimalna rentowna). Używany wewnętrznie do obliczenia `total_cost` z kosztami pośrednimi.
-> - **Marża** (*margin*): zysk jako procent OD ceny sprzedaży. `margin_rate = (cena − koszt) / cena`. To kluczowy KPI dla dashboardów.
->
-> Obie wartości widoczne w nagłówku kalkulacji; użytkownik ustawia `overhead_rate` (narzut), widzi wyliczoną `margin_rate` (marżę). Może też wpisać docelową marżę – wtedy UI wyświetla sugerowaną cenę (nieaplikowaną automatycznie).
+> Pole `markup_rate` **nie istnieje** w modelu — usunięte z wcześniejszej wersji spec. Narzut to `overhead_rate`; marża to `margin_rate`.
 
-### 3.5 Prognoza produkcji
+### 3.5 Zachowanie przy ręcznej edycji ceny linii
+
+Jeśli użytkownik ręcznie edytuje `unit_price` linii: `price_override = true`. Linia z `price_override = true` **nie jest** nadpisywana przy ponownym wyszukaniu w cenniku (np. po imporcie aktualizacji cennika). Użytkownik może ręcznie zresetować flagę.
+
+### 3.6 Prognoza produkcji z harmonogramu
+
+Prognoza 6-miesięczna agregowana z batchów harmonogramu (`pc_production_batches`):
 
 ```
-total_quantity_m3  = SUM(line.quantity WHERE line.unit = 'm3')
-total_quantity_pcs = SUM(line.quantity WHERE line.unit IN ('szt','pc','pcs'))
+-- Reguła pro-rata: batch trwający między planned_start_at a planned_end_at
+-- jest rozkładany na miesiące proporcjonalnie do liczby dni w każdym miesiącu.
+-- Dla batcha [ 2026-11-15 → 2026-12-20 ]:
+--   Listopad: 15 dni z 45 → qty × (15/45)
+--   Grudzień: 30 dni z 45 → qty × (30/45)
 ```
 
-Mapowanie `unit_id` → kodu jednostki pobierane ze słownika `dictionaries`. W `analytics.ts` eksponowane jako kolumny analityczne z `production_start_at`.
+Kolumny analityczne eksponowane per miesiąc (zakres 6 miesięcy od bieżącego dnia):
+- `forecast_m3_YYYY_MM` — prognozowana ilość m³
+- `forecast_pcs_YYYY_MM` — prognozowana ilość szt.
 
-### 3.6 Reguła aktywnej kalkulacji i zasilanie `value_amount`
+W praktyce analytics.ts eksponuje `pc_production_batches` z polami `quantity_m3`, `quantity_pcs`, `planned_start_at`, `planned_end_at`; widget dashboardu dokonuje aggregacji pro-rata w swoim zapytaniu (przez `groupBy` miesięczny z normalizacją).
 
-- Deal może mieć wiele kalkulacji (wersje), ale tylko jedną `is_active_version = true`.
-- Po oznaczeniu kalkulacji jako aktywna → endpoint `POST /api/project-costing/calculations/:id/apply-to-deal` aktualizuje `customer_deals.value_amount = calculation.total_price` (przez interceptor lub bezpośrednie wywołanie API `customers` przez serwis modułu z użyciem klienta HTTP wewnętrznego lub przez event `project_costing.calculation.activated`).
-- `cf_offer_role` (`primary` / `alternative`) na Dealu: **Projekt** (`klin:project` custom entity) sumuje wartości swoich Deali. Reguła sumowania:
-  - `project_total_price = SUM(deal.value_amount WHERE cf_offer_role = 'primary' AND deal.status NOT IN ('lost','archived'))`.
-  - Deale `alternative` nie wchodzą do sumy projektu, ale są widoczne w tabeli deali projektu (jako alternatywna oferta).
-  - Dashboard prognozowy bierze deale `primary` + `status = 'active'|'won'` z `production_start_at` w przedziale 6 miesięcy.
+`pc_calculations.total_quantity_m3` i `total_quantity_pcs` to sumy całkowite wszystkich batchów (derived, odświeżane przez `recalc`). `production_start_at`/`production_end_at` to min/max dat batchów (derived).
+
+### 3.7 Reguła walutowa (założenie rozwiązane)
+
+Waluta kalkulacji = waluta deala (`customer_deals.value_currency`). Kalkulacja jednowalutowa w v1. Przy tworzeniu kalkulacji serwis odczytuje `value_currency` deala i kopiuje do `pc_calculations.currency`. Jeśli deal nie ma ustawionej waluty – używa `pc_settings.default_currency` (domyślnie `PLN`).
+
+### 3.8 Reguła aktywnej wersji i zasilanie `value_amount`
+
+- Tylko jedna kalkulacja per deal może mieć `is_active_version = true` (partial unique index).
+- Po `activate`: endpoint ustawia `is_active_version = true` na wskazanej kalkulacji (poprzednia → `false`) w transakcji.
+- `apply-to-deal` (oddzielne wywołanie): aktualizuje `customer_deals.value_amount = subtotal_price` przez command bus OM (patrz §6.6 i §8.2) — zachowuje historię deala i zdarzenia CRM.
+
+### 3.9 Reguła odblokowania kalkulacji (założenie rozwiązane)
+
+Kalkulacja `locked` lub `sent` może być odblokowana **wyłącznie przez admina** (`project_costing.admin`). Odblokowanie tworzy **nową wersję** kalkulacji (kopia linii, `version += 1`, status `draft`) zamiast edytowania wersji wysłanej. Oryginalna wersja pozostaje nienaruszona (`locked`/`sent`). Każde odblokowanie zapisuje wpis w `pc_schedule_audit_log` z `reason` (obowiązkowy), `performed_by`, `previous_status`.
+
+### 3.10 Projekt (`klin:project`) — reguła sumowania deali
+
+`klin:project` to custom entity (Data designer). Moduł `project_costing` odczytuje `cf_offer_role` (custom field, id: `73f8260a-94c2-42d1-abc4-c08c4177be9f`, wartości: `primary`/`alternative`) per deal.
+
+Reguła sumy projektu:
+```
+project_total = SUM(deal.value_amount)
+  WHERE cf_offer_role = 'primary'
+    AND deal.status NOT IN ('lost', 'archived')
+```
+Deale `alternative` wyświetlane w tabeli deali projektu (jako widok porównawczy), ale nie wchodzą do sumy. Deal `primary` ze statusem `lost` jest wykluczany natychmiast po zmianie statusu (reaguje na zdarzenie `customers.deal.updated`).
+
+**`cf_offer_role` — istniejące dane**: Custom field istnieje w produkcji (id: `73f8260a-94c2-42d1-abc4-c08c4177be9f`). Moduł **wyłącznie odczytuje** wartość przez API `custom fields`. Moduł **nie tworzy** tego pola w `setup.ts`. Obecnie 546 deali = `primary`.
 
 ---
 
-## 4. UI / UX
+## 4. Widoczność kosztów/marż/cen (konfigurowalna)
 
-### 4.1 Zakładka „Kalkulacja" na karcie Deala
+### 4.1 Model konfiguracji
 
-**Punkt wstrzyknięcia**: `detail:customers.deal:tabs` (zweryfikowano w `packages/core/src/modules/customers/backend/customers/deals/[id]/hooks/useDealInjectedTabs.tsx`).
+Widoczność sterowana przez `pc_settings` (klucze `visibility.*_visible_features`) i ACL features modułu. Trzy niezależne wymiary:
 
-Widget: `project_costing/widgets/DealCalculationTab.tsx` rejestrowany w `widgets/index.ts`.
+| Wymiar | Feature do widzenia | Domyślna rola |
+|--------|---------------------|---------------|
+| Koszty (`unit_cost`, `line_cost`, `full_cost`, `overhead_amount`) | `project_costing.view_costs` | `admin`, `manager` |
+| Marże (`total_margin`, `margin_rate`, `line_margin`) | `project_costing.view_margin` | `admin`, `manager` |
+| Ceny sprzedaży (`unit_price`, `line_price`, `subtotal_price`) | `project_costing.view_prices` | `admin`, `manager`, `sales` |
 
-Zawartość zakładki:
-- Nagłówek: wybór aktywnej kalkulacji (dropdown wersji), przyciski: „Nowa wersja", „Importuj", „Eksportuj XLSX".
-- Siatka linii kosztowych (patrz §4.2).
-- Panel podsumowania (prawostronny lub pod siatką): sumy per kategoria + łącznie, narzut, marża %.
-- Przycisk „Zastosuj do Deala" → wywołuje `apply-to-deal`.
+### 4.2 Wymuszenie server-side
 
-Zakładka jest **Client Component** (Next.js `'use client'`) — siatka wymaga interaktywności.
+Każde API response przechodzi przez `applyVisibilityRedaction(response, userFeatures, tenantSettings)`:
 
-### 4.2 Siatka kosztów „jak Excel"
+```typescript
+// Przykład logiki redakcji (lib/visibility.ts)
+function applyVisibilityRedaction(line: CalculationLine, features: string[], settings: VisibilitySettings) {
+  if (!hasAnyFeature(features, settings.costsVisibleFeatures)) {
+    line.unitCost = null
+    line.lineCost = null
+    // full_cost, overhead_amount z nagłówka też → null
+  }
+  if (!hasAnyFeature(features, settings.marginVisibleFeatures)) {
+    line.lineMargin = null
+    line.marginRate = null
+  }
+  if (!hasAnyFeature(features, settings.pricesVisibleFeatures)) {
+    line.unitPrice = null
+    line.linePrice = null
+  }
+  return line
+}
+```
 
-**Biblioteka**: `adazzle/react-data-grid` v7 (licencja MIT, ~50 KB gzip).
+### 4.3 Redakcja w eksporcie XLSX/CSV
 
-Uzasadnienie wyboru:
-- Natywna obsługa edycji inline w komórce (klawiatura: Enter/Tab/Arrow), kopiuj/wklej z/do Excela (Ctrl+C/V przez schowek tekstu tabulowanego).
-- Lekka (~50 KB gzip) — ważne na VPS 3.77 GiB RAM.
-- Headless renderery kolumn → integracja z DS tokenami OM (kolory, fonty, spacing).
-- MIT license — brak opłat licencyjnych dla open-source fork.
+Kolumny kosztów/marż/cen są pomijane w arkuszu eksportowym jeśli użytkownik nie ma odpowiednich features. Eksport jest generowany server-side — nie istnieje możliwość ominięcia przez UI.
+
+### 4.4 PDF oferty (zawsze bez kosztów i marż)
+
+PDF generowany dla klienta (generalny wykonawca) **nigdy nie zawiera** `unit_cost`, `line_cost`, `full_cost`, `overhead_amount`, `total_margin`, `margin_rate`. Zawiera: `label`, `quantity`, jednostkę, `unit_price`, `line_price`. Kolumny kosztów/marż są strukturalnie wykluczone z szablonu PDF klienta, niezależnie od uprawnień użytkownika.
+
+### 4.5 Analityka (analytics.ts)
+
+Pola `totalCost`, `fullCost`, `overheadAmount`, `totalMargin`, `marginRate` w analytics.ts mają `requiredFeatures: ['project_costing.view_costs']` / `'project_costing.view_margin'`. Widgety dashboardów ukrywają metryki, do których użytkownik nie ma dostępu.
+
+---
+
+## 5. PDF oferty
+
+### 5.1 Wymagania
+
+- Szablon: logo firmy, dane firmy, numer oferty (code kalkulacji + version), data, ważność oferty (`pdf.validity_days` z settings), odbiorca (dane deala/firmy z customers), tabela pozycji, warunki handlowe, podpis.
+- Dane klienta: pobierane z deala (`customer_deals`) i powiązanej firmy/osoby przez API `customers`.
+- Wersjonowanie: każde wygenerowanie PDF = nowy rekord w `pc_calculation_pdf_attachments`; poprzedni `is_latest` → `false`. Attachment przechowywany w module `attachments` (powiązany z `deal_id` i `calculation_id`). PDF immutable po `sent`/`locked`.
+
+### 5.2 Renderowanie server-side
+
+**Biblioteka**: `@react-pdf/renderer` v3 (MIT, ~300 KB zcompressed, brak zależności Chromium).
+
+Uzasadnienie:
+- Lekka — ważne na VPS 3.77 GiB RAM. Brak Puppeteer/Chromium (~300 MB RAM).
+- Pure JS/Node.js, nie wymaga systemu plików ani headless browser.
+- Generuje PDF bezpośrednio z React komponentów — utrzymywalny szablon.
 
 Alternatywy odrzucone:
-- **AG Grid Community**: cięższy (~500 KB), duży footprint pamięci.
-- **Handsontable**: licencja komercyjna wymagana dla użytku komercyjnego.
-- **TanStack Table v8**: headless, ale nie ma wbudowanego Excel-like keyboard UX — wymagałoby znaczącej własnej implementacji.
+- **Puppeteer/html-to-pdf**: Chromium ~300 MB RAM per instancja — wykluczone na małym VPS.
+- **PDFKit**: niski poziom (raw primitives), trudny do utrzymania szablonu.
+- **wkhtmltopdf**: wymaga zewnętrznego binarnego, problem z deploy.
 
-Kolumny siatki (konfigurowalny porządek, resize):
+### 5.3 Endpoint generowania
 
-| Kolumna | Edytowalna | Typ komórki |
-|---------|-----------|-------------|
-| Lp. | Nie | auto-increment |
-| Kategoria | Tak | select (pc_cost_categories) |
-| Typ elementu | Tak | select (pc_element_types) |
-| Opis / Pozycja | Tak | text |
-| Ilość | Tak | numeric |
-| J.m. | Tak | select (dictionaries unit) |
-| Koszt jedn. [PLN] | Tak | numeric |
-| Cena jedn. [PLN] | Tak | numeric |
-| Wartość kosztu | Nie | computed = ilość × koszt jedn. |
-| Wartość ceny | Nie | computed = ilość × cena jedn. |
-| Marża zł | Nie | computed |
-| Marża % | Nie | computed |
-| Akcje | Nie | usuń wiersz |
+```
+POST /api/project-costing/calculations/:id/generate-pdf
+```
+Odpowiedź: `{ attachmentId, url }`. PDF przechowywany przez moduł `attachments`, powiązany tagami z `deal_id` i `calculation_id`. Generowanie asynchroniczne przy dużych kalkulacjach (>200 linii) – endpoint zwraca job ID, status przez SSE/polling.
 
-Funkcje siatki:
-- Dodawanie wiersza: przycisk „+ Dodaj" lub klawisz Insert na ostatnim wierszu.
-- Usuwanie wiersza: przycisk w kolumnie akcji lub Delete na zaznaczonym wierszu.
-- Kopiuj/wklej blok komórek (wielowierszowy): zgodny format z Excel/Google Sheets (tab-separated values).
-- Filtrowanie wierszy per kategoria (panel boczny checkboxy).
-- Zwijanie/rozwijanie grupy per kategoria (group-by category).
-- Auto-save (debounce 800 ms od ostatniej edycji) przez `PATCH /api/project-costing/calculation-lines/:id`.
-- Optimistic UI: wartości computed aktualizowane lokalnie, potwierdzane po recalc.
+### 5.4 Konfiguracja szablonu
 
-### 4.3 Strony backend modułu
-
-Trasy w `apps/mercato/src/modules/project_costing/backend/`:
-
-| Ścieżka URL | Plik strony | Opis |
-|-------------|-------------|------|
-| `/project-costing/segments` | `segments/page.tsx` | Lista segmentów, CRUD |
-| `/project-costing/segments/[id]` | `segments/[id]/page.tsx` | Edycja segmentu + kategorie kosztów |
-| `/project-costing/templates` | `templates/page.tsx` | Lista szablonów kalkulacji |
-| `/project-costing/templates/[id]` | `templates/[id]/page.tsx` | Edycja szablonu z siatką linii |
-| `/project-costing/price-catalog` | `price-catalog/page.tsx` | Cennik firmy (DataTable + import CSV/XLSX) |
-| `/project-costing/price-catalog/[id]` | `price-catalog/[id]/page.tsx` | Edycja pozycji cennikowej |
-| `/project-costing/calculations` | `calculations/page.tsx` | Lista wszystkich kalkulacji (cross-deal) |
-| `/project-costing/calculations/[id]` | `calculations/[id]/page.tsx` | Szczegóły kalkulacji (standalone, bez zakładki deala) |
-
-Linki menu: wstrzyknięte do sidebaru głównego przez `widgets/menu.tsx` (spot: `main-menu:settings` lub dedykowany spot modułu settings).
-
-### 4.4 Siatka szablonu
-
-Identyczna biblioteka `react-data-grid`. Kolumny: Kategoria, Typ elementu, Opis, Ilość domyślna, J.m., Koszt jedn., Cena jedn.
-
-### 4.5 Porównanie wersji kalkulacji
-
-Strona `calculations/[id]/compare` — widok diff dwóch wersji kalkulacji (wybór z dropdown). Tabela różnic: kolumna „stara wartość" vs „nowa wartość", zakolorowane DS tokenami (status-positive/negative).
+Przez `pc_settings`: `pdf.company_name`, `pdf.logo_url` (URL do uploadu przez attachments lub publicznego CDN), `pdf.footer_text` (HTML-safe), `pdf.validity_days` (np. 30), `pdf.contact_email`, `pdf.contact_phone`. Edytowalne w ustawieniach modułu (`/project-costing/settings`).
 
 ---
 
-## 5. Import / Eksport
+## 6. Import / Eksport
 
-### 5.1 Import XLSX/CSV
+### 6.1 Biblioteka XLSX
 
-**Biblioteka**: `xlsx` (SheetJS Community Edition, Apache-2.0). Obsługa formatów: `.xlsx`, `.xls`, `.csv`, `.ods` (ods opcjonalnie v2).
+**Biblioteka**: `exceljs` v4.4.0 (MIT, ostatnia aktualizacja 2024-12; aktywnie utrzymywana).
 
-**Kreator mapowania kolumn** (`ImportWizard`):
+Uzasadnienie:
+- Npm `xlsx` (SheetJS) zatrzymał aktualizacje na npm na wersji 0.18.5 (lipiec 2022 dla aktywnego developmentu). Nowsze wersje SheetJS wymagają instalacji z CDN tarball (niestandardowe w yarn workspace monorepo, utrudnia CI i bezpieczeństwo łańcucha zależności).
+- `exceljs` jest pełną, utrzymywaną alternatywą z obsługą `.xlsx`, `.csv`, formatowania komórek, wielu arkuszy i streamingu — wystarczające dla wymagań modułu.
+- MIT license, kompatybilna z open-source fork.
 
-1. **Upload**: przeciągnij lub wybierz plik (max 10 MB, max 5000 wierszy).
-2. **Podgląd**: pierwsze 5 wierszy danych (DataTable bez edycji).
-3. **Mapowanie**: dropdown per kolumnę modułu (label, quantity, unit, unit_cost, unit_price, cost_category, notes). Możliwość pominięcia kolumny.
-4. **Zapis mapowania**: checkbox „Zapamiętaj to mapowanie jako: [nazwa]" → zapisuje do `pc_import_column_mappings`.
-5. **Walidacja**: sprawdzenie typów (ilość/cena = liczba, kategoria = znany kod lub etykieta), wyróżnienie wierszy z błędami.
-6. **Podgląd po mapowaniu**: zaimportowane wiersze z obliczonymi wartościami.
-7. **Zatwierdzenie**: `POST /api/project-costing/calculations/:id/import` → dodaje linie do kalkulacji (tryb: dołącz lub zastąp).
+Formaty: `.xlsx`, `.csv` (UTF-8 z BOM dla zgodności Excel PL, separator `;`).
 
-Limity:
-- Rozmiar pliku: 10 MB.
-- Liczba wierszy: 5 000 per import (przy większych: błąd z informacją).
+### 6.2 Import XLSX/CSV — kreator mapowania
+
+1. **Upload**: drag-and-drop lub przycisk (max 10 MB, max 5000 wierszy — patrz §3.9 rozwiązane założenia).
+2. **Podgląd**: pierwsze 5 wierszy danych (DataTable read-only).
+3. **Mapowanie kolumn**: dropdown per pole modułu (`label`, `quantity`, `unit`, `unit_cost`, `unit_price`, `cost_category`, `element_type`, `notes`). Możliwość pominięcia kolumny.
+4. **Zapis mapowania**: opcja „Zapamiętaj jako [nazwa]" → `pc_import_column_mappings`.
+5. **Walidacja**: typy (ilość/cena = liczba, kategoria = znany kod lub label), wyróżnienie błędów.
+6. **Podgląd po mapowaniu**: zaimportowane linie z obliczonymi wartościami i flagami błędów.
+7. **Zatwierdzenie**: `POST /api/project-costing/calculations/:id/import` (tryb: dołącz / zastąp).
+
+Obsługa błędów: błędne wiersze wchodzą z `import_error = true`, widoczne w siatce z ikoną ostrzeżenia.
+
+### 6.3 Eksport XLSX
+
+`GET /api/project-costing/calculations/:id/export?format=xlsx|csv`
+
+XLSX — wieloarkuszowy:
+- Arkusz 1: linie kalkulacji (kolumny zredagowane wg widoczności użytkownika – §4.3).
+- Arkusz 2: sumy per kategoria (widoczność jak wyżej).
+- Arkusz 3: nagłówek (meta, daty, marża jeśli uprawnienie).
+
+CSV: UTF-8 z BOM, separator `;`.
+
+Import/eksport cennika: `GET/POST /api/project-costing/price-catalog/export|import`.
+
+### 6.4 Import/eksport harmonogramu
+
+```
+GET  /api/project-costing/calculations/:id/schedule/export?format=xlsx|csv
+POST /api/project-costing/calculations/:id/schedule/import
+```
+
+Format XLSX harmonogramu: kolumny `element_type`, `label`, `quantity_m3`, `quantity_pcs`, `planned_start`, `planned_end`, `status`. Kompatybilny z prostym eksportem z MS Project (CSV z nagłówkami).
+
+### 6.5 Limity (założenie rozwiązane)
+
+- Rozmiar pliku: 10 MB (kalkulacje prefabrykacji typowo 50–500 wierszy, 5000 to zapas bezpieczny).
+- Liczba wierszy: 5000 per import.
 - Timeout parsowania: 30 s.
 
-Obsługa błędów: błędne wiersze nie przerywają importu – wchodzą jako linie z flagą `import_error: true` i widoczne w podglądzie do ręcznej korekty lub pominięcia.
+---
 
-### 5.2 Eksport XLSX/CSV
+## 7. Abstrakcja źródeł cennikowych (Price Source Provider)
 
-Endpoint: `GET /api/project-costing/calculations/:id/export?format=xlsx|csv`.
+### 7.1 Interfejs providera
 
-XLSX: `SheetJS` — wieloarkuszowy plik:
-- Arkusz 1: linie kalkulacji (wszystkie kolumny).
-- Arkusz 2: sumy per kategoria.
-- Arkusz 3: nagłówek kalkulacji (meta, marża, daty).
+```typescript
+// lib/price-source/provider.interface.ts
+export interface PriceSourceProvider {
+  providerId: string              // np. 'company_catalog', 'sekocenbud'
+  label: string
+  search(query: PriceSourceQuery, ctx: ProviderContext): Promise<PriceSourceItem[]>
+  getByCode(code: string, ctx: ProviderContext): Promise<PriceSourceItem | null>
+}
 
-CSV: UTF-8 z BOM (dla zgodności z Excel PL), separator `;`.
+export type PriceSourceQuery = {
+  q?: string
+  segmentId?: string
+  categoryId?: string
+  priceSourceId: string           // UUID konkretnego pc_price_sources
+  limit?: number
+}
 
-Eksport cennika: `GET /api/project-costing/price-catalog/export?format=xlsx|csv`.
+export type PriceSourceItem = {
+  code: string
+  externalCode?: string           // kod z zewnętrznego systemu
+  label: string
+  description?: string
+  unitId?: string                 // UUID dictionaries unit
+  unitCost?: number
+  unitPrice?: number
+  currency: string
+  priceListVersion?: string
+  priceListDate?: string
+  region?: string
+}
+```
+
+### 7.2 Rejestr providerów
+
+```typescript
+// lib/price-source/registry.ts
+class PriceSourceRegistry {
+  register(provider: PriceSourceProvider): void
+  get(providerId: string): PriceSourceProvider | undefined
+  list(): PriceSourceProvider[]
+}
+export const priceSourceRegistry = new PriceSourceRegistry()
+```
+
+Inicjalizacja w `di.ts` modułu. Provider `company_catalog` rejestrowany zawsze (czyta z `pc_price_catalog`). Przyszłe adaptery (v2: Sekocenbud, Intercenbud) rejestrowane opcjonalnie.
+
+### 7.3 Proweniencja ceny na linii kalkulacji
+
+Przy każdym dodaniu/aktualizacji linii z cennika, serwis zapisuje:
+- `catalog_entry_id` — UUID pozycji `pc_price_catalog`
+- `price_source_id` — UUID `pc_price_sources`
+- `price_source_item_code` — kod pozycji
+- `price_captured_at` — timestamp
+- `price_captured_unit_cost`, `price_captured_unit_price` — wartości w momencie dodania (archiwum)
+
+Dzięki temu zmiany cennika nie wpływają retroaktywnie na kalkulacje (`unit_cost`/`unit_price` w linii to niezależne kopie). Linie z `price_override = true` nie są aktualizowane przy synchronizacji cennika.
+
+### 7.4 v2: Adaptery zewnętrznych cenników
+
+Format adaptera Sekocenbud/Intercenbud (v2):
+- Import pliku XLSX z cennika → `pc_price_catalog` (mapowanie predefiniowane per provider).
+- Adapter implementuje `PriceSourceProvider.search/getByCode` czytając z `pc_price_catalog` filtrując po `price_source_id`.
+- `external_code` w `pc_price_catalog` przechowuje oryginalny kod KNR/KNNR lub numer pozycji Sekocenbud.
 
 ---
 
-## 6. API
+## 8. API
 
-Wszystkie endpointy: `POST`, `GET`, `PATCH`, `DELETE` zgodne z konwencjami OM (`makeCrudRoute`, zod validators, `organizationId`/`tenantId` z DI). Prefix: `/api/project-costing/`.
+Prefix: `/api/project-costing/`. Konwencje OM: `makeCrudRoute`, zod validators, `organizationId`/`tenantId` z DI. Optimistic locking (`If-Unmodified-Since`) na wszystkich `PATCH`/`DELETE` encji z `updated_at`.
 
-### 6.1 Segmenty
+### 8.1 Ustawienia
+
+```
+GET   /api/project-costing/settings
+PATCH /api/project-costing/settings
+```
+
+### 8.2 Segmenty, kategorie, typy elementów
 
 ```
 GET    /api/project-costing/segments
 POST   /api/project-costing/segments
-GET    /api/project-costing/segments/:id
 PATCH  /api/project-costing/segments/:id
 DELETE /api/project-costing/segments/:id
-```
 
-### 6.2 Kategorie kosztów
-
-```
-GET    /api/project-costing/cost-categories
+GET    /api/project-costing/cost-categories?segmentId=
 POST   /api/project-costing/cost-categories
 PATCH  /api/project-costing/cost-categories/:id
 DELETE /api/project-costing/cost-categories/:id
-```
 
-### 6.3 Typy elementów
-
-```
 GET    /api/project-costing/element-types?segmentId=
 POST   /api/project-costing/element-types
 PATCH  /api/project-costing/element-types/:id
 DELETE /api/project-costing/element-types/:id
 ```
 
-### 6.4 Cennik
+### 8.3 Źródła cennikowe i cennik
 
 ```
-GET    /api/project-costing/price-catalog?segmentId=&categoryId=&q=
+GET    /api/project-costing/price-sources
+POST   /api/project-costing/price-sources
+PATCH  /api/project-costing/price-sources/:id
+DELETE /api/project-costing/price-sources/:id
+
+GET    /api/project-costing/price-catalog?priceSourceId=&segmentId=&categoryId=&q=
 POST   /api/project-costing/price-catalog
 PATCH  /api/project-costing/price-catalog/:id
 DELETE /api/project-costing/price-catalog/:id
 GET    /api/project-costing/price-catalog/export?format=xlsx|csv
-POST   /api/project-costing/price-catalog/import         (import pliku cennika)
+POST   /api/project-costing/price-catalog/import
+POST   /api/project-costing/price-catalog/search      (wyszukiwanie przez provider registry)
 ```
 
-### 6.5 Szablony
+### 8.4 Szablony
 
 ```
 GET    /api/project-costing/calculation-templates?segmentId=
@@ -510,108 +763,162 @@ PATCH  /api/project-costing/calculation-template-lines/:lineId
 DELETE /api/project-costing/calculation-template-lines/:lineId
 ```
 
-### 6.6 Kalkulacje
+### 8.5 Kalkulacje
 
 ```
 GET    /api/project-costing/calculations?dealId=&status=&isActiveVersion=
-POST   /api/project-costing/calculations                           (nowa kalkulacja dla deala)
+POST   /api/project-costing/calculations
 GET    /api/project-costing/calculations/:id
-PATCH  /api/project-costing/calculations/:id                       (nagłówek: label, overhead_rate, status, currency…)
-DELETE /api/project-costing/calculations/:id                       (tylko draft/archived)
+PATCH  /api/project-costing/calculations/:id
+DELETE /api/project-costing/calculations/:id                   (tylko draft/archived)
 
-POST   /api/project-costing/calculations/:id/duplicate             (nowa wersja = kopia linii)
-POST   /api/project-costing/calculations/:id/recalc                (przelicz line_cost/price/margin + sumy nagłówka)
-POST   /api/project-costing/calculations/:id/activate              (ustaw is_active_version=true, poprzednia → false)
-POST   /api/project-costing/calculations/:id/apply-to-deal         (aktualizuje deal.value_amount = total_price)
-POST   /api/project-costing/calculations/:id/mark-sent             (status → sent, sent_at = now())
-POST   /api/project-costing/calculations/:id/lock                  (status → locked, locked_at = now())
+POST   /api/project-costing/calculations/:id/duplicate         (nowa wersja — kopia linii + batchów)
+POST   /api/project-costing/calculations/:id/recalc            (przelicz linie + sumy + batch-derived)
+POST   /api/project-costing/calculations/:id/activate          (is_active_version → true, poprzednia → false)
+POST   /api/project-costing/calculations/:id/apply-to-deal     (value_amount deala via command bus)
+POST   /api/project-costing/calculations/:id/mark-sent         (status → sent, sent_at = now())
+POST   /api/project-costing/calculations/:id/lock              (status → locked, locked_at = now())
+POST   /api/project-costing/calculations/:id/unlock            (admin only: nowa wersja draft + audit log)
+POST   /api/project-costing/calculations/:id/generate-pdf      (server-side PDF → attachment)
 
 GET    /api/project-costing/calculations/:id/export?format=xlsx|csv
-POST   /api/project-costing/calculations/:id/import                (import linii z pliku)
+POST   /api/project-costing/calculations/:id/import
 ```
 
-### 6.7 Linie kalkulacji
+### 8.6 Linie kalkulacji
 
 ```
 GET    /api/project-costing/calculation-lines?calculationId=
 POST   /api/project-costing/calculation-lines
 PATCH  /api/project-costing/calculation-lines/:id
 DELETE /api/project-costing/calculation-lines/:id
-POST   /api/project-costing/calculation-lines/batch                (bulk upsert – dla auto-save siatki)
+POST   /api/project-costing/calculation-lines/batch            (bulk upsert — auto-save siatki)
 ```
 
-### 6.8 Mapowania importu
+### 8.7 Harmonogram produkcji
 
 ```
+GET    /api/project-costing/production-batches?calculationId=
+POST   /api/project-costing/production-batches
+PATCH  /api/project-costing/production-batches/:id
+DELETE /api/project-costing/production-batches/:id
+GET    /api/project-costing/calculations/:id/schedule/export?format=xlsx|csv
+POST   /api/project-costing/calculations/:id/schedule/import
+
+POST   /api/project-costing/calculations/:id/schedule/webhook  (inbound webhook od zewnętrznego narzędzia)
+```
+
+### 8.8 PDF i mapowania importu
+
+```
+GET    /api/project-costing/calculations/:id/pdf-attachments
 GET    /api/project-costing/import-column-mappings
 POST   /api/project-costing/import-column-mappings
 PATCH  /api/project-costing/import-column-mappings/:id
 DELETE /api/project-costing/import-column-mappings/:id
 ```
 
-### 6.9 Optimistic Locking
+### 8.9 `apply-to-deal` — mechanizm (zweryfikowany w kodzie)
 
-Wszystkie `PATCH` i `DELETE` na `pc_calculations` i `pc_calculation_lines` wymagają nagłówka `If-Unmodified-Since` (z `updatedAt`). Konflikty zwracają HTTP 409 + body `{ code: 'OPTIMISTIC_LOCK_CONFLICT' }`. UI obsługuje je przez `surfaceRecordConflict(err, t)`.
+**Weryfikacja w kodzie** (`packages/core/src/modules/customers/commands/deals.ts`, linia 745; `packages/shared/src/lib/crud/factory.ts`, linia 2372; `packages/shared/src/lib/di/container.ts`, linia 218):
+
+- Command `customers.deals.update` zarejestrowany przez `registerCommand(updateDealCommand)`.
+- `CommandBus` dostępny w DI jako `commandBus` (singleton, `asValue(new CommandBus())`).
+- `makeCrudRoute` wywołuje go przez `ctx.container.resolve('commandBus')`.
+
+Implementacja `apply-to-deal` w serwisie modułu:
+```typescript
+// lib/calculation.service.ts
+async applyToDeal(calculationId: string, ctx: ServiceContext) {
+  const calculation = await this.loadCalculation(calculationId, ctx)
+  const commandBus = ctx.container.resolve('commandBus') as CommandBus
+  await commandBus.execute({
+    commandId: 'customers.deals.update',
+    input: {
+      id: calculation.dealId,
+      valueAmount: calculation.subtotalPrice,
+      // updatedAt deala pobrane z osobnego zapytania — optimistic lock deala
+    },
+    ctx,
+  })
+}
+```
+
+Efekt: zachowanie historii deala (`audit_log`), emisja zdarzenia `customers.deal.updated` przez command handler, aktualizacja cache/search index przez CRUD side effects. **Zero zmian w `packages/core`**.
 
 ---
 
-## 7. Uprawnienia (ACL)
+## 9. Uprawnienia (ACL)
 
-Plik `acl.ts` w module eksponuje features:
+Plik `acl.ts` w module:
 
 | Feature ID | Opis |
 |-----------|------|
-| `project_costing.view` | Podgląd kalkulacji na dealach |
-| `project_costing.edit` | Edycja linii, wersji, szablonów |
-| `project_costing.admin` | Zarządzanie segmentami, kategoriami, cennikiem |
-| `project_costing.apply_to_deal` | Prawo do aktualizacji `value_amount` deala |
+| `project_costing.view` | Podgląd kalkulacji (nagłówek, linie bez chronionych pól) |
+| `project_costing.view_costs` | Widzenie kosztów (`unit_cost`, `line_cost`, `full_cost`) |
+| `project_costing.view_margin` | Widzenie marży (`total_margin`, `margin_rate`, `line_margin`) |
+| `project_costing.view_prices` | Widzenie cen sprzedaży (`unit_price`, `line_price`, `subtotal_price`) |
+| `project_costing.edit` | Edycja linii, wersji, harmonogramu (bez locked/sent) |
+| `project_costing.admin` | Zarządzanie segmentami, kategoriami, cenniktem, ustawieniami, odblokowanie |
+| `project_costing.apply_to_deal` | Aktualizacja `value_amount` deala |
 | `project_costing.import` | Import XLSX/CSV |
-| `project_costing.export` | Eksport XLSX/CSV |
-| `project_costing.lock` | Blokowanie/oznaczanie wersji wysłanej |
+| `project_costing.export` | Eksport XLSX/CSV/PDF |
+| `project_costing.lock` | Blokowanie/oznaczanie jako wysłane |
 
 Domyślne przypisania w `setup.ts`:
-- Rola `admin` → wszystkie features.
-- Rola `sales_manager` (lub odpowiednik w CRM) → `view`, `edit`, `apply_to_deal`, `import`, `export`.
-- Rola `sales_rep` → `view`, `edit` (tylko własne deale – filtr `created_by` lub właściciel deala, do decyzji §14).
+- `admin` → wszystkie features.
+- `manager` → `view`, `view_costs`, `view_margin`, `view_prices`, `edit`, `apply_to_deal`, `import`, `export`, `lock`.
+- `sales` → `view`, `view_prices`, `edit`, `import`, `export`.
 
-Strony backend: `requireFeatures(['project_costing.admin'])` dla `/project-costing/segments`, `requireFeatures(['project_costing.view'])` dla zakładki kalkulacji.
+Strony backend: `requireFeatures(['project_costing.admin'])` dla ustawień; `requireFeatures(['project_costing.view'])` dla zakładki kalkulacji.
 
 ---
 
-## 8. Zdarzenia i integracja z Dealem / `klin:project`
+## 10. Zdarzenia i integracja
 
-### 8.1 Zdarzenia modułu (`events.ts`)
+### 10.1 Zdarzenia modułu (`events.ts`)
 
-```typescript
-// project_costing.calculation.created
-// project_costing.calculation.updated
-// project_costing.calculation.activated   (is_active_version → true)
-// project_costing.calculation.sent
-// project_costing.calculation.locked
-// project_costing.calculation.deleted
-// project_costing.deal.value_applied      (value_amount zaktualizowany)
+```
+project_costing.calculation.created     (clientBroadcast: true)
+project_costing.calculation.updated
+project_costing.calculation.activated   (clientBroadcast: true)
+project_costing.calculation.sent
+project_costing.calculation.locked
+project_costing.calculation.unlocked    (zawiera: by, reason, new_version_id)
+project_costing.calculation.deleted
+project_costing.deal.value_applied      (clientBroadcast: true)
+project_costing.pdf.generated           (clientBroadcast: true)
+project_costing.schedule.batch_updated
 ```
 
-Zdarzenia z `clientBroadcast: true`: `activated`, `value_applied` (odświeżają zakładkę deala w przeglądarce przez SSE DOM Event Bridge).
+`clientBroadcast: true` odświeża zakładkę deala przez SSE DOM Event Bridge.
 
-### 8.2 Integracja z Dealem
+### 10.2 Integracja z Dealem
 
-- Zakładka wstrzyknięta przez spot `detail:customers.deal:tabs` (zweryfikowany w kodzie).
-- `apply-to-deal` używa interceptora lub internal API call do aktualizacji `customer_deals.value_amount`. Szczegół implementacyjny: serwis `ProjectCostingService` wywołuje `em.nativeUpdate('customer_deals', { id: dealId }, { value_amount: totalPrice })` — dopuszczalne cross-module update przez raw SQL (nie ORM relation) lub przez dedykowany event subscriber w `customers` module, jeśli taki zostanie dodany.
-- **Uwaga**: zmiana `value_amount` wymaga obsługi optimistic lock deala (przekazanie `updatedAt` deala, nie kalkulacji).
+- Zakładka wstrzyknięta przez `detail:customers.deal:tabs` (zweryfikowany spot, `useDealInjectedTabs.tsx`, `packages/core/src/modules/customers/backend/customers/deals/[id]/hooks/useDealInjectedTabs.tsx`).
+- `apply-to-deal` przez `customers.deals.update` command (§8.9).
+- Subskrypcja na `customers.deal.updated` (w `subscribers/`) → jeśli zmiana `value_currency` deala → aktualizacja `currency` aktywnej kalkulacji + notify.
 
-### 8.3 Integracja z `klin:project`
+### 10.3 Integracja z `klin:project`
 
-`klin:project` to custom entity (Data designer, `custom_entities_storage`). Moduł `project_costing` **nie** tworzy własnej relacji do `klin:project`. Integracja jest przez:
-1. Deal ma `cf_offer_role` (custom field EAV) → moduł odczytuje go przez API `entities` przy wyświetlaniu listy deali projektu.
-2. Dashboard widgetu projektu (widget wstrzyknięty przez spot na stronie szczegółów `klin:project` – jeśli taki spot istnieje) – filtruje kalkulacje po `deal_id IN (deale powiązane z projektem)`.
-3. W braku spotu na `klin:project` (weryfikacja w implementacji): widget listy kalkulacji projektu dostarczany jako osobna strona `/project-costing/projects/:projectId`.
+Jak opisano w §3.10: odczyt `cf_offer_role` przez API entities, brak tworzenia custom fielda. Widget sumy projektu wstrzyknięty przez spot na `klin:project` (do weryfikacji w implementacji — spot może nie istnieć, fallback: `/project-costing/projects/:projectId`).
+
+### 10.4 Integracja zewnętrznych narzędzi harmonogramowania
+
+Inbound webhook `POST /api/project-costing/calculations/:id/schedule/webhook` przyjmuje payload zgodny z `PriceSourceProvider` interfejsem dla harmonogramu:
+```json
+{
+  "tool": "ms_project",
+  "batches": [
+    { "externalId": "task_123", "elementTypeCode": "floor_slab", "quantityM3": 45.5, "plannedStart": "2026-11-15", "plannedEnd": "2026-12-20" }
+  ]
+}
+```
+Serwis mapuje `elementTypeCode` → `element_type_id` przez `pc_element_types.code`. Nierozpoznane kody → batch z `element_type_id = null` i ostrzeżenie w odpowiedzi.
 
 ---
 
-## 9. Analityka (`analytics.ts`)
-
-Wpis w `analytics.ts` modułu – encje eksponowane do silnika dashboardów (`POST /api/dashboards/widgets/data`):
+## 11. Analityka (`analytics.ts`)
 
 ```typescript
 entities: [
@@ -630,270 +937,297 @@ entities: [
       segmentId:        { dbColumn: 'segment_id',      type: 'uuid' },
       status:           { dbColumn: 'status',          type: 'text' },
       currency:         { dbColumn: 'currency',        type: 'text' },
-      totalCost:        { dbColumn: 'total_cost',      type: 'numeric' },
-      totalPrice:       { dbColumn: 'total_price',     type: 'numeric' },
-      totalMargin:      { dbColumn: 'total_margin',    type: 'numeric' },
-      marginRate:       { dbColumn: 'margin_rate',     type: 'numeric' },
-      overheadRate:     { dbColumn: 'overhead_rate',   type: 'numeric' },
+      // Koszty — chronione requiredFeatures
+      subtotalCost:     { dbColumn: 'subtotal_cost',   type: 'numeric', requiredFeatures: ['project_costing.view_costs'] },
+      overheadAmount:   { dbColumn: 'overhead_amount', type: 'numeric', requiredFeatures: ['project_costing.view_costs'] },
+      fullCost:         { dbColumn: 'full_cost',       type: 'numeric', requiredFeatures: ['project_costing.view_costs'] },
+      // Ceny — chronione requiredFeatures
+      subtotalPrice:    { dbColumn: 'subtotal_price',  type: 'numeric', requiredFeatures: ['project_costing.view_prices'] },
+      // Marża — chroniona requiredFeatures
+      totalMargin:      { dbColumn: 'total_margin',    type: 'numeric', requiredFeatures: ['project_costing.view_margin'] },
+      marginRate:       { dbColumn: 'margin_rate',     type: 'numeric', requiredFeatures: ['project_costing.view_margin'] },
+      // Ilości — publiczne (nie są wrażliwe)
       totalQuantityM3:  { dbColumn: 'total_quantity_m3',  type: 'numeric' },
       totalQuantityPcs: { dbColumn: 'total_quantity_pcs', type: 'numeric' },
-      productionStartAt: { dbColumn: 'production_start_at', type: 'timestamp' },
-      productionEndAt:   { dbColumn: 'production_end_at',   type: 'timestamp' },
+      productionStartAt:{ dbColumn: 'production_start_at', type: 'timestamp' },
+      productionEndAt:  { dbColumn: 'production_end_at',   type: 'timestamp' },
       createdAt:        { dbColumn: 'created_at',      type: 'timestamp' },
       isActiveVersion:  { dbColumn: 'is_active_version', type: 'boolean' },
     },
   },
   {
-    entityId: 'project_costing:calculation_lines',
+    entityId: 'project_costing:production_batches',
     requiredFeatures: ['project_costing.view'],
     entityConfig: {
-      tableName: 'pc_calculation_lines',
-      dateField: 'created_at',
+      tableName: 'pc_production_batches',
+      dateField: 'planned_start_at',
       defaultScopeFields: ['tenant_id', 'organization_id'],
     },
     fieldMappings: {
       id:             { dbColumn: 'id',               type: 'uuid' },
       calculationId:  { dbColumn: 'calculation_id',   type: 'uuid' },
-      costCategoryId: { dbColumn: 'cost_category_id', type: 'uuid' },
       elementTypeId:  { dbColumn: 'element_type_id',  type: 'uuid' },
-      quantity:       { dbColumn: 'quantity',         type: 'numeric' },
-      unitCost:       { dbColumn: 'unit_cost',        type: 'numeric' },
-      unitPrice:      { dbColumn: 'unit_price',       type: 'numeric' },
-      lineCost:       { dbColumn: 'line_cost',        type: 'numeric' },
-      linePrice:      { dbColumn: 'line_price',       type: 'numeric' },
-      lineMargin:     { dbColumn: 'line_margin',      type: 'numeric' },
-      createdAt:      { dbColumn: 'created_at',       type: 'timestamp' },
+      quantityM3:     { dbColumn: 'quantity_m3',      type: 'numeric' },
+      quantityPcs:    { dbColumn: 'quantity_pcs',     type: 'numeric' },
+      plannedStartAt: { dbColumn: 'planned_start_at', type: 'timestamp' },
+      plannedEndAt:   { dbColumn: 'planned_end_at',   type: 'timestamp' },
+      status:         { dbColumn: 'status',           type: 'text' },
     },
   },
 ]
 ```
 
-### 9.1 Widgety dashboardów
+### 11.1 Widgety dashboardów
 
-Poniższe konfiguracje widgetów są możliwe do zbudowania w silniku dashboardów:
+**TOP/BOTTOM marża** (wymaga `project_costing.view_margin`):
+- Encja: `project_costing:calculations`, filtr `isActiveVersion = true`.
+- Metryka: `avg(marginRate)` lub `sum(totalMargin)`, groupBy: `dealId`.
+- Sortowanie: malejąco (TOP) / rosnąco (BOTTOM) — konfigurowane w widgecie.
 
-**TOP/BOTTOM marża (deale)**:
-- Encja: `project_costing:calculations`, filtr `is_active_version = true`.
-- Metryka: `marginRate` (avg lub ostatnia wartość), groupBy: `dealId`.
-- Sortowanie: malejąco (TOP) / rosnąco (BOTTOM) — konfigurowane w widgecie (nie w schemacie, jak zaznaczono w kontekście).
-- Resolver etykiety: `deal_id` → `customer_deals.display_name` (przez `labelResolvers` w analytics lub join w widgecie).
-
-**Prognoza produkcji – m³/szt. na 6 miesięcy**:
-- Encja: `project_costing:calculations`, filtr `is_active_version = true AND status IN ('active','sent') AND production_start_at BETWEEN now() AND now() + 6 months`.
-- Metryki: `SUM(totalQuantityM3)`, `SUM(totalQuantityPcs)`, groupBy: miesiąc (`productionStartAt`).
-- Wynik: wykres słupkowy z 6 słupkami (miesiące).
+**Prognoza produkcji — m³/szt. na 6 miesięcy**:
+- Encja: `project_costing:production_batches`, join z `pc_calculations` (filtr `is_active_version = true`, status `active|sent`).
+- Metryki: `SUM(quantityM3)`, `SUM(quantityPcs)`, groupBy: miesiąc z `plannedStartAt` (pro-rata w widgecie).
+- Wynik: wykres słupkowy 6 miesięcy.
 
 ---
 
-## 10. Rekomendacja integracji cennikowej
+## 12. UI / UX
 
-### 10.1 Analiza dostępnych źródeł cennikowych
+### 12.1 Zakładka „Kalkulacja" na karcie Deala
+
+Spot: `detail:customers.deal:tabs` (zweryfikowany w kodzie).
+
+Widget: `project_costing/widgets/DealCalculationTab.tsx`.
+
+Zawartość:
+- Nagłówek: wybór wersji kalkulacji, status badge, przyciski: „Nowa wersja", „Importuj", „Eksportuj XLSX", „Generuj PDF".
+- Siatka linii kosztowych (§12.2).
+- Panel podsumowania: sumy per kategoria + łącznie, narzut %, marża % (zredagowane wg widoczności).
+- Zakładka harmonogramu (view Gantt-list batchów, tylko dla kalkulacji z batchami).
+- Przycisk „Zastosuj do Deala" (wymaga `project_costing.apply_to_deal`).
+
+### 12.2 Siatka kosztów „jak Excel"
+
+**Biblioteka**: `adazzle/react-data-grid` v7 (MIT, ~50 KB gzip, zweryfikowana lekka opcja).
+
+Kolumny (widoczność zależna od ACL):
+
+| Kolumna | Edytowalna | Widoczność |
+|---------|-----------|-----------|
+| Lp. | Nie | zawsze |
+| Kategoria | Tak | zawsze |
+| Typ elementu | Tak | zawsze |
+| Opis / Pozycja | Tak | zawsze |
+| Ilość | Tak | zawsze |
+| J.m. | Tak | zawsze |
+| Koszt jedn. [PLN] | Tak | `view_costs` |
+| Cena jedn. [PLN] | Tak | `view_prices` |
+| Wartość kosztu | Nie | `view_costs` |
+| Wartość ceny | Nie | `view_prices` |
+| Marża zł | Nie | `view_margin` |
+| Marża % | Nie | `view_margin` |
+| Źródło ceny | Nie (info) | zawsze (ikona) |
+| Akcje | Nie | zawsze |
+
+Funkcje: edycja inline (Enter/Tab/Arrow), kopiuj/wklej blok (tab-separated, kompatybilny Excel), dodawanie/usuwanie wierszy, filtrowanie per kategoria, zwijanie grup per kategoria, auto-save debounce 800 ms.
+
+### 12.3 Widok harmonogramu produkcji
+
+Lista/tabela batchów w zakładce kalkulacji:
+- Kolumny: Typ elementu, Opis, m³, szt., Start, Koniec, Status.
+- Prosta wizualizacja Gantt: horizontal bar per batch w timeline (bez zewnętrznej biblioteki Gantt — własny SVG/CSS).
+- Import/eksport harmonogramu XLSX.
+
+### 12.4 Strony backend modułu
+
+| URL | Opis |
+|-----|------|
+| `/project-costing/settings` | Ustawienia modułu (widoczność, PDF config) |
+| `/project-costing/segments` | Lista segmentów |
+| `/project-costing/segments/[id]` | Edycja segmentu + kategorie + typy elementów |
+| `/project-costing/templates` | Lista szablonów |
+| `/project-costing/templates/[id]` | Edycja szablonu z siatką linii |
+| `/project-costing/price-sources` | Rejest źródeł cennikowych |
+| `/project-costing/price-catalog` | Cennik firmy (DataTable + import XLSX) |
+| `/project-costing/price-catalog/[id]` | Edycja pozycji cennikowej |
+| `/project-costing/calculations` | Lista kalkulacji cross-deal |
+| `/project-costing/calculations/[id]` | Szczegóły kalkulacji (standalone) |
+
+---
+
+## 13. Rekomendacja integracji cennikowej
+
+### 13.1 Analiza dostępnych źródeł
 
 #### Sekocenbud (Orgbud-Serwis)
 
-- **Licencja / warunki**: Komercyjne — subskrypcja roczna dla firm. Ceny orientacyjne [niezweryfikowane]: kilkaset–kilka tysięcy PLN/rok zależnie od zakresu danych.
-- **API**: Brak publicznie udokumentowanego REST API [niezweryfikowane]. Dane dostępne głównie jako pliki do pobrania po zalogowaniu (PDF, Excel) lub przez dedykowane oprogramowanie (Norma PRO, Planista).
-- **Formaty**: Pliki XLSX/PDF per kwartał. Brak oficjalnego formatu wymiany danych maszynowych.
-- **Realistyczność v1**: ❌ Nie. Brak API, konieczność ręcznego pobierania i konwertowania plików. Możliwe jako adapter importu CSV/XLSX w v2.
-- **v2 ścieżka**: Adapter importu pliku XLSX z Sekocenbud → mapowanie na `pc_price_catalog`.
+- **Licencja/warunki**: Komercyjne — subskrypcja roczna. Ceny [niezweryfikowane].
+- **API**: Brak publicznie udokumentowanego REST API [niezweryfikowane]. Dane dostępne jako pliki XLSX/PDF per kwartał lub przez dedykowane oprogramowanie (Norma PRO).
+- **v1**: ❌ Nie — brak API.
+- **v2**: Adapter importu XLSX z mapowaniem predefiniowanym dla formatu Sekocenbud → `pc_price_catalog` przez `PriceSourceProvider`.
 
 #### Intercenbud
 
-- **Licencja / warunki**: Komercyjne, subskrypcja. Dane kwartalne dla budownictwa ogólnego i instalacji [niezweryfikowane].
-- **API**: Brak publicznie dostępnego API [niezweryfikowane].
-- **Formaty**: Excel, własny format eksportu z oprogramowania Intercenbud.
-- **Realistyczność v1**: ❌ Nie. Analogicznie do Sekocenbud.
-- **v2 ścieżka**: Import pliku → `pc_price_catalog`.
+- **API**: Brak publicznie dostępnego API [niezweryfikowane]. Pliki Excel, format własny.
+- **v1**: ❌ Nie.
+- **v2**: Analogicznie do Sekocenbud.
 
 #### Bazy norm KNR/KNNR
 
-- **Charakter**: Katalogi Nakładów Rzeczowych — normy zużycia materiałów, robocizny, sprzętu na jednostkę roboty budowlanej. Nie są cenami, lecz normatywami ilościowymi.
-- **Dostępność**: Historyczne KNR dostępne bezpłatnie (domeny publiczne po ~30 latach), nowsze KNNR — komercyjnie lub w oprogramowaniu kosztorysowym (Norma PRO, Zuzia, R3).
-- **Format**: Bazy danych własnych systemów (nie REST API). Import możliwy przez eksport z Norma PRO do CSV/Excel.
-- **Realistyczność v1**: ❌ Nie (jako automatyczna integracja). Możliwe jako ręczny import szablonów opartych na KNR.
-- **v2 ścieżka**: Biblioteka szablonów kalkulacji opartych na normach KNR jako opcjonalny pakiet danych.
+- **Charakter**: Normatywy ilościowe (nie ceny). Import przez eksport z Norma PRO/Zuzia do CSV.
+- **v1**: ❌ Nie (jako automatyczna integracja). Możliwe jako ręczne szablony.
+- **v2**: Biblioteka szablonów kalkulacji opartych na normach KNR jako seed data.
 
 #### Własny cennik firmy
 
-- **Charakter**: Tabela `pc_price_catalog` w module — pozycje wprowadzane ręcznie lub importowane z XLSX/CSV przez firmę.
-- **Dostępność**: Pełna kontrola.
-- **Format**: Dowolny (kreator mapowania kolumn).
-- **Realistyczność v1**: ✅ **Tak** — to rekomendowane rozwiązanie dla v1.
-- **Koszt implementacji**: Wbudowane (część modułu, brak zewnętrznych licencji).
+- **v1**: ✅ **Tak** — `pc_price_catalog` z `price_source_id = company_catalog`. Wprowadzany ręcznie lub importowany z XLSX/CSV.
 
-### 10.2 Rekomendacja
+### 13.2 Rekomendacja
 
-> **v1: własny cennik firmy (`pc_price_catalog`) + import CSV/XLSX** — jedyne w pełni realistyczne źródło dla v1. Firmy budowlane mają własne cenniki w Excelu; kreator mapowania pozwala na jednorazowy import i bieżące aktualizacje.
->
-> **v2: adaptery importu plików z cenników komercyjnych** — Sekocenbud i Intercenbud oferują pliki Excel per kwartał. Moduł `project_costing` może dostarczyć adapter importu (zmapowane kolumny predefiniowane dla formatu Sekocenbud) jako opcjonalną funkcję.
->
-> **v2+: bazy KNR jako szablony** — biblioteka gotowych szablonów kalkulacji (np. płyta stropowa 1 m³: normy betonu, stali, deskowania, robocizny wg KNR 2-01) dostarczana jako plik seed/migration do `pc_calculation_templates`. Nie wymaga licencji API.
->
-> Integracja z zewnętrznymi API cenników (Orgbud-Serwis, GUS) **nie jest realistyczna w v1 ani v2** ze względu na brak publicznie dostępnych API i warunki licencyjne [niezweryfikowane — gdyby Sekocenbud/Intercenbud udostępnił API B2B, wróć do analizy].
+> **v1**: Własny cennik firmy + import CSV/XLSX + abstrakcja providera (gotowa na v2).
+> **v2**: Adaptery pliku Sekocenbud/Intercenbud jako `PriceSourceProvider`.
+> **v2+**: Biblioteka szablonów KNR jako seed data.
 
 ---
 
-## 11. Ocena: Katalog produktów (`catalog` module) vs własna tabela elementów
+## 14. Fazy, zakres i szacowanie wysiłku
 
-| Kryterium | Aktywacja `catalog` | Własna tabela `pc_element_types` |
-|-----------|---------------------|----------------------------------|
-| RAM na VPS | ~+80–150 MB (wszystkie encje catalog) | ~+5 MB |
-| Kompleksowość | Wysokie: produkty, warianty, SKU, kategorie, tagi, ceny, konwersje jednostek, historia cen | Niskie: tylko typy elementów + ewentualne konwersje |
-| UI catalog | Pełny moduł katalogowy (bez `sales`) — duży UI overhead | Brak — zarządzanie w ustawieniach `project_costing` |
-| Sprzężenia z upstream | Brak (`requires` catalog = brak w upstream) — ryzyko sync | Brak — własna tabela, brak sync-ryzyka |
-| Konwersje jednostek | `catalog_product_unit_conversions` (szt↔m³↔t) — gotowe | Własna implementacja lub delegacja do dictionaries |
-| Rekomendacja | ❌ **Nie** w v1 | ✅ **Tak** — własna lekka tabela `pc_element_types` |
+### Faza MVP (~15 dni roboczych)
 
-**Decyzja**: `pc_element_types` (własna tabela) w v1. Konwersje jednostek (np. szt↔m³ dla różnych typów elementów) dodawane jako opcjonalna tabela `pc_element_unit_factors` w v2, jeśli zapotrzebowanie potwierdzone.
-
----
-
-## 12. Fazy, zakres i szacowanie wysiłku
-
-### Faza MVP (ok. 8–13 dni roboczych)
-
-**Cel**: Ręczna kalkulacja linii kosztowych na karcie Deala + eksport XLSX.
+**Cel**: Ręczna kalkulacja linii na dealu + widoczność + ustawienia + podstawowa analityka.
 
 | Zadanie | Rozmiar |
 |---------|---------|
-| Model danych + migracje (pc_calculations, pc_calculation_lines, pc_cost_categories, pc_segments, pc_element_types) | M (2 dni) |
-| API CRUD: segments, cost-categories, element-types, calculations, calculation-lines | M (2 dni) |
-| Siatka `react-data-grid` — zakładka na dealu (edycja inline, sumy, narzut/marża %) | L (3 dni) |
-| Backend strony: segmenty, kategorie (ustawienia) | S (1 dzień) |
-| Eksport XLSX/CSV | S (1 dzień) |
-| ACL features + setup.ts (seed: kategorie domyślne, segment precast) | S (0.5 dnia) |
-| Analytics.ts + podstawowy widget marży | S (0.5 dnia) |
-| i18n PL/EN, testy jednostkowe kluczowych serwisów | M (2 dni) |
+| Model danych + migracje (pc_settings, pc_segments, pc_cost_categories, pc_element_types, pc_price_sources, pc_price_catalog, pc_calculations, pc_calculation_lines, pc_schedule_audit_log) | L (3 dni) |
+| API CRUD: segments, categories, element-types, price-sources, price-catalog, calculations, calculation-lines, settings | L (3 dni) |
+| Siatka `react-data-grid` — zakładka na dealu, sumy, widoczność ACL | L (3 dni) |
+| Konfiguracja widoczności (pc_settings, 3 features, redakcja server-side w API) | M (2 dni) |
+| Backend strony: segmenty, kategorie, cennik, ustawienia | M (2 dni) |
+| ACL features + setup.ts (seed: kategorie, segment precast, ustawienia widoczności) | S (0.5 dnia) |
+| Analytics.ts + requiredFeatures per pole + widget TOP/BOTTOM marża | M (1.5 dnia) |
 
-**Suma MVP**: ~12 dni roboczych.
+**Suma MVP**: 15 dni roboczych.
 
-### Faza v1 (ok. 9–14 dni roboczych, po MVP)
+### Faza v1 (~18 dni roboczych, po MVP)
 
-**Cel**: Import XLSX/CSV z mapowaniem, szablony kalkulacji, cennik firmy, `apply-to-deal`.
-
-| Zadanie | Rozmiar |
-|---------|---------|
-| Import XLSX/CSV + kreator mapowania + walidacja | L (3 dni) |
-| Cennik firmy (CRUD + import + eksport) | M (2 dni) |
-| Szablony kalkulacji + generowanie kalkulacji z szablonu | M (2 dni) |
-| Wersjonowanie kalkulacji (duplicate, activate, mark-sent, lock) + reguła `is_active_version` | M (2 dni) |
-| `apply-to-deal` + prognoza produkcji (daty, m³/szt.) | M (1.5 dnia) |
-| Widgety dashboard: TOP/BOTTOM marża, prognoza produkcji | M (2 dni) |
-| Widok porównania wersji | S (1 dzień) |
-
-**Suma v1**: ~13.5 dnia roboczych.
-
-### Faza v2 (szacunek wstępny, po v1)
-
-**Cel**: Multi-segment budowlany, adaptery importu cenników, konwersje jednostek, integracja projektu (`klin:project`).
+**Cel**: Import/eksport, szablony, wersjonowanie, PDF, harmonogram, apply-to-deal, prognoza.
 
 | Zadanie | Rozmiar |
 |---------|---------|
-| Nowe segmenty: materiały/robocizna/sprzęt/podwykonawca | S (1 dzień) |
-| Adapter importu Sekocenbud/Intercenbud (plik XLSX → cennik) | M (2 dni) |
+| Import XLSX/CSV + kreator mapowania + walidacja (`exceljs`) | L (3 dni) |
+| Eksport XLSX/CSV (z redakcją widoczności) + cennik import/eksport | M (2 dni) |
+| Szablony kalkulacji + generowanie z szablonu | M (2 dni) |
+| Wersjonowanie (duplicate, activate, mark-sent, lock, unlock + audit log) | M (2 dni) |
+| `apply-to-deal` via command bus (§8.9) | S (1 dzień) |
+| PDF oferty (`@react-pdf/renderer`) + generowanie + attachment + template config | L (3 dni) |
+| Harmonogram produkcji (pc_production_batches, CRUD, import/eksport XLSX, widok Gantt-list) | L (3 dni) |
+| Widget prognozy produkcji 6 miesięcy (pro-rata z batchów) | M (2 dni) |
+
+**Suma v1**: 18 dni roboczych.
+
+### Faza v2 (~15 dni roboczych, po v1)
+
+**Cel**: Multi-segment, adaptery cennikowe, klin:project, webhook harmonogramu.
+
+| Zadanie | Rozmiar |
+|---------|---------|
+| Nowe segmenty branżowe (materiał/robocizna/sprzęt/podwykonawca) | S (1 dzień) |
+| Adapter importu Sekocenbud/Intercenbud XLSX → `PriceSourceProvider` | M (2 dni) |
 | `pc_element_unit_factors` (szt↔m³ per typ elementu) | S (1 dzień) |
-| Integracja z `klin:project` (widget na stronie projektu, sumowanie deali) | M (2 dni) |
+| Integracja z `klin:project` (widget sumy projektu, cf_offer_role aggregation) | M (2 dni) |
 | Biblioteka szablonów KNR (seed data) | M (2 dni) |
-| Konwersja walutowa (integracja z `currencies`) | S (1 dzień) |
-| Eksport PDF kalkulacji | M (2 dni) |
-| AI-tool: generowanie linii kalkulacji na podstawie opisu projektu | L (3 dni) |
+| Konwersja walutowa v2 (integracja `currencies`) | S (1 dzień) |
+| Webhook inbound harmonogram (MS Project/zewnętrzne narzędzia) | M (2 dni) |
+| Eksport PDF listy/porównania wersji | S (1 dzień) |
+| AI-tool: generowanie linii kalkulacji z opisu | L (3 dni) |
 
-**Suma v2**: ~14 dni roboczych.
+**Suma v2**: 15 dni roboczych.
 
----
-
-## 13. Ryzyka
-
-| # | Ryzyko | Prawdopodobieństwo | Wpływ | Mitygacja |
-|---|--------|--------------------|-------|-----------|
-| R1 | `react-data-grid` niezgodność z DS OM lub konflikty stylów Tailwind | Średnie | Wysoki | PoC siatki w izolacji przed v1; custom renderers tokenów DS |
-| R2 | Wydajność `recalc` przy 5000 liniach (VPS 3.77 GiB) | Niskie | Wysoki | Recalc asynchroniczny (queue job) po próg >500 linii; synchroniczny poniżej |
-| R3 | Aktualizacja `value_amount` deala bez optimistic lock → race condition | Średnie | Średni | `apply-to-deal` pobiera aktualne `deal.updatedAt` i przekazuje jako `If-Unmodified-Since` |
-| R4 | Import pliku XLSX z nieoczekiwanym formatem (scalane komórki, wielopoziomowe nagłówki) | Wysokie | Średni | Kreator mapowania + walidacja + tryb „omiń błędne wiersze" |
-| R5 | Brak spotu na stronie `klin:project` (custom entity) | Nieznane | Średni | Fallback: osobna strona `/project-costing/projects/:projectId` |
-| R6 | SheetJS (xlsx) nie obsługuje wszystkich wariantów .xlsx (formuły, makra) | Niskie | Niski | Import tylko wartości (nie formuł); informacja dla użytkownika |
-| R7 | Unique partial index `is_active_version` — race condition przy równoległych `activate` | Niskie | Wysoki | Transakcja `SERIALIZABLE` lub advisory lock per `deal_id` w serwisie `activate` |
-| R8 | Scope creep: żądanie integracji z ERP/fakturowanie przed MVP | Wysokie | Wysoki | Granica scope: moduł `project_costing` nie zastępuje ERP; `sales` wyłączony celowo |
+**Łącznie**: ~48 dni roboczych (MVP 15 + v1 18 + v2 15).
 
 ---
 
-## 14. Pytania otwarte do Marka
+## 15. Ryzyka
 
-1. **Rola użytkownika a widoczność kalkulacji**: Czy `sales_rep` widzi tylko kalkulacje na swoich dealach (filtr `created_by` lub właściciel deala), czy wszystkie w organizacji? Czy `sales_manager` może edytować kalkulacje cudzych deali?
-
-2. **`cf_offer_role` — tworzenie custom fielda**: Custom field `cf_offer_role` na Dealu — czy jest już zdefiniowany w instancji produkcyjnej? Jeśli nie, spec powinien uwzględnić kroki konfiguracji lub automatyczne tworzenie przez `setup.ts`.
-
-3. **Integracja `apply-to-deal` — mechanizm update**: Czy akceptowalne jest, że moduł `project_costing` bezpośrednio aktualizuje `customer_deals.value_amount` przez raw ORM update (cross-module), czy wymagany jest event subscriber w `customers` module (co by wymagało zmiany w `packages/core`)?
-
-4. **Waluta kalkulacji vs waluta deala**: Czy kalkulacja zawsze ma tę samą walutę co deal (`value_currency`)? Czy możliwe kalkulacje wielowalutowe (np. materiały w EUR, robocizna w PLN)?
-
-5. **Szablony a segmenty — preload danych**: Czy chcesz, żeby spec uwzględnił pakiet seed z typowymi stawkami dla prefabrykacji żelbetowej (np. cena betonu C30/37 ~380 PLN/m³, stal zbrojeniowa ~3200 PLN/t, roboczogodzina montażu ~60 PLN/h) jako punkt startowy dla nowych tenantów, czy dane cennikowe mają być zawsze wprowadzane ręcznie?
-
-6. **Prognoza produkcji — granularność**: Prognoza 6 miesięcy opiera się na `production_start_at` kalkulacji. Czy wystarczy jeden przedział per deal (start–koniec), czy potrzebna jest bardziej szczegółowa harmonogramacja (np. per typ elementu / per etap)?
-
-7. **Projekt (`klin:project`) — suma deali**: Potwierdzenie reguły: do sumy projektu wchodzą **tylko** deale z `cf_offer_role = 'primary'`? Co z dealem `primary`, który zmienił status na `lost` — odejmuję go od sumy projektu natychmiast czy po zamknięciu okresu?
-
-8. **Limit wierszy importu**: Zaproponowany limit 5000 wierszy / 10 MB per import — czy to odpowiednie dla rzeczywistych arkuszy prefabrykacji?
-
-9. **Wersje wysłane klientowi — blokada**: Po `mark-sent` / `lock` — czy użytkownik z rolą `admin` powinien móc odblokować kalkulację (np. dla korekty błędu), czy blokada jest trwała?
-
-10. **Eksport PDF**: Czy PDF kalkulacji (wycena dla klienta) jest potrzebny już w v1, czy wystarczy XLSX/CSV?
+| # | Ryzyko | P-stwo | Wpływ | Mitygacja |
+|---|--------|--------|-------|-----------|
+| R1 | `react-data-grid` niezgodność ze stylami DS OM | Średnie | Wysoki | PoC przed v1; custom cell renderers z DS tokenami |
+| R2 | `@react-pdf/renderer` ograniczenia typograficzne (polskie znaki, fonty) | Średnie | Średni | Test z polskim tekstem i fontami (np. Source Sans Pro) przed implementacją |
+| R3 | Wydajność `recalc` przy 5000 linii na VPS 3.77 GiB | Niskie | Wysoki | Recalc async (queue job) powyżej 500 linii; sync poniżej |
+| R4 | Race condition przy równoległych `activate` | Niskie | Wysoki | Transakcja `SERIALIZABLE` lub advisory lock per `deal_id` w serwisie activate |
+| R5 | Optimistic lock deala przy `apply-to-deal` — staleness | Średnie | Średni | Serwis pobiera aktualne `deal.updatedAt` tuż przed dispatching command |
+| R6 | Spot na stronie `klin:project` może nie istnieć | Nieznane | Średni | Fallback strona `/project-costing/projects/:projectId` |
+| R7 | Import XLSX z formułami/scalonymi komórkami (`exceljs`) | Średnie | Niski | Import tylko wartości (nie formuł); informacja dla użytkownika; test na przykładowych plikach klienta |
+| R8 | `exceljs` streaming duże pliki: wzrost RAM przy 5000 wierszy | Niskie | Niski | Streaming reader zamiast `workbook.xlsx.read()` dla plików > 2 MB |
+| R9 | Scope creep: żądanie ERP/fakturowanie przed MVP | Wysokie | Wysoki | Granica scope: `sales` wyłączony celowo; `project_costing` nie zastępuje ERP |
+| R10 | Pro-rata batchów: precyzja przy bardzo krótkich batchach (<3 dni) | Niskie | Niski | Minimum batch duration = 1 dzień; ilości zaokrąglone do 2 miejsc |
 
 ---
 
-## 15. Rozwiązane założenia autonomiczne
+## 16. Pytania otwarte do Marka
 
-> Założenia podjęte samodzielnie przez agenta z braku wyraźnej decyzji w briefie. Każde może być nadpisane przez Marka przed implementacją.
+1. **Widok harmonogramu**: Czy prosta wizualizacja Gantt w tabeli (horizontal bar CSS) wystarczy w v1, czy potrzebna pełna biblioteka Gantt z drag-and-drop? Biblioteki Gantt (np. DHTMLX, frappe-gantt) dodają ~200–500 KB.
+
+2. **Spot na `klin:project`**: Czy strona szczegółów `klin:project` (custom entity z Data designer) ma spot na wstrzyknięcie widgetu? Jeśli nie — czy wystarczy link „Idź do projektu" otwierający `/project-costing/projects/:projectId`?
+
+3. **Widoczność kalkulacji między użytkownikami**: Czy `sales` (handlowiec) widzi kalkulacje na wszystkich dealach w organizacji, czy tylko na swoich (filtr po właścicielu deala)?
+
+4. **Szablon PDF — dane firmy**: Skąd pobieramy dane nagłówkowe (NIP, adres, REGON)? Z `pc_settings` (ręcznie wpisywane) czy z profilu tenanta (moduł `directory`)?
+
+5. **Webhook harmonogramu**: Czy integracja z zewnętrznym narzędziem harmonogramowania (MS Project, własne Gantt) jest realna w v1, czy można przesunąć do v2 (v1 = tylko ręczny import XLSX harmonogramu)?
+
+---
+
+## 17. Rozwiązane założenia autonomiczne
 
 | # | Obszar | Założenie | Uzasadnienie |
 |---|--------|-----------|--------------|
-| A1 | Biblioteka siatki | `adazzle/react-data-grid` v7 (MIT) | Najlżejsza opcja z natywnym Excel-like UX; TanStack Table wymaga dużej własnej implementacji klawiatury/paste |
-| A2 | Narzut vs marża | Narzut = dodawany do kosztu (nie do ceny), marża wyliczona od ceny | Zgodne z polską praktyką budowlaną i terminologią KNR |
-| A3 | Aktywna kalkulacja | Unique partial index w DB (nie soft constraint) | Gwarancja integralności bez warstwy aplikacyjnej |
-| A4 | Catalog module | Nie aktywować w v1; własna tabela `pc_element_types` | RAM VPS, brak `requires` catalog w upstream, prostszy sync |
-| A5 | Waluta | Jednowalutowa kalkulacja (PLN) w v1 | Eliminuje złożoność konwersji; v2 integruje `currencies` |
-| A6 | Limity importu | 5000 wierszy / 10 MB | Kompromis między typowymi arkuszami budowlanymi a RAM VPS |
-| A7 | Auto-save | Debounce 800 ms, `PATCH` per linia | Minimalizuje requesty; batch upsert dla wklejania wielu wierszy |
-| A8 | Cennik zewnętrzny | v1 = tylko własny cennik; v2 = adaptery pliki Sekocenbud/Intercenbud | API zewnętrznych dostawców niedostępne publicznie |
-| A9 | Prognoza produkcji | `production_start_at` na poziomie kalkulacji (nie linii) | Upraszcza model; szczegółowa harmonogramacja per linia = v2 |
-| A10 | Mockupy UI | Pominięte (`--no-mockups`) | Ograniczenie środowiska (małe VPS); zakładka deala dobrze opisana tekstowo |
+| A1 | Biblioteka siatki | `adazzle/react-data-grid` v7 (MIT) | Najlżejsza (~50 KB) z natywnym Excel-like UX |
+| A2 | Model kosztów | `overhead_rate` = narzut do kosztu; `margin_rate` = marża od ceny; `full_cost = subtotal_cost + overhead`; tryby A/B ceny | Polska praktyka budowlana; konsekwentne nazwy w całej spec |
+| A3 | Aktywna kalkulacja | Partial unique index w DB | Gwarancja integralności bez warstwy aplikacyjnej |
+| A4 | Catalog module | Nie aktywować v1; własna tabela `pc_element_types` | RAM VPS, prostszy sync |
+| A5 | Waluta kalkulacji | = waluta deala (`value_currency`); jednowalutowe v1 | Eliminuje złożoność konwersji |
+| A6 | Limity importu | 5000 wierszy / 10 MB | Bezpieczne dla typowych arkuszy prefabrykacji |
+| A7 | Auto-save | Debounce 800 ms; batch upsert dla paste | Minimalizuje requesty |
+| A8 | Biblioteka XLSX | `exceljs` v4.4.0 (MIT) | `xlsx` npm nie aktualizowany; `exceljs` aktywnie utrzymywany, MIT |
+| A9 | PDF rendering | `@react-pdf/renderer` v3 (MIT) | Brak Chromium/Puppeteer; lekki na VPS 3.77 GiB |
+| A10 | Odblokowanie | Admin only; tworzy nową wersję, nie edytuje wysłanej | Immutability wersji wysłanych; audit log obowiązkowy |
+| A11 | apply-to-deal | Przez `customers.deals.update` command bus (zweryfikowano w kodzie) | Zachowanie historii deala i zdarzeń CRM; zero zmian core |
+| A12 | Prognoza produkcji | Pro-rata z batchów harmonogramu; `productionStartAt/EndAt` jako derived | Harmonogram daje granularność; single date range niewystarczający |
+| A13 | cf_offer_role | Odczyt tylko (field id: 73f8260a…); brak tworzenia w setup.ts | Field istnieje na produkcji ze 546 dealami = primary |
+| A14 | Mockupy UI | Pominięte (`--no-mockups`) | Środowisko VPS; zakładka opisana tekstowo |
 
 ---
 
-## 16. Migracje i backward compatibility
+## 18. Migracje i backward compatibility
 
-Moduł dodaje **wyłącznie nowe tabele** (`pc_*`). Zero zmian w tabelach `packages/core`. Brak ryzyka backward compatibility dla upstream.
+Moduł dodaje wyłącznie nowe tabele (`pc_*`). Zero zmian w tabelach `packages/core`. Brak ryzyka backward compatibility dla upstream.
 
-Kolejność migracji (MikroORM):
-1. `pc_segments`
-2. `pc_cost_categories`
-3. `pc_element_types`
-4. `pc_price_catalog`
-5. `pc_calculation_templates` + `pc_calculation_template_lines`
-6. `pc_calculations`
-7. `pc_calculation_lines`
-8. `pc_import_column_mappings`
+Kolejność migracji: `pc_settings` → `pc_segments` → `pc_cost_categories` → `pc_element_types` → `pc_price_sources` → `pc_price_catalog` → `pc_calculation_templates` + `pc_calculation_template_lines` → `pc_calculations` → `pc_calculation_lines` → `pc_production_batches` → `pc_schedule_audit_log` → `pc_calculation_pdf_attachments` → `pc_import_column_mappings`.
 
 ---
 
-## 17. Pliki modułu (szkielet)
+## 19. Szkielet plików modułu
 
 ```
 apps/mercato/src/modules/project_costing/
-├── index.ts                    # rejestracja modułu
-├── acl.ts                      # features
-├── analytics.ts                # analytics config
-├── events.ts                   # defineModuleEvents
-├── setup.ts                    # seed: kategorie, segment precast
-├── di.ts                       # DI: serwisy
-├── extension-points.ts         # hosts (jeśli moduł eksponuje spoty)
+├── index.ts
+├── acl.ts                          # features (10 features)
+├── analytics.ts                    # analytics config z requiredFeatures
+├── events.ts                       # defineModuleEvents (9 zdarzeń)
+├── setup.ts                        # seed: kategorie, segment, ustawienia widoczności
+├── di.ts                           # DI: serwisy, price source registry
+├── extension-points.ts
 ├── api/
+│   ├── settings/route.ts
 │   ├── segments/route.ts
 │   ├── cost-categories/route.ts
 │   ├── element-types/route.ts
+│   ├── price-sources/route.ts
 │   ├── price-catalog/route.ts
 │   ├── price-catalog/export/route.ts
 │   ├── price-catalog/import/route.ts
+│   ├── price-catalog/search/route.ts
 │   ├── calculation-templates/route.ts
 │   ├── calculation-template-lines/[lineId]/route.ts
 │   ├── calculations/route.ts
@@ -904,41 +1238,58 @@ apps/mercato/src/modules/project_costing/
 │   ├── calculations/[id]/apply-to-deal/route.ts
 │   ├── calculations/[id]/mark-sent/route.ts
 │   ├── calculations/[id]/lock/route.ts
+│   ├── calculations/[id]/unlock/route.ts
+│   ├── calculations/[id]/generate-pdf/route.ts
 │   ├── calculations/[id]/export/route.ts
 │   ├── calculations/[id]/import/route.ts
+│   ├── calculations/[id]/schedule/export/route.ts
+│   ├── calculations/[id]/schedule/import/route.ts
+│   ├── calculations/[id]/schedule/webhook/route.ts
 │   ├── calculation-lines/route.ts
 │   ├── calculation-lines/[id]/route.ts
 │   ├── calculation-lines/batch/route.ts
+│   ├── production-batches/route.ts
+│   ├── production-batches/[id]/route.ts
+│   ├── calculations/[id]/pdf-attachments/route.ts
 │   └── import-column-mappings/route.ts
 ├── backend/
-│   ├── project-costing/
-│   │   ├── segments/page.tsx
-│   │   ├── segments/[id]/page.tsx
-│   │   ├── templates/page.tsx
-│   │   ├── templates/[id]/page.tsx
-│   │   ├── price-catalog/page.tsx
-│   │   ├── price-catalog/[id]/page.tsx
-│   │   ├── calculations/page.tsx
-│   │   └── calculations/[id]/page.tsx
+│   └── project-costing/
+│       ├── settings/page.tsx
+│       ├── segments/page.tsx + [id]/page.tsx
+│       ├── templates/page.tsx + [id]/page.tsx
+│       ├── price-sources/page.tsx
+│       ├── price-catalog/page.tsx + [id]/page.tsx
+│       └── calculations/page.tsx + [id]/page.tsx
 ├── components/
-│   ├── CalculationGrid.tsx     # react-data-grid wrapper
-│   ├── CalculationSummary.tsx  # panel podsumowania
-│   ├── ImportWizard.tsx        # kreator importu
-│   └── VersionSelector.tsx     # dropdown wersji
+│   ├── CalculationGrid.tsx         # react-data-grid wrapper
+│   ├── CalculationSummary.tsx      # panel podsumowania (z redakcją)
+│   ├── ScheduleGanttList.tsx       # widok batchów harmonogramu
+│   ├── ImportWizard.tsx
+│   ├── VersionSelector.tsx
+│   └── PdfTemplateEditor.tsx       # konfiguracja szablonu PDF
 ├── data/
-│   ├── entities.ts             # MikroORM entities
-│   └── validators.ts           # zod schemas
+│   ├── entities.ts
+│   └── validators.ts
 ├── i18n/
 │   ├── pl.json
 │   └── en.json
 ├── migrations/
-│   └── Migration20261019*.ts   # migracje DB
+│   └── Migration20261019*.ts
 ├── widgets/
-│   ├── index.ts                # rejestracja widgetów
-│   └── DealCalculationTab.tsx  # zakładka deala
+│   ├── index.ts
+│   └── DealCalculationTab.tsx
 └── lib/
-    ├── calculation.service.ts  # recalc, activate, apply-to-deal
-    └── import.service.ts       # parsowanie XLSX/CSV
+    ├── calculation.service.ts      # recalc, activate, apply-to-deal (command bus)
+    ├── pdf.service.ts              # @react-pdf/renderer
+    ├── import.service.ts           # exceljs parsing
+    ├── visibility.ts               # applyVisibilityRedaction
+    ├── price-source/
+    │   ├── provider.interface.ts
+    │   ├── registry.ts
+    │   └── providers/
+    │       └── company-catalog.provider.ts
+    └── schedule/
+        └── forecast.ts             # pro-rata aggregation
 ```
 
 ---
@@ -947,4 +1298,5 @@ apps/mercato/src/modules/project_costing/
 
 | Data | Zmiana |
 |------|--------|
-| 2026-10-19 | Inicjalna wersja specyfikacji (autonomous, `om-auto-write-spec`) |
+| 2026-10-19 | Inicjalna wersja (v1 — autonomous, `om-auto-write-spec`) |
+| 2026-10-19 | Rewizja (v2 — po przeglądzie Marka): widoczność kosztów/marż/cen (pc_settings + ACL), PDF v1 (@react-pdf/renderer), abstrakcja price-source (provider interface + registry + proweniencja linii), harmonogram produkcji z batchów (pc_production_batches + pro-rata), wyjaśnienie modelu overhead/margin (full_cost, tryby A/B, price_override), apply-to-deal przez command bus (zweryfikowano w kodzie), exceljs zamiast xlsx npm, odblokowanie = nowa wersja (admin + audit log), waluta = waluta deala, cf_offer_role read-only. Aktualizacja wysiłku: MVP 15d, v1 18d, v2 15d. Pytania otwarte skrócone do 5 nierozwiązanych. |
