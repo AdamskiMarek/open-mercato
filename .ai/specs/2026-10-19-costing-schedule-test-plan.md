@@ -19,7 +19,14 @@
 | Koszty rzeczywiste (TC-REAL) | 3 |
 | Harmonogram Gantt (TC-GANTT) | 8 |
 | Testy wydajności (TC-PERF) | 3 |
-| **Razem** | **72** |
+| Waluty (TC-CUR) | 5 |
+| Firmy bez modułu harmonogramu (TC-NOSCHED) | 4 |
+| Prognoza produkcji (TC-FCST) | 6 |
+| Harmonogram ofertowy → wykonawczy (TC-EXEC) | 5 |
+| Bezpieczeństwo plików (TC-SEC) | 6 |
+| Izolacja multi-tenant (TC-TEN) | 6 |
+| Edycja równoległa (TC-CONC) | 5 |
+| **Razem** | **109** |
 
 ---
 
@@ -30,12 +37,17 @@
 | # | Ryzyko | Prawdopodobieństwo | Wpływ | Priorytet | Obszar | Scenariusze |
 |----|--------|-------------------|-------|-----------|--------|-------------|
 | R1 | Błędy kalkulacji finansowej (zaokrąglenia, dzielenie przez zero) | Wysoki | Krytyczny | P0 | Kalkulacja | TC-COST-001 do TC-COST-022 |
-| R2 | Wyciek danych międzytenantowych (multitenant izolacja) | Średni | Krytyczny | P0 | Uprawnienia | TC-PERM-001 do TC-PERM-008 |
+| R2 | Wyciek danych międzytenantowych (multitenant izolacja) | Średni | Krytyczny | P0 | Uprawnienia + Tenant | TC-PERM-001 do TC-PERM-008, TC-TEN-001 do TC-TEN-006 |
 | R3 | Uszkodzenie danych przy imporcie (złe kodowanie, formatowanie) | Wysoki | Wysoki | P1 | Import/eksport | TC-IMP-001 do TC-IMP-008 |
 | R4 | Utrata integralności oferty po wysłaniu (zmiana ceny, marży) | Średni | Wysoki | P1 | Wersje | TC-VER-001 do TC-VER-006 |
-| R5 | Niekonwersja oferty przy wygranym dealu (brak synchronizacji) | Średni | Wysoki | P1 | Harmonogram | TC-GANTT-001 do TC-GANTT-008 |
+| R5 | Niekonwersja oferty przy wygranym dealu (brak synchronizacji) | Średni | Wysoki | P1 | Harmonogram wykonawczy | TC-EXEC-001 do TC-EXEC-005 |
 | R6 | Błędy harmonogramu (cykl, zależności, auto-przesunięcie) | Średni | Wysoki | P1 | Harmonogram | TC-GANTT-005 do TC-GANTT-008 |
 | R7 | Duplikowanie lub gubianie inwestycji (dopasowanie) | Niski | Wysoki | P2 | Powiązania | TC-DEAL-009, TC-DEAL-010 |
+| R8 | Ataki plikowe (XLSX bomb, formula injection) na VPS | Wysoki | Krytyczny | P0 | Bezpieczeństwo plików | TC-SEC-001 do TC-SEC-006 |
+| R9 | Utrata danych przy równoległej edycji (race condition) | Średni | Krytyczny | P0 | Edycja równoległa | TC-CONC-001 do TC-CONC-005 |
+| R10 | Błędy walutowe (kursy, zamrożenie, zaokrąglenia per waluta) | Średni | Wysoki | P1 | Waluty | TC-CUR-001 do TC-CUR-005 |
+| R11 | Nieprawidłowa prognoza produkcji (suma ≠ partie, prob) | Niski | Średni | P2 | Prognoza | TC-FCST-001 do TC-FCST-006 |
+| R12 | Wyciek danych przez eksport / PDF (marża, koszty) | Wysoki | Wysoki | P1 | Uprawnienia, Waluty, Tenant | TC-PERM-007, TC-TEN-004, TC-CUR-005 |
 
 ### 1.2. Poza zakresem (Phase 2+)
 
@@ -97,9 +109,11 @@ Podstawowe operacje kalkulacji, arytmetyka finansowa, zaokrąglenia, jednostki, 
 - **Kroki**:
   1. Cena 1: 100.33 PLN, Cena 2: 200.34 PLN, Cena 3: 150.33 PLN
   2. Sumy = ?
-- **Oczekywane wyniki**:
-  - Suma = 100.33 + 200.34 + 150.33 = 450.99 (lub zaokrąglona do 451.00)
-  - **Luka spec**: standard zaokrąglenia (IEEE 754 / bankierski) nie sprecyzowany
+- **Oczekiwane wyniki**:
+  - Każda linia zaokrąglana half-up do 2 miejsc dziesiętnych: 100.33, 200.34, 150.33 (tu bez zmiany)
+  - Suma = 100.33 + 200.34 + 150.33 = 450.99 (suma już-zaokrąglonych linii, nie zaokrąglenie sumy surowej)
+  - Tryb zaokrąglenia konfigurowalny per firma (domyślnie half-up); zmiana trybu w ustawieniach firmy przelicza na żywo
+  - Różnica względem bankierskiego: 0.5 zawsze idzie w górę; test: linia = 1.005 → 1.01 (nie 1.00)
 
 #### TC-COST-004: Dzielenie przez zero — jednostka z zerem
 
@@ -228,8 +242,10 @@ Podstawowe operacje kalkulacji, arytmetyka finansowa, zaokrąglenia, jednostki, 
   1. Marża kwotowa = 1000 - 600 = 400 PLN
   2. Marża % = (1000 - 600) / 1000 = 40% (na cenie) lub (400 / 600) = 66.7% (na koszcie)
 - **Oczekywane wyniki**:
-  - Wyświetl obydwie (kwotową i %), jasne podpisanie
-  - **Luka spec**: który standard % (na cenie czy koszcie)?
+  - Marża kwotowa = 1000 - 600 = 400 PLN
+  - Marża % = (1000 - 600) / 1000 = 40% **na cenie** (definicja: marża = % od ceny sprzedaży)
+  - Narzut % (widok pomocniczy): 400 / 600 = 66.7% na koszcie — wyświetlany osobno z jasnym podpisem "Narzut"
+  - Oba wyświetlone: "Marża 40% (na cenie)" i "Narzut 66.7% (na koszcie)"
 
 #### TC-COST-015: Narzut — ręczne nadpisanie
 
@@ -758,19 +774,19 @@ Role, widoczność kosztów/marży/cen, multi-tenant izolacja, uprawnienia do ed
   - Eksport: tylko dane Firmy A
   - **Luka spec**: czy organization filter na DB czy w aplikacji?
 
-#### TC-PERM-006: Marża po zamknięciu deala — widoczność per rola
+#### TC-PERM-006: Marża po zamknięciu deala — widoczność per firma (ustawienie globalne)
 
 - **Priorytet**: P1 | **Poziom**: Integration + UI
 - **Kroki**:
   1. Deal wygrana, status = "Zaakceptowana"
-  2. Admin: "Pokaż marżę zaakceptowanej wersji po zamknięciu"
+  2. Admin firmy: zmień ustawienie "Widoczność marży po zamknięciu deala" na ON/OFF
   3. Zaloguj się jako Manager, Handlowiec, Obsługa
   4. Otwórz closed deal
 - **Oczekiwane wyniki**:
-  - Ustawienie firmy (global lub per-role): czy marża widoczna po zamknięciu?
-  - Jeśli global "Nie": wszystkie role = marża ukryta
-  - Jeśli per-role "Manager=Tak": Manager widzi, pozostali nie
-  - **Luka spec**: global czy per-role?
+  - Ustawienie PER FIRMA (nie per rola): gdy OFF — żadna rola nie widzi marży po zamknięciu
+  - Gdy ON — wszystkie role z uprawnieniem do marży widzą ją też po zamknięciu
+  - Zmiana ustawienia firmy natychmiastowo skuteczna (bez re-logowania)
+  - Dotyczy tylko wersji zaakceptowanej, nie roboczych
 
 #### TC-PERM-007: Widoczność w PDF oferty — nigdy nie zawiera kosztów/marży
 
@@ -998,23 +1014,591 @@ Zależności, auto-planowanie, baseline, części produkcji, prognoza produkcji.
 
 ---
 
-## 12. Zbiory danych testowych (Fixtures)
+## 12. Scenariusze testowe: Waluty (TC-CUR) — 5 TC
 
-| Typ | Opis | Ilość |
-|-----|------|-------|
-| **Organizacje** | 3 firmy (A, B, C), różne konfiguracje ról i uprawnień | 3 |
-| **Użytkownicy** | Admin (Firma A), Handlowiec (A), Manager (A/B), Obsługa (B), Klient (portal) | 8 |
-| **Deale** | 5 dealów w różnych statusach (Nowy, Propozycja, Wygrana, Przegrana, Zamknięta) | 5 |
-| **Projekty/Inwestycje** | 3 inwestycje (Hala A, Kompleks, Łącznica) z różnymi ID (e-Zamówienia, TED, BIP) | 3 |
-| **Kalkulacje** | 12 kalkulacji (różne statusy, wersje, ceny, marże, jednostki) | 12 |
-| **Cenniki** | 2 cenniki (domyślny, promocyjny) z regułami warstowymi | 2 |
-| **XLSX/CSV testowe** | 10 plików (poprawne, złe kodowanie, brak kolumn, separator ;, duże) | 10 |
-| **Harmonogramy** | 4 Gantta (ofertowy, wykonawczy, z cyklem, 300+ zadań) | 4 |
-| **Koszty rzeczywiste** | 20 wpisów kosztów (verschiedne kategorie, daty, kwoty) | 20 |
+Kalkulacja jednowalutowa, kursy wymiany, zaokrąglenie per waluta, zmiana waluty deala.
+
+#### TC-CUR-001: Waluta kalkulacji = waluta deala / domyślna firmy
+
+- **Priorytet**: P1 | **Poziom**: Integration
+- **Warunki wstępne**: Firma A z domyślną walutą PLN; Deal X z walutą EUR
+- **Kroki**:
+  1. Stwórz kalkulację bez podpięcia do deala → waluta = PLN (domyślna firmy)
+  2. Podepnij do Deal X (EUR) → waluta kalkulacji zmienia się na EUR
+  3. Odepnij od deala → waluta wraca do PLN (domyślna firmy)
+- **Oczekiwane wyniki**:
+  - Kalkulacja jednowalutowa: dokładnie jedna waluta aktywna w danym momencie
+  - Zmiana waluty po podpięciu: komunikat "Waluta zostanie zmieniona z PLN na EUR. Przelicz wartości czy zachowaj liczby?" z wyborem
+  - Brak mieszanych walut w liniach jednej kalkulacji
+
+#### TC-CUR-002: Kurs wymiany — źródło, data kursu, zamrożenie w wysłanej wersji
+
+- **Priorytet**: P1 | **Poziom**: Integration
+- **Warunki wstępne**: Kalkulacja w EUR, kurs EUR/PLN = 4.25 na dzień T
+- **Kroki**:
+  1. Robocza wersja: kurs EUR/PLN z dnia T = 4.25; wartość pozycji 1000 EUR = 4250 PLN
+  2. Wyślij wersję (status "Wysłana")
+  3. Następnego dnia kurs zmienia się na 4.30
+  4. Otwórz wysłaną wersję
+- **Oczekiwane wyniki**:
+  - Wysłana wersja zachowuje kurs 4.25 (snapshot z dnia wysłania)
+  - Nowa robocza kopia pokaże kurs 4.30 (aktualny)
+  - Metadane kursu: źródło, data pobrania, wartość — widoczne per wersja
+  - PDF oferty zawiera kurs z daty wysłania
+
+#### TC-CUR-003: Zaokrąglenie per waluta — JPY (0 miejsc), PLN (2 miejsca)
+
+- **Priorytet**: P1 | **Poziom**: Unit
+- **Warunki wstępne**: Firma z dwoma aktywnymi walutami (PLN, JPY)
+- **Kroki**:
+  1. Kalkulacja JPY: linia 1 = 1005.4 JPY, linia 2 = 2003.6 JPY
+  2. Oczekiwane zaokrąglenia half-up per linia: 1005, 2004
+  3. Suma = 1005 + 2004 = 3009 JPY (0 miejsc)
+  4. Kalkulacja PLN: linia 1 = 100.345 PLN → 100.35; linia 2 = 200.344 → 200.34
+  5. Suma = 100.35 + 200.34 = 300.69 PLN
+- **Oczekiwane wyniki**:
+  - JPY: 0 miejsc po przecinku (ISO 4217 standard)
+  - PLN: 2 miejsca po przecinku
+  - Konfiguracja per waluta: admin może nadpisać domyślne miejsca dziesiętne (np. BTC → 8)
+  - Eksport i PDF respektują precyzję waluty
+
+#### TC-CUR-004: Zmiana waluty deala po podpięciu — ostrzeżenie i przeprzeliczenie
+
+- **Priorytet**: P1 | **Poziom**: Integration + E2E
+- **Warunki wstępne**: Kalkulacja z 5 liniami (EUR), podpięta do Deal X
+- **Kroki**:
+  1. Zmień walutę Deal X z EUR na USD
+  2. System wykrywa niezgodność walut (kalkulacja EUR, deal USD)
+  3. Wybierz: "Przelicz po kursie" lub "Zachowaj liczby w nowej walucie"
+  4. Zapisz
+- **Oczekiwane wyniki**:
+  - Opcja A (przelicz): każda linia = wartość_EUR × kurs_EUR/USD; kurs z dnia zmiany zapamiętany
+  - Opcja B (zachowaj liczby): wartości numeryczne bez zmian, tylko symbol waluty się zmienia
+  - Audit trail: zmiana waluty + wybrana metoda + kurs (jeśli A)
+  - Wersje robocze i wysłane traktowane różnie: wysłane nie mogą być zmienione
+
+#### TC-CUR-005: Eksport i PDF w walucie oferty
+
+- **Priorytet**: P1 | **Poziom**: E2E/UI
+- **Warunki wstępne**: Kalkulacja EUR, wysłana wersja
+- **Kroki**:
+  1. Eksportuj do XLSX
+  2. Wygeneruj PDF
+  3. Sprawdź nagłówki kolumn, symbole walut, precyzję
+- **Oczekiwane wyniki**:
+  - XLSX: kolumna "Wartość (EUR)" — wszystkie kwoty w EUR z 2 miejscami
+  - PDF: symbol waluty spójny w całym dokumencie (nie mieszaj PLN/EUR)
+  - Kurs użyty do wysłania: widoczny w stopce PDF ("Kurs: 1 EUR = 4.25 PLN na dzień 2026-10-15")
+  - Eksport przez użytkownika bez uprawnień do marży: kolumna marży pominięta
 
 ---
 
-## 13. Poziomy testów — mapowanie do narzędzi
+## 13. Scenariusze testowe: Firmy BEZ modułu harmonogramu (TC-NOSCHED) — 4 TC
+
+Kalkulacja, partie, prognoza działają; brak Ganttu; włączanie/wyłączanie modułu.
+
+#### TC-NOSCHED-001: Kalkulacja + partie/daty bez modułu harmonogramu
+
+- **Priorytet**: P1 | **Poziom**: Integration
+- **Warunki wstępne**: Firma B z wyłączonym modułem harmonogramu
+- **Kroki**:
+  1. Firma B: w ustawieniach "Moduł harmonogramu" = OFF
+  2. Otwórz kalkulator w Firmie B
+  3. Dodaj pozycje z datą produkcji i datą dostawy bezpośrednio w liniach kalkulacji
+  4. Dodaj partie: element "Słup SB-01", ilość 10 szt., data produkcji 2026-11-15, data dostawy 2026-11-30
+  5. Zapisz
+- **Oczekiwane wyniki**:
+  - Linie kalkulacji mają pola "Data produkcji" i "Data dostawy" — działają normalnie
+  - Partie produkcji widoczne i edytowalne w kalkulacji
+  - Prognoza produkcji działa (z tych dat, bez Ganttu)
+  - Brak zakładki "Harmonogram Gantt" w nawigacji
+  - Brak endpointów `/schedule/gantt` (404) dla Firmy B
+
+#### TC-NOSCHED-002: Brak endpointów i UI harmonogramu
+
+- **Priorytet**: P0 | **Poziom**: API + E2E
+- **Warunki wstępne**: Firma B (harmonogram OFF), zalogowany użytkownik Firmy B
+- **Kroki**:
+  1. GET `/api/v1/schedule/gantt?deal_id=X` (deal Firmy B)
+  2. GET `/api/v1/schedule/tasks?deal_id=X`
+  3. Sprawdź UI: menu boczne, zakładki na dealu, zakładki na kalkulacji
+- **Oczekiwane wyniki**:
+  - API: 404 lub 403 z komunikatem "Moduł harmonogramu niedostępny dla tej organizacji"
+  - UI: brak zakładki "Harmonogram" w menu i na stronach deal/projekt
+  - Widget Gantta nie ładowany (brak importu JS)
+  - Użytkownik Firmy A (z harmonogramem) wywołując te same endpointy dla SWOJEGO deala → 200 OK
+
+#### TC-NOSCHED-003: Import harmonogramu z XLSX bez modułu Gantta
+
+- **Priorytet**: P1 | **Poziom**: Integration
+- **Warunki wstępne**: Firma B (harmonogram OFF), plik XLSX z kolumnami Zadanie|Start|Koniec|Ilość
+- **Kroki**:
+  1. Import XLSX harmonogramu do kalkulacji (bez Ganttu)
+  2. Mapuj kolumny: Zadanie → Nazwa, Start → Data produkcji, Koniec → Data dostawy
+  3. Import 20 wierszy
+- **Oczekiwane wyniki**:
+  - 20 partii/zadań zaimportowanych jako wiersze kalkulacji z datami
+  - Prognoza produkcji odzwierciedla daty z importu
+  - Brak próby tworzenia Gantta (żadnych rekordów w tabelach harmonogramu)
+
+#### TC-NOSCHED-004: Włączenie modułu harmonogramu w trakcie — migracja danych
+
+- **Priorytet**: P2 | **Poziom**: Integration + E2E
+- **Warunki wstępne**: Firma B (moduł OFF) z 10 kalkulacjami z datami/partiami
+- **Kroki**:
+  1. Admin Firmy B: ustawienia → "Moduł harmonogramu" = ON
+  2. Odśwież aplikację
+  3. Sprawdź: czy istniejące daty/partie są widoczne w nowym Ganttcie?
+  4. Odwróć: "Moduł harmonogramu" = OFF ponownie
+- **Oczekiwane wyniki**:
+  - Włączenie: zakładka Gantt pojawia się; istniejące partie mogą być opcjonalnie zmigrowne do zadań Ganttu (lub pozostają jako daty w kalkulacji)
+  - Wyłączenie: Gantt znika z UI; dane harmonogramu zachowane w DB (nie kasowane); partie/daty w kalkulacji nadal widoczne
+  - Brak utraty danych przy obu operacjach
+
+---
+
+## 14. Scenariusze testowe: Prognoza produkcji (TC-FCST) — 6 TC
+
+Horyzont 6 miesięcy, tygodnie/miesiące, ważenie prawdopodobieństwem, partie, zmiana oferty.
+
+#### TC-FCST-001: Prognoza z Ganttem — tygodnie i miesiące
+
+- **Priorytet**: P1 | **Poziom**: Integration
+- **Warunki wstępne**: Firma A z modułem harmonogramu; deal z Ganttem; kilkanaście partii produkcji
+- **Kroki**:
+  1. Partie: Słup SB-01 × 10 szt. (2026-11-05), Strop ST-02 × 5 m³ (2026-11-20), Ściana SC-03 × 3 m³ (2027-01-10)
+  2. Otwórz prognozę: tryb "miesiące"
+  3. Przełącz na tryb "tygodnie"
+- **Oczekiwane wyniki**:
+  - Tryb miesiące: Listopad=15 szt. + 5 m³, Grudzień=brak, Styczeń=3 m³
+  - Tryb tygodnie: Tydzień 45 (Słup SB-01), Tydzień 47 (Strop), Tydzień 2/2027 (Ściana)
+  - Suma tygodni listopad = suma miesiąca listopad (konsolidacja spójna)
+  - Partie powiązane z zadaniami Ganttu — zmiana daty w Ganttcie automatycznie aktualizuje prognozę
+
+#### TC-FCST-002: Prognoza bez Ganttu — daty z kalkulacji
+
+- **Priorytet**: P1 | **Poziom**: Integration
+- **Warunki wstępne**: Firma B (harmonogram OFF); partie z datami w liniach kalkulacji
+- **Kroki**:
+  1. Kalkulacja z partiami: Element A (2026-11-01, 10 szt.), Element B (2026-12-15, 5 m³)
+  2. Otwórz prognozę produkcji
+- **Oczekiwane wyniki**:
+  - Prognoza działa bez Ganttu — agreguje z dat bezpośrednio w partiach
+  - Listopad: 10 szt. Element A; Grudzień: 5 m³ Element B
+  - Brak zakładki Gantt, ale zakładka Prognoza widoczna
+
+#### TC-FCST-003: Jednostki w prognozie — m³ i szt. oddzielnie
+
+- **Priorytet**: P1 | **Poziom**: Integration
+- **Warunki wstępne**: Partie: 10 szt. Słup, 3 m³ Strop, 2 szt. Belka
+- **Kroki**:
+  1. Prognoza listopad
+- **Oczekiwane wyniki**:
+  - Wyświetlenie per jednostka: "12 szt. | 3 m³" (nie sumy różnych jednostek)
+  - Ewentualnie osobne kolumny per jednostka miary
+  - Brak sumowania m³ + szt. (niezgodne jednostki)
+
+#### TC-FCST-004: Ważenie prawdopodobieństwem deala
+
+- **Priorytet**: P1 | **Poziom**: Integration
+- **Warunki wstępne**: Deal X (prawdopodobieństwo 60%), Deal Y (100%), Deal Z (0%)
+- **Kroki**:
+  1. Deal X: 10 szt. w listopadzie → ważone = 6 szt.
+  2. Deal Y: 5 szt. w listopadzie → ważone = 5 szt.
+  3. Deal Z: 20 szt. w listopadzie → ważone = 0 szt.
+  4. Zmień prawdopodobieństwo Deal X na 80%
+  5. Prognoza ponownie
+- **Oczekiwane wyniki**:
+  - Prognoza "niezważona" (surowa): 10 + 5 + 20 = 35 szt.
+  - Prognoza "ważona": 6 + 5 + 0 = 11 szt.
+  - Obie dostępne (dwa widoki lub przełącznik)
+  - Po zmianie prob Deal X na 80%: ważona = 8 + 5 + 0 = 13 szt. (natychmiastowa aktualizacja)
+  - Deal Z (0%): nie pojawia się w prognozie ważonej (filtrowany)
+
+#### TC-FCST-005: Partie przekraczające horyzont 6 miesięcy
+
+- **Priorytet**: P1 | **Poziom**: Integration
+- **Warunki wstępne**: Prognoza z horyzontem 6 mies. (2026-11 do 2027-04); partie: Element D data 2027-05-01 (poza horyzontem)
+- **Kroki**:
+  1. Otwórz prognozę
+  2. Rozszerz horyzont na 12 mies.
+  3. Powróć do 6 mies.
+- **Oczekiwane wyniki**:
+  - Partie poza horyzontem: widoczne w sekcji "Po horyzoncie" lub po rozszerzeniu widoku
+  - Suma partii w horyzoncie ≠ suma wszystkich partii (jeśli są poza horyzontem)
+  - UI: informacja "X partii poza horyzontem (suma: Y szt.)"
+  - Nie ukrywaj cicho — użytkownik widzi, że coś jest pominięte
+
+#### TC-FCST-006: Suma okresów = suma partii; zmiana oferty głównej
+
+- **Priorytet**: P0 | **Poziom**: Integration
+- **Warunki wstępne**: Inwestycja z dwoma dealami; Deal A = oferta główna; Deal B = alternatywna
+- **Kroki**:
+  1. Deal A: 15 szt. łącznie (rozłożone: 5/4/6 na listopad/grudzień/styczeń)
+  2. Prognoza: suma okresów = 5 + 4 + 6 = 15 ✓
+  3. Zmień ofertę główną na Deal B (10 szt. w różnych miesiącach)
+  4. Prognoza po zmianie
+- **Oczekiwane wyniki**:
+  - Suma tygodni/miesięcy = całkowita ilość partii w danym dealu (invariant zawsze spełniony)
+  - Po zmianie oferty głównej: prognoza inwestycji opiera się na Deal B (oferta główna)
+  - Deal A: nie znika, ale oznaczony jako "Alternatywna" w prognozie zbiorczej
+  - Zmiana oferty głównej jest audytowana
+
+---
+
+## 15. Scenariusze testowe: Harmonogram ofertowy → wykonawczy (TC-EXEC) — 5 TC
+
+Automatyczne tworzenie, idempotentność, ponowne otwarcie, deal bez harmonogramu, wiele dealów.
+
+#### TC-EXEC-001: Automatyczne tworzenie harmonogramu wykonawczego przy wygraniu deala
+
+- **Priorytet**: P0 | **Poziom**: Integration
+- **Warunki wstępne**: Deal X ze statusem "Propozycja"; harmonogram ofertowy z 5 zadaniami
+- **Kroki**:
+  1. Zmień status Deal X → "Wygrana" (lub zdarzenie `deal.won`)
+  2. Sprawdź harmonogram
+- **Oczekiwane wyniki**:
+  - Harmonogram wykonawczy tworzony AUTOMATYCZNIE (bez klikania użytkownika)
+  - Nowy harmonogram: typ = "execution", powiązany z deal_id i versją ofertową
+  - Baseline = kopia dat z harmonogramu ofertowego (zamrożony punkt odniesienia)
+  - Daty planowane = daty wykonawcze (edytowalne przez kierownika projektu)
+  - Daty bazowe ≠ zmieniają się automatycznie (baseline frozen)
+  - Użytkownik widzi notyfikację "Harmonogram wykonawczy utworzony"
+
+#### TC-EXEC-002: Idempotentność — podwójne zdarzenie won
+
+- **Priorytet**: P0 | **Poziom**: Integration
+- **Warunki wstępne**: Deal X, harmonogram wykonawczy już istnieje (po pierwszym wygraniu)
+- **Kroki**:
+  1. Wyemituj zdarzenie `deal.won` ponownie (np. system retry, błąd integracji, podwójny klik)
+  2. Sprawdź liczbę harmonogramów wykonawczych dla Deal X
+- **Oczekiwane wyniki**:
+  - Tylko jeden harmonogram wykonawczy (constraint unikowy na deal_id + typ)
+  - Drugie zdarzenie: no-op z logiem ostrzegawczym "execution schedule already exists for deal X"
+  - Brak duplikatów baseline, zadań, kamieni milowych
+  - Stan harmonogramu po podwójnym zdarzeniu = identyczny jak po pierwszym
+
+#### TC-EXEC-003: Deal ponownie otwarty i ponownie wygrany
+
+- **Priorytet**: P1 | **Poziom**: Integration
+- **Warunki wstępne**: Deal X wygrany → harmonogram wykonawczy (wer. 1) istnieje; deal cofnięty do "Otwarta"
+- **Kroki**:
+  1. Zmień status Deal X → "Otwarta" (cofnięcie wygrania)
+  2. Sprawdź harmonogram: czy usunięty?
+  3. Zmień deal ponownie → "Wygrana"
+  4. Sprawdź harmonogram: czy nowy, czy stary?
+- **Oczekiwane wyniki**:
+  - Cofnięcie wygrania: harmonogram wykonawczy ZACHOWANY jako historia (nie kasowany); oznaczony jako "zawieszony" lub "historyczny"
+  - Ponowne wygranie: tworzy NOWĄ wersję harmonogramu wykonawczego (ver. 2) z nowym baselinetem
+  - Stary (ver. 1) dostępny w historii wersji
+  - Audit trail: wygranie 1 → cofnięcie → wygranie 2
+
+#### TC-EXEC-004: Deal bez harmonogramu ofertowego — wygranie
+
+- **Priorytet**: P1 | **Poziom**: Integration
+- **Warunki wstępne**: Deal Y bez harmonogramu ofertowego (tylko kalkulacja); wygranie
+- **Kroki**:
+  1. Deal Y: status "Propozycja", brak Ganttu ofertowego
+  2. Zmień status → "Wygrana"
+  3. Sprawdź harmonogram
+- **Oczekiwane wyniki**:
+  - System nie tworzy harmonogramu wykonawczego (brak danych źródłowych)
+  - LUB: tworzy pusty harmonogram wykonawczy z komunikatem "Harmonogram ofertowy nie istniał — utwórz ręcznie"
+  - Notyfikacja dla użytkownika: "Deal wygrany, brak harmonogramu ofertowego — warto dodać harmonogram"
+  - Deal wygrywa normalnie (brak blokady)
+
+#### TC-EXEC-005: Wiele dealów tej samej inwestycji — wygranie jednego
+
+- **Priorytet**: P1 | **Poziom**: Integration
+- **Warunki wstępne**: Inwestycja I1: Deal A (oferta główna), Deal B (alternatywna); oба mają harmonogramy ofertowe
+- **Kroki**:
+  1. Deal A wygrywa (status → "Wygrana")
+  2. Sprawdź harmonogramy
+  3. Deal B: co się dzieje?
+- **Oczekiwane wyniki**:
+  - Deal A: harmonogram wykonawczy tworzony automatycznie
+  - Deal B: harmonogram ofertowy ZACHOWANY bez zmian (nie tworzony wykonawczy)
+  - Inwestycja I1: Gantt zbiorczy pokazuje harmonogram wykonawczy Deal A + ofertowy Deal B (opcjonalnie)
+  - Deal B pozostaje "alternatywna" — brak automatycznych zmian
+
+---
+
+## 16. Scenariusze testowe: Bezpieczeństwo plików (TC-SEC) — 6 TC
+
+XLSX/zip bomb, ogromne arkusze, formula injection, makra, MIME spoofing, timeouty.
+
+#### TC-SEC-001: XLSX bomb / zip bomb — wysoki współczynnik kompresji
+
+- **Priorytet**: P0 | **Poziom**: Integration
+- **Warunki wstępne**: VPS 3.8 GiB RAM; plik XLSX (zip bomb) o rozmiarze 100 kB skompresowanym, >500 MB po rozwinięciu
+- **Kroki**:
+  1. Prześlij plik przez endpoint importu
+  2. Monit: RAM, czas odpowiedzi
+- **Oczekiwane wyniki**:
+  - Odrzucenie PRZED pełnym rozpakowaniem (sprawdzenie proporcji zip: compressed/uncompressed ratio)
+  - Limit: jeśli uncompressed > X MB (np. 200 MB), odrzuć z kodem 413 i komunikatem "Plik zbyt duży po rozpakowaniu"
+  - RAM VPS nie przekracza 80% (3 GiB)
+  - Timeout: max 30s dla całego procesu importu
+  - Brak crash serwera; inne żądania obsługiwane normalnie
+
+#### TC-SEC-002: Ogromne arkusze — miliony komórek, tysiące kolumn
+
+- **Priorytet**: P0 | **Poziom**: Integration
+- **Warunki wstępne**: XLSX z 1 000 000 wierszy × 10 kolumn; XLSX z 100 wierszy × 5000 kolumn
+- **Kroki**:
+  1. Import pliku 1M wierszy
+  2. Import pliku 5000 kolumn
+  3. Monit: RAM, CPU, czas
+- **Oczekiwane wyniki**:
+  - 1M wierszy: odrzucenie z komunikatem "Przekroczono limit 100k wierszy" (lub skonfigurowany limit)
+  - 5000 kolumn: odrzucenie "Zbyt wiele kolumn (max 500)"
+  - Streaming/chunked parsing — nie ładuj całego pliku do pamięci naraz
+  - Odpowiedź w < 5s (szybkie odrzucenie, nie pełny parsing)
+
+#### TC-SEC-003: Formula injection w eksporcie — CSV i XLSX
+
+- **Priorytet**: P0 | **Poziom**: Integration
+- **Warunki wstępne**: Kalkulacja z pozycją nazwaną `=CMD|'/c calc'!A1` lub `+1+1`
+- **Kroki**:
+  1. Zapisz pozycję z nazwą `=1+1`, `@SUM(1,2)`, `-2+3*4`, `+CMD` itp.
+  2. Eksportuj do CSV
+  3. Eksportuj do XLSX
+  4. Otwórz w Excelu
+- **Oczekiwane wyniki**:
+  - CSV eksport: wartości zaczynające się od `=`, `+`, `-`, `@` są poprzedzone apostrofem lub cudzysłowem: `'=1+1`
+  - XLSX eksport: komórki ustawione jako Text (nie Formula), Excel nie interpretuje jako formuły
+  - Zewnętrzne linki w formulach (`=IMPORTRANGE(...)`) — zawsze zablokowane
+  - Test w Excelu: otwarcie pliku bez ostrzeżeń o potencjalnie niebezpiecznych formułach
+
+#### TC-SEC-004: Makra (.xlsm) i zły MIME / rozszerzenie
+
+- **Priorytet**: P1 | **Poziom**: Integration
+- **Warunki wstępne**: Plik z rozszerzeniem .xlsm (z makrami); plik .xlsx ale z MIME text/plain; plik .csv z MIME application/octet-stream
+- **Kroki**:
+  1. Import pliku .xlsm
+  2. Import .xlsx z MIME text/html (fałszywy MIME)
+  3. Import .csv z rozszerzeniem .xls (mismatch)
+- **Oczekiwane wyniki**:
+  - .xlsm: odrzucony (422) z komunikatem "Pliki z makrami (.xlsm) nie są obsługiwane"
+  - Fałszywy MIME: walidacja po rzeczywistej sygnaturze pliku (magic bytes), nie tylko po MIME headerze
+  - Mismatch rozszerzenie/content: ostrzeżenie lub odrzucenie; nie przetwarzaj blindly
+  - Brak wykonania makr pod żadnym warunkiem
+
+#### TC-SEC-005: Timeouty i limity pamięci na małym VPS
+
+- **Priorytet**: P0 | **Poziom**: Performance + Integration
+- **Warunki wstępne**: VPS 3.8 GiB RAM; 3 równoczesne importy dużych plików
+- **Kroki**:
+  1. Przesyłaj 3 pliki ~5 MB jednocześnie od różnych użytkowników
+  2. Monit: RAM całego procesu Node.js, czas odpowiedzi na każde żądanie
+  3. Przesyłaj 1 plik 50 MB (graniczna porcja)
+- **Oczekiwane wyniki**:
+  - 3 importy równoczesne: każdy < 30s; RAM peak < 1 GB (dla importu)
+  - Plik 50 MB: odrzucony przed parsowaniem (rozmiar skompresowany > limit)
+  - Brak OOM (Out of Memory) — watchdog lub limit pamięci na poziomie procesu
+  - Po odrzuceniu/timeoucie: zasoby zwolnione, GC zakończony; kolejne żądania normalne
+
+#### TC-SEC-006: Zewnętrzne linki i SSRF w formulach arkusza
+
+- **Priorytet**: P1 | **Poziom**: Integration
+- **Warunki wstępne**: XLSX z formulami `=WEBSERVICE("http://internal-api/secret")`, `=IMPORTDATA(...)`, linkami do plików sieciowych
+- **Kroki**:
+  1. Import XLSX zawierającego formuły z zewnętrznymi referencjami
+  2. Monit: czy serwer wykonuje jakiekolwiek żądania HTTP podczas parsowania
+- **Oczekiwane wyniki**:
+  - Parser arkuszy traktuje formuły jako tekst (wartości statyczne), nie oblicza ich
+  - Zero wychodzących żądań HTTP z serwera podczas importu
+  - Wartości z komórek: zapamiętana wartość obliczona (cached value z XLSX), nie re-evaluation
+  - Logi: brak zewnętrznych połączeń; jeśli parser wymaga sieci — blokada na poziomie OS/firewall
+
+---
+
+## 17. Scenariusze testowe: Izolacja multi-tenant (TC-TEN) — 6 TC
+
+API cross-tenant, wyszukiwanie inwestycji, eksport, PDF, webhooki, cenniki cross-deal.
+
+#### TC-TEN-001: API — cudze ID kalkulacji w ścieżce → 404
+
+- **Priorytet**: P0 | **Poziom**: API
+- **Warunki wstępne**: Firma A (organizacja A), Firma B (organizacja B); kalkulacja `calc-B-123` należy do Firmy B
+- **Kroki**:
+  1. Zaloguj się jako użytkownik Firmy A
+  2. GET `/api/v1/costing/calculations/calc-B-123`
+  3. PUT `/api/v1/costing/calculations/calc-B-123` z ciałem kalkulacji
+  4. DELETE `/api/v1/costing/calculations/calc-B-123`
+- **Oczekiwane wyniki**:
+  - GET, PUT, DELETE: 404 (nie ujawniać, że zasób istnieje pod inną organizacją)
+  - Brak 403 (to ujawniłoby istnienie zasobu) — konsekwentnie 404
+  - Logi serwera: wpis "cross-tenant access attempt: user org_A, resource org_B"
+  - Test odporny na enumeration: sekwencyjne UUIDs nie ujawniają ID innych firm
+
+#### TC-TEN-002: Cudze ID w ciele żądania POST/PUT
+
+- **Priorytet**: P0 | **Poziom**: API
+- **Warunki wstępne**: Jak wyżej; deal `deal-B-456` należy do Firmy B
+- **Kroki**:
+  1. Zaloguj jako użytkownik Firmy A
+  2. POST `/api/v1/costing/calculations` z body `{"deal_id": "deal-B-456", "name": "Atak"}`
+  3. PUT `/api/v1/costing/calculations/calc-A-789` z body `{"organization_id": "org-B"}` (próba zmiany właściciela)
+- **Oczekiwane wyniki**:
+  - POST z obcym deal_id: 404 lub 422 "Deal not found" (deal z org B nie widoczny dla org A)
+  - PUT próba zmiany organization_id: pole ignorowane lub 422 "Cannot change organization"
+  - `organization_id` zawsze pochodzi z tokenu sesji, nie z body — nadpisanie niemożliwe
+
+#### TC-TEN-003: Wyszukiwanie i dopasowanie inwestycji — izolacja cross-tenant
+
+- **Priorytet**: P0 | **Poziom**: Integration
+- **Warunki wstępne**: Inwestycja "Hala A" istnieje w Firmie A i w Firmie B (przypadkowa zbieżność nazwy)
+- **Kroki**:
+  1. Zaloguj jako użytkownik Firmy A
+  2. Wyszukaj inwestycje: `GET /api/v1/projects?q=Hala`
+  3. Podpięcie identyfikatora e-Zamówienia współdzielonego przez obie firmy
+- **Oczekiwane wyniki**:
+  - Wyniki wyszukiwania: tylko inwestycje Firmy A (zero z Firmy B — mimo zbieżności nazwy)
+  - Dopasowanie po e-Zamówienia ID: wynik zawiera tylko inwestycję Firmy A
+  - Brak "podpowiedzi" z danych innej firmy
+
+#### TC-TEN-004: Eksport i PDF — tylko własne dane organizacji
+
+- **Priorytet**: P0 | **Poziom**: E2E/UI + API
+- **Warunki wstępne**: Firma A z 5 kalkulacjami; Firma B z 3 kalkulacjami
+- **Kroki**:
+  1. Zaloguj jako użytkownik Firmy A
+  2. Eksport XLSX "Wszystkie kalkulacje"
+  3. Wygeneruj PDF dla każdego dostępnego zasobu
+  4. Eksport listy dealów
+- **Oczekiwane wyniki**:
+  - XLSX: zawiera dokładnie 5 kalkulacji Firmy A (żadnych z Firmy B)
+  - PDF: nagłówek z danymi Firmy A; brak danych Firmy B
+  - Brak możliwości "wylistowania" ID z innej organizacji przez masowy eksport
+
+#### TC-TEN-005: Zdarzenia i webhooki — cross-tenant nie emitowane
+
+- **Priorytet**: P1 | **Poziom**: Integration
+- **Warunki wstępne**: Firma A z subskrypcją na webhooki; zdarzenie pochodzi z kalkulacji Firmy B
+- **Kroki**:
+  1. Firma A: zarejestruj webhook na `calculation.updated`
+  2. Użytkownik Firmy B aktualizuje swoją kalkulację
+  3. Sprawdź webhooki odebrane przez Firmę A
+- **Oczekiwane wyniki**:
+  - Firma A nie otrzymuje webhooka z zdarzenia Firmy B
+  - Payload webhooka zawiera `organization_id` — zawsze zgodny z organizacją subskrybenta
+  - Wewnętrzny bus zdarzeń: zdarzenia scopowane per organizacja; brak "broadcast" cross-tenant
+
+#### TC-TEN-006: ID z tej samej organizacji vs różnego tenanta
+
+- **Priorytet**: P0 | **Poziom**: API
+- **Warunki wstępne**: Multi-tenant setup: Tenant T1 (Firma A, Firma B) i Tenant T2 (Firma C). Firm A i B dzielą tenanta T1.
+- **Kroki**:
+  1. Użytkownik Firmy A (Tenant T1): próba dostępu do cennika Firmy B (też T1) przez API
+  2. Użytkownik Firmy A (Tenant T1): próba dostępu do zasobu Firmy C (Tenant T2)
+- **Oczekiwane wyniki**:
+  - Firma B (ten sam tenant, inna organizacja): 404 — izolacja per organization, nie tylko per tenant
+  - Firma C (inny tenant): 404 lub 401 — silniejsza izolacja
+  - Cenniki: per organizacja (Firma A nie widzi cennika Firmy B nawet przy wspólnym tenancie)
+  - Harmonogram cross-deal z innej organizacji: niedostępny
+
+---
+
+## 18. Scenariusze testowe: Edycja równoległa (TC-CONC) — 5 TC
+
+Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głównej, import.
+
+#### TC-CONC-001: Dwóch użytkowników edytuje tę samą kalkulację jednocześnie
+
+- **Priorytet**: P0 | **Poziom**: Integration + E2E
+- **Warunki wstępne**: Kalkulacja K1 z wersją updatedAt=T0; zalogowani Użytkownik A i Użytkownik B
+- **Kroki**:
+  1. Użytkownik A otwiera K1 (widzi K1 @ T0)
+  2. Użytkownik B otwiera K1 (widzi K1 @ T0)
+  3. Użytkownik A zmienia Pozycja P1: cena 100 → 200, zapisuje (K1 @ T1)
+  4. Użytkownik B (nadal z K1 @ T0) zmienia Pozycja P2: ilość 5 → 10, próbuje zapisać
+- **Oczekiwane wyniki**:
+  - Krok 3: Użytkownik A → 200 OK; K1.updatedAt = T1
+  - Krok 4: Użytkownik B → 409 Conflict z komunikatem "Kalkulacja została zmodyfikowana przez innego użytkownika. Odśwież i spróbuj ponownie."
+  - Brak cichego nadpisania zmian Użytkownika A
+  - K1 po konflikcie: zawiera zmiany Użytkownika A (P1 = 200), P2 = 5 (niezmienione)
+  - Użytkownik B widzi odświeżony formularz z aktualnym stanem i może ponowić edycję
+
+#### TC-CONC-002: Optimistic locking — konflikt → 409 + szczegółowy komunikat
+
+- **Priorytet**: P0 | **Poziom**: API
+- **Warunki wstępne**: Kalkulacja K2 z updatedAt=T0
+- **Kroki**:
+  1. GET `/api/v1/costing/calculations/K2` → odpowiedź zawiera `updatedAt: T0`
+  2. PUT `/api/v1/costing/calculations/K2` z nagłówkiem `If-Unmodified-Since: T0` i zmienionymi danymi
+  3. Niezależnie: inny klient zapisuje K2 (updatedAt→T1)
+  4. PUT z `If-Unmodified-Since: T0` ponownie
+- **Oczekiwane wyniki**:
+  - Krok 2 (przed zmianą przez inny klient): 200 OK
+  - Krok 4 (po zmianie): 409 Conflict z body `{"error": "conflict", "currentUpdatedAt": "T1"}`
+  - Brak utraty danych: rekord zawiera ostatnią poprawną wersję
+  - Klient może: odczytać aktualny stan (GET), scalić i ponowić PUT z nowym `If-Unmodified-Since: T1`
+
+#### TC-CONC-003: Wyścig zamrożenia wersji — wysłanie podczas edycji
+
+- **Priorytet**: P0 | **Poziom**: Integration
+- **Warunki wstępne**: Wersja V1.0 w stanie "Robocza"; Użytkownik A edytuje, Użytkownik B wysyła
+- **Kroki**:
+  1. Użytkownik A otwiera V1.0 (Robocza)
+  2. Użytkownik B klika "Wyślij" na V1.0 → status zmienia się na "Wysłana", V1.0 zamrożona
+  3. Użytkownik A (nie wiedząc o zmianie) zmienia cenę i klika "Zapisz"
+- **Oczekiwane wyniki**:
+  - Krok 3: 409 Conflict lub 422 "Wersja jest już wysłana i nie może być edytowana"
+  - Brak nadpisania zamrożonej wersji
+  - Użytkownik A widzi komunikat: "Wersja V1.0 została wysłana przez innego użytkownika. Utwórz nową wersję, aby kontynuować."
+  - Opcja "Duplikuj jako V1.1" dostępna od razu w komunikacie błędu
+
+#### TC-CONC-004: Równoległe przełączanie oferty głównej
+
+- **Priorytet**: P1 | **Poziom**: Integration
+- **Warunki wstępne**: Inwestycja I1; aktualnie oferta główna = Deal A; Użytkownik A i Użytkownik B jednocześnie próbują zmienić ofertę główną
+- **Kroki**:
+  1. Użytkownik A: zmienia ofertę główną na Deal B (PUT `/api/v1/projects/I1/primary-deal`, body `{dealId: "B"}`)
+  2. Użytkownik B: jednocześnie zmienia na Deal C (PUT `.../primary-deal`, body `{dealId: "C"}`)
+  3. Oba żądania docierają do serwera prawie jednocześnie
+- **Oczekiwane wyniki**:
+  - Jedno żądanie wygrywa (serialized): inwestycja ma jedną ofertę główną
+  - Drugie żądanie: 409 Conflict lub wymusza potwierdzenie ("Oferta główna właśnie zmieniona na B. Nadpisać na C?")
+  - Brak stanu inconsistentnego: nigdy dwie oferty główne jednocześnie
+  - Audit trail: dwa wpisy (zmiana A→B, i opcjonalne B→C)
+
+#### TC-CONC-005: Równoległy import XLSX — dwa importy tej samej kalkulacji
+
+- **Priorytet**: P1 | **Poziom**: Integration
+- **Warunki wstępne**: Kalkulacja K3 (Robocza); Użytkownik A i B importują różne XLSX do tej samej kalkulacji jednocześnie
+- **Kroki**:
+  1. Użytkownik A importuje Plik A (10 wierszy) do K3
+  2. Użytkownik B importuje Plik B (8 wierszy) do K3 jednocześnie
+  3. Oba importy kończą się
+- **Oczekiwane wyniki**:
+  - Brak interleaving danych (wiersze z Pliku A i B nie przeplatają się losowo)
+  - Jeden import blokuje drugi (mutex/lock na czas importu) LUB import drugi dostaje 409 "Import w toku"
+  - Finalny stan K3: spójny (wszystkie wiersze jednego importu, nie mix)
+  - Komunikat dla drugiego użytkownika: "Import kalkulacji jest już w toku. Spróbuj za chwilę."
+
+---
+
+## 19. Zbiory danych testowych (Fixtures)
+
+| Typ | Opis | Ilość |
+|-----|------|-------|
+| **Organizacje** | 3 firmy (A, B, C), różne konfiguracje ról, uprawnień, walut, modułów | 3 |
+| **Użytkownicy** | Admin (Firma A), Handlowiec (A), Manager (A/B), Obsługa (B), Klient (portal) | 8 |
+| **Deale** | 5 dealów w różnych statusach (Nowy, Propozycja, Wygrana, Przegrana, Zamknięta) | 5 |
+| **Projekty/Inwestycje** | 3 inwestycje (Hala A, Kompleks, Łącznica) z różnymi ID (e-Zamówienia, TED, BIP) | 3 |
+| **Kalkulacje** | 12 kalkulacji (różne statusy, wersje, ceny, marże, jednostki, waluty) | 12 |
+| **Cenniki** | 2 cenniki (domyślny, promocyjny) z regułami warstowymi | 2 |
+| **XLSX/CSV testowe** | 15 plików (poprawne, złe kodowanie, brak kolumn, separator ;, duże, XLSX bomb, formula injection, .xlsm) | 15 |
+| **Harmonogramy** | 4 Gantta (ofertowy, wykonawczy, z cyklem, 300+ zadań) + 2 harmonogramy XLSX (dla Firm bez modułu) | 6 |
+| **Koszty rzeczywiste** | 20 wpisów kosztów (verschiedne kategorie, daty, kwoty) | 20 |
+| **Kursy walut** | Kursy historyczne EUR/PLN, USD/PLN, JPY/PLN dla testów zamrożenia kursu | 10 rekordów |
+| **Partie produkcji** | 30 partii dla testu prognozy (różne jednostki, daty, prawdopodobieństwa) | 30 |
+| **Zdarzenia deal.won** | Duplikaty i sekwencje dla testu idempotentności | 5 zdarzeń |
+
+---
+
+## 20. Poziomy testów — mapowanie do narzędzi
 
 ### Unit (Jest)
 
@@ -1056,7 +1640,7 @@ Zależności, auto-planowanie, baseline, części produkcji, prognoza produkcji.
 
 ---
 
-## 14. Kryteria akceptacji
+## 21. Kryteria akceptacji
 
 ### Wejścia
 
@@ -1068,111 +1652,154 @@ Zależności, auto-planowanie, baseline, części produkcji, prognoza produkcji.
 
 | Kryterium | Wymaganie | Status |
 |-----------|-----------|--------|
-| **Pokrycie P0 scenariuszy** | 100% (TC-COST-003, TC-COST-004, TC-COST-021, TC-DEAL-004, TC-VER-002, TC-VER-003, TC-VER-006, TC-PERM-001, TC-PERM-005, TC-PERM-007) | TBD |
-| **Multi-tenant izolacja** | Brak przecieków danych (TC-PERM-005) | TBD |
+| **Pokrycie P0 scenariuszy** | 100% (TC-COST-003, TC-COST-004, TC-COST-021, TC-DEAL-004, TC-VER-002, TC-VER-003, TC-VER-006, TC-PERM-001, TC-PERM-005, TC-PERM-007, TC-SEC-001, TC-SEC-002, TC-SEC-003, TC-CONC-001, TC-CONC-002, TC-CONC-003, TC-TEN-001, TC-TEN-002, TC-TEN-003, TC-TEN-004, TC-EXEC-001, TC-EXEC-002, TC-FCST-006, TC-NOSCHED-002) | TBD |
+| **Multi-tenant izolacja** | Brak przecieków danych przez API, eksport, PDF, webhooki (TC-PERM-005, TC-TEN-001 do TC-TEN-006) | TBD |
 | **Budżety wydajności** | Import < 10s, Gantt render < 3s, API < 500ms (TC-PERF-*) | TBD |
-| **Arytmetyka finansowa** | Zaokrąglenia, narzuty, marża (TC-COST-*) | TBD |
-| **Integracja z dealami/projektami** | Cena → szansa (TC-DEAL-002) | TBD |
-| **Obsługa XLSX/CSV** | Kodowania, separatory, walidacja (TC-IMP-*) | TBD |
-| **Zamrożenie oferty po wysłaniu** | Brak edycji, snapshot PDF (TC-VER-*) | TBD |
+| **Budżety bezpieczeństwa plików** | Zip bomb odrzucony < 5s, RAM import < 1 GB, brak SSRF (TC-SEC-001 do TC-SEC-006) | TBD |
+| **Arytmetyka finansowa** | Zaokrąglenia half-up, narzuty, marża % od ceny (TC-COST-*) | TBD |
+| **Poprawność walutowa** | Kurs zamrożony w wersji, zaokrąglenia per waluta ISO 4217 (TC-CUR-001 do TC-CUR-005) | TBD |
+| **Edycja równoległa** | Optimistic locking 409 + brak utraty danych (TC-CONC-001 do TC-CONC-005) | TBD |
+| **Integracja z dealami/projektami** | Cena → szansa (TC-DEAL-002), oferta główna (TC-DEAL-004) | TBD |
+| **Obsługa XLSX/CSV** | Kodowania, separatory, walidacja (TC-IMP-*), bezpieczeństwo (TC-SEC-*) | TBD |
+| **Zamrożenie oferty po wysłaniu** | Brak edycji, snapshot PDF, kurs zamrożony (TC-VER-*, TC-CUR-002) | TBD |
+| **Harmonogram wykonawczy** | Automatyczny, idempotentny, baseline (TC-EXEC-001 do TC-EXEC-005) | TBD |
+| **Firma bez modułu harmonogramu** | Kalkulacja/prognoza działają, brak endpointów Ganttu (TC-NOSCHED-*) | TBD |
 
 ---
 
-## 15. Wnioski do specyfikacji (Luki i niejasności)
+## 22. Wnioski do specyfikacji (Luki i niejasności)
 
-**Liczba wniosków**: 15
+**Liczba wniosków**: 15 + nowe z rev 2
 
 ### Priorytet 1 (Musi być w spec przed kodem)
 
-1. **Standard zaokrąglenia** (TC-COST-003, TC-COST-014)
-   - Czy IEEE 754 czy bankierski (round half even)?
-   - Czy sum(zaokrąglone) = zaokrąglona(sum) czy reverse?
-   - **Rekomendacja**: Math.round() (IEEE 754) + test cases z konkretnymi przykładami
+1. **Standard zaokrąglenia** (TC-COST-003, TC-COST-014) — ✅ **ROZSTRZYGNIĘTE**
+   - **Decyzja (2026-10-19)**: half-up do 2 miejsc po przecinku per linia; sumy = suma już-zaokrąglonych linii (nie zaokrąglona suma surowa); tryb zaokrąglania konfigurowalny per firma. Np.: linia 1.005 → 1.01.
+   - ~~**Rekomendacja**: Math.round() (IEEE 754) + test cases z konkretnymi przykładami~~ **ODRZUCONE**: `Math.round()` zaokrągla 0.5 w dół dla ujemnych (np. -0.5 → 0), co jest mylące biznesowo. Używamy jawnego `half-up` niezależnie od `Math.round` semantyki JS.
 
-2. **Jednostki i konwersje** (TC-COST-007)
-   - Czy są konwersje między m³/m²/szt. czy tylko ręczne?
-   - Słownik jednostek: czy globalny czy per-firma?
-   - **Rekomendacja**: Per-firma, brak automatycznych konwersji
+2. **Jednostki i konwersje** (TC-COST-007) — ✅ **ROZSTRZYGNIĘTE**
+   - **Decyzja**: Słownik jednostek z przelicznikami (współczynniki konwersji) per firma; konwersje wspierane systemowo. Słownik globalny + możliwość dostosowania per firma.
 
-3. **Definicja marży** (TC-COST-014)
-   - Marża % na cenie czy na koszcie?
-   - Wzór: (Cena - Koszt) / Cena czy / Koszt?
-   - **Rekomendacja**: Wyświetl obydwie (% na cenie i na koszcie) z jasnym podpisem
+3. **Definicja marży** (TC-COST-014) — ✅ **ROZSTRZYGNIĘTE**
+   - **Decyzja**: Marża = % od ceny sprzedaży: `(Cena - Koszt) / Cena × 100%`. Narzut (markup) = `(Cena - Koszt) / Koszt × 100%` — wyłącznie jako widok pomocniczy.
 
-4. **Multi-tenant mapping** (TC-PERM-005)
-   - Czy `organization` (CRM) = `firma` (biznesowa) czy odrębne?
-   - Czy filter `organization_id` na DB czy aplikacja?
-   - **Rekomendacja**: organization = firma, filter na DB level (Awilix scoped payload)
+4. **Multi-tenant mapping** (TC-PERM-005) — ✅ **ROZSTRZYGNIĘTE**
+   - **Decyzja**: Firma = organizacja OM (`organization`); filter `organization_id` na poziomie DB (Awilix scoped payload).
 
-5. **Priorytet źródeł ID inwestycji** (TC-DEAL-008)
-   - Jaka kolejność: eZamówienia > TED > BIP > kod > nazwa+NIP?
-   - Czy e-Zamówienia ma pewność 100% czy szansa?
-   - **Rekomendacja**: Zdefiniuj ranking jasno, fallback na fallback
+5. **Priorytet źródeł ID inwestycji** (TC-DEAL-008) — ✅ **ROZSTRZYGNIĘTE**
+   - **Decyzja**: e-Zamówienia (BZP/postępowanie/plan) > TED > BIP > własny kod INV > fallback nazwa+NIP (tylko podpowiedź, zawsze wymaga potwierdzenia użytkownika).
 
 ### Priorytet 2 (Ważne, ale można mieć domyślne)
 
-6. **Marża po zamknięciu deala** (TC-PERM-006)
-   - Global setting czy per-role?
-   - Dotyczy tylko zaakceptowanej wersji czy wszystkich?
-   - **Rekomendacja**: Per-role (Manager=widzi, Handlowiec=nie)
+6. **Marża po zamknięciu deala** (TC-PERM-006) — ✅ **ROZSTRZYGNIĘTE**
+   - **Decyzja**: Ustawienie PER FIRMA (nie per rola). Gdy włączone — widczą wszyscy z uprawnieniem do marży; gdy wyłączone — nikt.
+   - ~~**Rekomendacja**: Per-role (Manager=widzi, Handlowiec=nie)~~ **ODRZUCONE**: decyzja właściciela systemu jest per firma, nie per rola.
 
-7. **Trigger harmonogramu ofertowego → wykonawczego** (TC-GANTT-008)
-   - Natychmiast czy na żądanie?
-   - Czy z ostrzeżeniem o zmianach?
-   - **Rekomendacja**: Na żądanie (użytkownik kliknie "Zaakceptuj i utwórz harmonogram wykonawczy")
+7. **Trigger harmonogramu ofertowego → wykonawczego** (TC-GANTT-008) — ✅ **ROZSTRZYGNIĘTE**
+   - **Decyzja**: Tworzony AUTOMATYCZNIE, idempotentnie, gdy deal zostanie wygrany (zdarzenie `deal.won`). Brak ręcznego wyzwalania.
+   - ~~**Rekomendacja**: Na żądanie (użytkownik kliknie "Zaakceptuj i utwórz harmonogram wykonawczy")~~ **ODRZUCONE**: automatyzm zapewnia, że żaden deal nie zostanie przeoczony.
 
 8. **Lista pól do audytu** (brak TC)
-   - Każda zmiana ceny? Narzutu? Jednostki? Ilości?
-   - Czy user_id + timestamp wystarczą czy więcej metadanych?
+   - **Otwarte**: Każda zmiana ceny? Narzutu? Jednostki? Ilości?
    - **Rekomendacja**: price, markup, cost, unit, quantity, status zmian + user_id + timestamp + old_value/new_value
 
-9. **Limity rozmiaru pliku i wierszy** (TC-IMP-006, TC-PERF-001)
-   - Max 5 MB? 5000 wierszy?
-   - Co robić, gdy przekroczony?
-   - **Rekomendacja**: 10 MB / 10k wierszy z komunikatem; splitting dla dużych plików
+9. **Limity rozmiaru pliku i wierszy** (TC-IMP-006, TC-PERF-001, TC-SEC-001)
+   - **Otwarte**: Max 5 MB? 5000 wierszy?
+   - **Rekomendacja**: 10 MB / 10k wierszy z komunikatem; odrzucenie ≥ 100 MB; streaming dla dużych plików; timeout import = 30s
 
 10. **Definicja "błędnego wiersza" w imporcie** (TC-IMP-005)
-    - Brak ilości = błąd? Ujemna ilość? Null jednostka?
-    - Czy skip czy abort?
+    - **Otwarte**: Brak ilości = błąd? Ujemna ilość? Null jednostka?
     - **Rekomendacja**: Skip z logowaniem; nigdy nie abort całego importu
 
 ### Priorytet 3 (Uwagi/sugestie)
 
 11. **Notacja narzutu** — "30% narzutu" = ×1.30 czy +0.30?
-    - **Rekomendacja**: Zawsze ×(1 + narzut%), czyli 30% = ×1.30
+    - **Otwarte** → **Rekomendacja**: Zawsze ×(1 + narzut%), czyli 30% = ×1.30
 
-12. **Prognoza produkcji** — jak waży prawdopodobieństwo?
-    - Ilość = sum(partii) czy sum(partii × probability)?
-    - **Rekomendacja**: Obie metryki: dedykowana (partii) i ważona (rzeczywista)
+12. **Prognoza produkcji** — jak waży prawdopodobieństwo? (TC-FCST-004)
+    - **Otwarte**: Ilość = sum(partii) czy sum(partii × probability)?
+    - **Rekomendacja**: Obie metryki: niezważona (partii) i ważona; suma ważona ≠ suma partii jeśli prob < 100%
 
 13. **Widoczność kosztów w API vs UI**
-    - Czy API zawsze filtruje czy tylko UI?
-    - **Rekomendacja**: API zawsze filtruje (backend security, nie client-side)
+    - **Otwarte**: Czy API zawsze filtruje czy tylko UI?
+    - **Rekomendacja**: API zawsze filtruje (backend security, nie client-side); TC-TEN-001 to weryfikuje
 
 14. **Cena zero** — czy jest przypadkiem, czy przychód z innego źródła?
-    - Czy wymagać przyczyny?
-    - **Rekomendacja**: Dozwolone, opcjonalny komentarz
+    - **Otwarte** → **Rekomendacja**: Dozwolone, opcjonalny komentarz
 
 15. **Gotowość Sekocenbud/Intercenbud** — architektura mapowania kodów
-    - Gdzie przechowywać mapping? W entity kalkulacji czy osobny cennik adapter?
+    - **Otwarte**: Gdzie przechowywać mapping?
     - **Rekomendacja**: Osobny moduł integrations, mapowanie per-firma
+
+### Nowe wnioski (rev 2)
+
+16. **Zaokrąglenia per waluta** (TC-CUR-003)
+    - **Otwarte**: Czy JPY = 0 miejsc dziesiętnych per reguła ISO 4217? Jak przechowywać konfigurację?
+    - **Rekomendacja**: ISO 4217 jako default; możliwość nadpisania per firma
+
+17. **Zamrożenie kursu w wysłanej wersji** (TC-CUR-002)
+    - **Otwarte**: Jakie jest źródło kursów (NBP? ECB? ręczne)? Jak często odświeżane?
+    - **Rekomendacja**: Kurs pobierany raz przy wysyłaniu, zapamiętany w wersji (snapshot), niemożliwy do zmiany
+
+18. **Idempotentność tworzenia harmonogramu wykonawczego** (TC-EXEC-002)
+    - **Otwarte**: Jak system wykrywa, że harmonogram już istnieje — po `deal_id` + typ = `execution`?
+    - **Rekomendacja**: Unikalne constraint na (deal_id, schedule_type = 'execution'); powtórne zdarzenie → no-op z logiem
+
+19. **Zachowanie harmonogramu przy ponownym otwarciu deala** (TC-EXEC-003)
+    - **Otwarte**: Czy harmonogram wykonawczy jest archiwizowany czy kasowany przy cofnięciu do otwartego?
+    - **Rekomendacja**: Harmonogram zachowany jako wersja historyczna; nowe wygranie tworzy nową wersję
+
+20. **Limity antybombowe na VPS** (TC-SEC-001, TC-SEC-002)
+    - **Otwarte**: Max expanded size w MB? Max liczba wierszy w arkuszu?
+    - **Rekomendacja**: Limit przed rozpakowaniem: 50 MB; po: 200 MB; wiersze: 100k; kolumny: 500; timeout: 30s
 
 ---
 
-## 16. Podsumowanie
+## 23. Podsumowanie
 
 **Dokument**: Niezależny plan testów — spec only
-**Liczba scenariuszy**: 72 (wszystkie obszary z wymagań + performance)
-**Liczba wniosków do speki**: 15
+**Liczba scenariuszy**: 109 (rev 2; rev 1 miał 72)
+**Liczba wniosków do speki**: 20 (15 oryginalnych + 5 nowych w rev 2)
 **Status**: SPEC ONLY — bez kodu, bez testów wykonywalnych
 
 **Kolejne kroki**:
-1. Sprecyzować odpowiedzi na 15 wniosków w specyfikacji
+1. Sprecyzować odpowiedzi na otwarte wnioski (8, 9, 10, 11, 14, 15–20 w sekcji 22)
 2. Zatwierdzić dokument (review przez Marka + PO)
 3. Przejść do fazy implementacji
 
 ---
 
+## Changelog
+
+### Rev 2 — 2026-10-19
+
+**Dodane scenariusze** (+37 TC):
+- TC-CUR-001..005: Waluty (kalkulacja jednowalutowa, kursy, zaokrąglenie per waluta, zmiana waluty, eksport/PDF)
+- TC-NOSCHED-001..004: Firmy BEZ modułu harmonogramu (partie/daty, brak Ganttu, import XLSX, włączenie/wyłączenie)
+- TC-FCST-001..006: Prognoza produkcji 6 mies. (z/bez Ganttu, m³/szt., prawdopodobieństwo, horyzont, suma partii, zmiana oferty)
+- TC-EXEC-001..005: Harmonogram ofertowy → wykonawczy (automatyczny, idempotentny, ponowne otwarcie, brak harmonogramu, wiele dealów)
+- TC-SEC-001..006: Bezpieczeństwo plików (XLSX bomb, ogromne arkusze, formula injection, makra, MIME, SSRF)
+- TC-TEN-001..006: Izolacja multi-tenant (API 404, cudze ID w body, wyszukiwanie inwestycji, eksport/PDF, webhooki, same-tenant/cross-tenant)
+- TC-CONC-001..005: Edycja równoległa (optimistic locking, 409 conflict, wyścig zamrożenia, równoległe przełączanie oferty, import)
+
+**Zmiany w istniejących scenariuszach**:
+- TC-COST-003: oczekiwany wynik zaktualizowany do half-up per linia (usunięto "Luka spec")
+- TC-COST-014: definicja marży zaktualizowana: marża = % od ceny sprzedaży (usunięto "Luka spec")
+- TC-PERM-006: widoczność marży per FIRMA (nie per rola) — zmiana treści scenariusza
+
+**Zmiany w sekcji Wnioski (sekcja 22)**:
+- Oznaczono jako **ROZSTRZYGNIĘTE**: standard zaokrąglenia (half-up), słownik jednostek z przelicznikami, definicja marży (% od ceny), firma = organizacja OM, priorytet ID inwestycji (e-Zamówienia > TED > BIP > INV)
+- Oznaczono jako **ODRZUCONE z uzasadnieniem**: Math.round dla kwot, harmonogram wykonawczy "na żądanie", widoczność marży per rola
+- Dodano nowe wnioski 16–20 (zaokrąglenia per waluta, zamrożenie kursu, idempotentność exec, ponowne otwarcie deala, limity antybombowe)
+
+**Zmiany strukturalne**:
+- Sekcje 12–16 → 19–23 (aby zrobić miejsce na nowe sekcje TC 12–18)
+- Macierz ryzyk rozszerzona o R8–R12
+- Fixtures zaktualizowane o nowe typy danych testowych
+- Kryteria akceptacji zaktualizowane o nowe obszary
+
+---
+
 **Koniec dokumentu**
-*Data wygenerowania: 2026-10-19*
+*Data wygenerowania: 2026-10-19 | Rev 2: 2026-10-19*
 
