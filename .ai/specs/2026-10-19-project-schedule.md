@@ -140,6 +140,33 @@ Reguły WBS:
 - Zadania-podsumowanie (summary tasks) = te z dziećmi; ich `planned_start_at` = MIN(child.planned_start_at), `planned_end_at` = MAX(child.planned_end_at) — wyliczane przez serwis.
 - Liście WBS = zadania bez dzieci.
 
+**Wariancja baseline (obliczana ON READ — nigdy przechowywana)**:
+
+Konwencja znaku: **+ = opóźnienie**, − = wyprzedzenie. Jednostka: dni kalendarzowe (v1); dni robocze w v2.
+
+```typescript
+// Computed per task in API response (never stored, baseline_* never overwritten):
+start_variance_days    = baseline_start_at
+  ? Math.round((planned_start_at.getTime()  - baseline_start_at.getTime())  / 86_400_000)
+  : null
+end_variance_days      = baseline_end_at
+  ? Math.round((planned_end_at.getTime()    - baseline_end_at.getTime())    / 86_400_000)
+  : null
+duration_variance_days = (baseline_start_at && baseline_end_at)
+  ? (planned_duration_days - baseline_duration_days)   // planned - baseline
+  : null
+
+// Actual vs baseline (gdy actual dates exist):
+actual_start_variance  = (actual_start_at && baseline_start_at)
+  ? Math.round((actual_start_at.getTime()  - baseline_start_at.getTime())   / 86_400_000)
+  : null
+actual_end_variance    = (actual_end_at && baseline_end_at)
+  ? Math.round((actual_end_at.getTime()    - baseline_end_at.getTime())     / 86_400_000)
+  : null
+```
+
+Wariancja eksponowana w: response API `GET /api/project-schedule/tasks`, tooltip Gantt (overlay na pasku), analytics.ts (opcjonalnie).
+
 #### `ps_task_dependencies` — zależności między zadaniami
 
 | Kolumna | Typ | Uwagi |
@@ -263,7 +290,7 @@ Kolumny: id, organization_id, tenant_id, provider_id, label, inbound_webhook_sec
 - **Drag & drop** (move + resize): ✅ MIT.
 - **Dependency links** (strzałki): ✅ MIT. Etykiety typ (FS/SS/FF/SF) + lag = custom CSS nad linkami.
 - **Przełącznik Day / Week / Month**: ✅ MIT.
-- **Baseline overlay** (v1): custom rendering nadpisujące `baseline_start/end_at` jako pasek drugorzędny.
+- **Baseline overlay** (v1): custom rendering — dla każdego zadania z `baseline_start_at` rysowany dodatkowy cienki pasek (np. szary, za/przed głównym) przez custom task renderer w @svar-ui. Tooltip: `Baseline: ${baseline_start} – ${baseline_end} | Odchylenie: ${start_variance_days}d start, ${end_variance_days}d koniec`.
 - **SSR**: `dynamic(() => import('./GanttChart'), { ssr: false })`.
 
 ---
@@ -323,7 +350,7 @@ export type WeeklyForecast  = { week: string; quantityM3: number; quantityPcs: n
 ```typescript
 // apps/mercato/src/modules/project_schedule/types.ts
 export type ScheduleBatchSummary = {
-  scheduleId: string; calculationId: string | null; dealId: string
+  scheduleId: string; calculationId: string | null; dealId: string | null
   totalQuantityM3: number | null; totalQuantityPcs: number | null
   productionStartAt: string | null; productionEndAt: string | null
   batchCount: number
@@ -401,6 +428,8 @@ GET/POST  /api/project-schedule/tasks?scheduleId=&parentTaskId=
 PATCH/DELETE /api/project-schedule/tasks/:id
 POST      /api/project-schedule/tasks/batch    (bulk upsert — drag&drop save)
 ```
+
+API response dla każdego zadania zawiera pola wariancji obliczone ON READ (§2.2): `startVarianceDays`, `endVarianceDays`, `durationVarianceDays`, `actualStartVariance`, `actualEndVariance` — tylko gdy `baseline_start_at` / `baseline_end_at` != NULL.
 
 ### 6.4 Zależności
 
@@ -602,11 +631,12 @@ Przy każdej zmianie `planned_start_at`/`planned_end_at` zadania (drag&drop) →
 |---------|---------|
 | `ps_import_column_mappings` + Import/eksport XLSX/CSV (zadania + batche) | M (1.5 dnia) |
 | Baseline capture (offer → execution, `create-execution` endpoint) | M (1.5 dnia) |
+| Wariancja baseline: API response, Gantt tooltip/overlay, baseline overlay renderer | S (1 dzień) |
 | Zdarzenia + subscriber w `project_costing` (update sum w pc_calculations) | S (1 dzień) |
 | Backend strony: lista harmonogramów, element-types | S (0.5 dnia) |
-| i18n PL/EN + testy serwisów (cycle detection, LRM rounding) | S (0.5 dnia) |
+| i18n PL/EN + testy serwisów (cycle detection, LRM rounding, variance) | S (0.5 dnia) |
 
-**Suma v1**: 1.5+1.5+1+0.5+0.5 = **5 dni roboczych**.
+**Suma v1**: 1.5+1.5+1+1+0.5+0.5 = **6 dni roboczych**.
 
 ### Faza v2 (~10 dni roboczych)
 
@@ -620,7 +650,7 @@ Przy każdej zmianie `planned_start_at`/`planned_end_at` zadania (drag&drop) →
 
 **Suma v2**: 1.5+1.5+1.5+2.5+3 = **10 dni roboczych**.
 
-**Łącznie `project_schedule`**: 15+5+10 = **30 dni roboczych**.
+**Łącznie `project_schedule`**: 15+6+10 = **31 dni roboczych**.
 
 ---
 
@@ -628,9 +658,9 @@ Przy każdej zmianie `planned_start_at`/`planned_end_at` zadania (drag&drop) →
 
 | Moduł | MVP | v1 | v2 | Suma |
 |-------|-----|----|----|------|
-| `project_costing` | 17 d | 22 d | 14 d | 53 d |
-| `project_schedule` | 15 d | 5 d | 10 d | 30 d |
-| **Łącznie** | **32 d** | **27 d** | **24 d** | **83 d** |
+| `project_costing` | 17 d | 23 d | 14 d | 54 d |
+| `project_schedule` | 15 d | 6 d | 10 d | 31 d |
+| **Łącznie** | **32 d** | **29 d** | **24 d** | **85 d** |
 
 ---
 
@@ -732,5 +762,6 @@ apps/mercato/src/modules/project_schedule/
 | 2026-10-19 | v1 (rev 3) — inicjalna spec |
 | 2026-10-19 | v2 (rev 4) — Gantt MVP, @svar-ui, ps_element_types, ps_import_column_mappings, LRM |
 | 2026-10-19 | v3 (rev 5) — …(jak poprzednio)… |
+| 2026-10-19 | v4 (rev 6) — wariancja baseline: ON READ (start/end/duration/actual), §2.2 ps_schedule_tasks, API §6.2, Gantt tooltip+overlay §3.3, v1 +1d; ScheduleBatchSummary.dealId string|null; combined 83→85d |
 | 2026-10-19 | v3 patch (b) — ps_schedules.deal_id nullable (kalkulacja standalone może mieć harmonogram bez deala); combined table zaktualizowane: project_costing 53d + project_schedule 30d = 83d |
 | 2026-10-19 | v3 patch (a) — @svar-ui/react-gantt 2.8.1 MIT/PRO zweryfikowane z tarball: MIT core ma WBS ✅, drag&drop ✅, dep links ✅, React 19/Next.js ✅; FS/SS/FF/SF auto-scheduling = PRO only; CPM/baselines/MS Project = PRO; milestones [niezwer.]; zaktualizowano §3.1 tabela, §3.2 (MIT/PRO split), §3.3, GanttChart.tsx, R1, A1; dodano pytanie otwarte o SVAR PRO vs impl. własna (§15 pkt 5) |

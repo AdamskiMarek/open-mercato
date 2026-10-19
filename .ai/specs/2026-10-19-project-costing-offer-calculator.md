@@ -353,34 +353,49 @@ Input: `target_margin_rate` na poziomie kalkulacji. `target_subtotal_price = ful
 
 #### Tryb C — `markup`
 
-Input: `markup_rate` na poziomie kalkulacji (dziedziczony per pozycja przez §3.4). Dla pozycji bez własnego `markup_pct`:
+Tryb C liczy `unit_price` **per pozycję** z `line_full_cost` i efektywnego narzutu. Brak globalnej redistrybuowania — każda pozycja jest niezależna.
+
+Dla każdej pozycji `item i` z `price_override = false`:
 ```
-item.unit_price_derived = item.unit_cost × (1 + overhead_rate) × (1 + effective_markup_pct)
+line_full_cost_i = ROUND(line_cost_i × (1 + overhead_rate), 2, HALF_EVEN)
+effective_markup_i = pierwsze non-NULL z: [item.markup_pct, parent_section.markup_pct,
+                                           calc.markup_rate, 0]
+line_price_i     = ROUND(line_full_cost_i × (1 + effective_markup_i), 2, HALF_EVEN)
+unit_price_i     = ROUND(line_price_i / quantity_i, 4, HALF_EVEN)   -- gdy quantity > 0
 ```
-`target_subtotal_price = full_cost × (1 + markup_rate)`. Redistrybuowanie wg §3.6.
+
+Pozycje z `price_override = true`: zachowują bieżące `unit_price`/`line_price` bez zmian.
+
+```
+subtotal_price = SUM(line_price_i)   -- suma wszystkich item (override i nie-override)
+total_margin   = subtotal_price − full_cost
+margin_rate    = total_margin / subtotal_price
+```
 
 > **Nazewnictwo (konsekwentne)**:
 >
 > | Pole | Definicja |
 > |------|-----------|
-> | `overhead_rate` | % kosztu pośredniego na koszt zakupu (dodaje do kosztu) |
+> | `overhead_rate` | % kosztów pośrednich na koszt zakupu (zwiększa koszt) |
 > | `full_cost` | `subtotal_cost + overhead_amount` |
-> | `markup_rate` | % cenowy na `full_cost` (tryb C / dziedziczenie) |
-> | `target_margin_rate` | % marży od ceny (tryb B) |
-> | `margin_rate` | `total_margin / subtotal_price` — zawsze z rzeczywistych sum |
-> | `line_margin_pct` | marża % per pozycja (na linii) |
+> | `markup_rate` | % cenowy na `full_cost` — narzut na poziomie kalkulacji (tryb C, dziedziczony) |
+> | `markup_pct` | % cenowy per pozycja/sekcja — nadpisuje `markup_rate` dla danej gałęzi |
+> | `target_margin_rate` | % marży od ceny — input trybu B |
+> | `margin_rate` | `total_margin / subtotal_price` — zawsze obliczony z rzeczywistych sum |
+> | `line_full_cost` | `line_cost × (1 + overhead_rate)` — koszt pozycji z narzutem pośrednim |
+> | `line_margin_pct` | `line_margin / line_price` per pozycja |
 
-### 3.6 Redistrybuowanie cen pozycji (tryby B i C)
+### 3.6 Redistrybuowanie cen pozycji (tryb B — `target_margin`)
 
-Jednolita reguła:
+Stosowane **wyłącznie w trybie B**. Tryb C używa per-item formuły (§3.5).
 
-1. `T = target_subtotal_price` (z §3.5 B lub C).
+1. `T = full_cost / (1 − target_margin_rate)` (target całkowita cena).
 2. `S_ov = SUM(item.line_price WHERE price_override = true)`.
 3. `R = T − S_ov`. Gdy `R < 0`: warning UI (nie blokada); `subtotal_price = rzeczywista suma`.
-4. Non-override pozycje N: `base = SUM(item.line_cost × (1 + overhead_rate))`. Proporcja per item: `base > 0` → `item_full_cost / base`; `base = 0` → równy podział.
-5. Nowe ceny: `new_item.line_price = ROUND(R × proporcja, 2, HALF_EVEN)`; `new_unit_price = ROUND(new_line_price / quantity, 4, HALF_EVEN)`.
+4. Non-override pozycje N: `base = SUM(line_full_cost_i FOR i IN N)` gdzie `line_full_cost_i = line_cost_i × (1 + overhead_rate)`. Proporcja per item: `base > 0` → `line_full_cost_i / base`; `base = 0` → równy podział `1/|N|`.
+5. `new_line_price[i] = ROUND(R × proporcja[i], 2, HALF_EVEN)`; `new_unit_price[i] = ROUND(new_line_price[i] / quantity[i], 4, HALF_EVEN)`.
 6. Rounding residual: ostatnia pozycja w N absorbuje `R − SUM(new_line_price)`.
-7. Sekcje przeliczane z nowych sum dzieci. `subtotal_price = SUM(new_item.line_price + override_item.line_price)`.
+7. `subtotal_price = SUM(line_price)` (override + non-override). `total_margin = subtotal_price − full_cost`. `margin_rate = total_margin / subtotal_price`.
 
 ### 3.7 Reguła wyznaczania ceny z cennika (layered pricelist)
 
@@ -433,7 +448,7 @@ Widget dashboardu „Prognoza lejka": `SUM(forecast_value)` per etap pipeline lu
 
 ### 3.12 `cf_offer_role`, reguła sumy projektu i detekcja duplikatów inwestycji
 
-**`cf_offer_role`** (id: `73f8260a-94c2-42d1-abc4-c08c4177be9f`): read-only przez API entities. Aktualizacja wyłącznie przez `customers.deals.update` command bus (§8.7), nie bezpośrednio.
+**`cf_offer_role`** (id: `73f8260a-94c2-42d1-abc4-c08c4177be9f`): moduł **odczytuje** do agregacji sumy projektu (przez API entities); **zapisuje** wyłącznie przez `customers.deals.update` command bus (jeden deal na raz — brak komendy bulk-update-roles w kodzie; zweryfikowano: `packages/core/src/modules/customers/commands/deals.ts`).
 
 **Reguła sumy projektu** (gdy `project_id != NULL`):
 ```
@@ -444,46 +459,115 @@ project_total = SUM(deal.value_amount)
 ```
 Deale `alternative` widoczne w tabeli projektu, nie wliczane.
 
-**Detekcja duplikatów inwestycji**:
+**`set-primary-offer` — bezpieczna sekwencja dwóch kroków**:
 
-Gdy kalkulacja jest dołączana do deala/projektu (lub gdy `investment_name`/`investment_location` jest ustawiane), serwis sprawdza podobne kalkulacje w tej samej organizacji przez `pg_trgm`:
+Brak komendy bulk-update w `customers` — stosujemy sekwencję idempotentnych kroków:
 
+```typescript
+// lib/primary-offer.service.ts
+async setPrimaryOffer(newPrimaryDealId: string, projectId: string, ctx) {
+  const currentPrimary = await findCurrentPrimaryDeal(projectId, ctx)
+  
+  // Krok 1: zdegraduj stary primary (idempotent — no-op gdy już 'alternative')
+  if (currentPrimary && currentPrimary.id !== newPrimaryDealId) {
+    await commandBus.execute({ commandId: 'customers.deals.update',
+      input: { id: currentPrimary.id, customFields: { cf_offer_role: 'alternative' } }, ctx })
+    await logAudit('set_primary_offer', { action: 'demote', dealId: currentPrimary.id }, ctx)
+  }
+
+  // Krok 2: promuj nowy primary (idempotent — no-op gdy już 'primary')
+  try {
+    await commandBus.execute({ commandId: 'customers.deals.update',
+      input: { id: newPrimaryDealId, customFields: { cf_offer_role: 'primary' } }, ctx })
+    await logAudit('set_primary_offer', { action: 'promote', dealId: newPrimaryDealId }, ctx)
+  } catch (err) {
+    // Akcja kompensująca: przywróć stary primary
+    if (currentPrimary && currentPrimary.id !== newPrimaryDealId) {
+      await commandBus.execute({ commandId: 'customers.deals.update',
+        input: { id: currentPrimary.id, customFields: { cf_offer_role: 'primary' } }, ctx })
+      await logAudit('set_primary_offer', { action: 'compensate_restore', dealId: currentPrimary.id }, ctx)
+    }
+    throw err
+  }
+}
+```
+
+Sekwencja retry-safe: oba kroki są idempotent (repeated execution = no-op jeśli cel już osiągnięty).
+
+**Detekcja duplikatów inwestycji — dwa źródła**:
+
+Przy `attach-deal`, `attach-project` lub zmianie `investment_name`/`investment_location`, serwis łączy kandydatów z:
+
+**Źródło A — inne kalkulacje (pg_trgm)**:
 ```sql
 SELECT c.id, c.base_code, c.deal_id, c.investment_name,
-       similarity(c.investment_key, :target_key) AS score
+       similarity(c.investment_key, :target_key) AS score,
+       'calculation_trgm' AS match_reason
 FROM pc_calculations c
 WHERE c.organization_id = :org AND c.tenant_id = :tenant AND c.id != :this_id
   AND c.investment_key IS NOT NULL
   AND similarity(c.investment_key, :target_key) > 0.5
-ORDER BY score DESC
-LIMIT 10;
+ORDER BY score DESC LIMIT 10;
 ```
 
-Wynik: `GET /api/project-costing/calculations/:id/duplicate-investment-candidates`.
+**Źródło B — deale klientów (bez kalkulacji lub różna inwestycja)**:
+Serwis odpytuje read-only `GET /api/customers/deals?q=<investment_name>&companyNip=<client_nip>` (customers query index) i filtruje deale, które nie mają jeszcze kalkulacji lub mają inną `investment_key`. Dopasowanie przez:
+- Podobieństwo tytułu/opisu deala do `investment_name` (pg_trgm)
+- Matching po NIP klienta: `company.cf_nip` deala = NIP z kalkulacji (jeśli dołączona do deala z firmą)
+
+Kandydaci scaleni, zduplikowani usunięci, posortowani wg `score DESC`. Każdy kandydat zawiera `match_reason` (np. `"investment_name_similarity=0.72"`, `"company_nip_match"`).
+
+Wynik: `GET /api/project-costing/calculations/:id/duplicate-investment-candidates`
+
+Response:
+```typescript
+type DuplicateCandidate = {
+  id: string; type: 'calculation' | 'deal'
+  label: string; dealId: string | null; investmentName: string | null
+  score: number; matchReason: string[]
+}
+```
 
 **UI notice** (brak automatyzacji — user decyduje):
-> „Istnieje już oferta dla innego wykonawcy (${dealName}, ${similarity}% podobieństwo nazwy inwestycji). Upewnij się, która powinna być główna."
+> „Istnieje już oferta dla innego wykonawcy (${label}, ${matchReason}) dla podobnej inwestycji. Upewnij się, która powinna być główna."
 
-Przyciski per kandydat: „Ta jest główna" / „Tamta jest główna" / „Ignoruj".
-
-Po wyborze: `POST /api/project-costing/calculations/:id/set-primary-offer` → serwis wywołuje `customers.deals.update` command bus:
-- Wybrany deal: `customFields: { cf_offer_role: 'primary' }`.
-- Poprzedni primary deal: `customFields: { cf_offer_role: 'alternative' }`.
-- Zmiana logowana: `pc_calculation_audit_log` (`action = 'set_primary_offer'`, `meta: { changed_deal_id, previous_role, new_role }`).
+Przyciski: „Ta jest główna" / „Tamta jest główna" / „Ignoruj".
 
 `pg_trgm` wymagane: `CREATE EXTENSION IF NOT EXISTS pg_trgm;` w migracji.
 
 ### 3.13 Koszty rzeczywiste vs budżet
 
-Budżet = wartości `full_cost` / `subtotal_price` per kategoria z wersji `accepted` (lub najnowszej `sent` gdy brak accepted):
+Budżet pochodzi z wersji `accepted` (fallback: najnowsza `sent`). `pc_cost_entries` wymaga `calculation_id` dla raportu budżet-vs-actual (zapewnia spójność z konkretną wersją); `deal_id`/`project_id` opcjonalne (kalkulacje standalone obsługiwane przez `calculation_id`).
+
+**Formuły per kategoria**:
 
 ```
-budget_cost[cat] = SUM(item.line_cost WHERE cost_category_id = cat AND calc.status = 'accepted')
-actual_cost[cat] = SUM(total_amount WHERE cost_category_id = cat AND entry.deal_id = deal.id)
-variance[cat]    = actual_cost[cat] − budget_cost[cat]
-margin_offer     = subtotal_price − full_cost          (z accepted version)
-margin_actual    = subtotal_price − actual_total_cost  (total_amount SUM)
+-- Budżet (z zatwierdzonej wersji kalkulacji):
+direct_budget[cat]   = SUM(item.line_cost WHERE cost_category_id = cat)
+overhead_share[cat]  = direct_budget[cat] × overhead_rate
+budget_full_cost[cat] = direct_budget[cat] + overhead_share[cat]   -- line_full_cost per kat.
+
+-- Rzeczywiste (z pc_cost_entries):
+actual_cost[cat]     = SUM(entry.total_amount WHERE cost_category_id = cat
+                           AND entry.calculation_id = :calc_id)
+
+-- Wariancja:
+variance[cat]        = actual_cost[cat] − budget_full_cost[cat]    -- + = przekroczenie
+variance_pct[cat]    = variance[cat] / budget_full_cost[cat] × 100
 ```
+
+**Raport widok** (kolumny per kategoria):
+
+| Kategoria | Koszt direct (budżet) | Narzut pośredni (budżet) | Pełny koszt (budżet) | Rzeczywisty | Wariancja | Wariancja % |
+|-----------|-----------------------|--------------------------|----------------------|-------------|-----------|-------------|
+
+**Marże ogólne**:
+```
+margin_offer  = subtotal_price − full_cost          (zaplanowana marża z kalkulacji)
+margin_actual = subtotal_price − SUM(actual_cost)   (marża wykonawcza przy zrealizowanej cenie)
+```
+
+> Uwaga: `margin_actual` zakłada, że `subtotal_price` z kalkulacji odpowiada faktycznie uzyskanej cenie (cena oferty = cena realizacji). Odchylenie ceny realizacji od oferty jest poza scope v1.
 
 ---
 
@@ -587,15 +671,30 @@ Na każdej linii: `price_source_id`, `price_source_item_code`, `price_captured_a
 
 Prefix: `/api/project-costing/`. Optimistic locking na `PATCH`/`DELETE`.
 
-### 8.1–8.2 Ustawienia, segmenty, kategorie
+### 8.1 Ustawienia
 
 ```
-GET/PATCH /api/project-costing/settings
-GET/POST/PATCH/DELETE /api/project-costing/segments[/:id]
-GET/POST/PATCH/DELETE /api/project-costing/cost-categories[/:id]?segmentCode=
+GET   /api/project-costing/settings
+PATCH /api/project-costing/settings    (partial update; body: { key: value, ... })
 ```
 
-> Typy elementów: `GET /api/project-schedule/element-types` (własność `project_schedule`).
+Klucze ustawień: `visibility.*`, `default_currency`, `default_overhead_rate`, `pdf.*` — patrz §2.2 `pc_settings`.
+
+### 8.2 Segmenty i kategorie kosztów
+
+```
+GET    /api/project-costing/segments
+POST   /api/project-costing/segments
+PATCH  /api/project-costing/segments/:id
+DELETE /api/project-costing/segments/:id   (tylko gdy brak powiązanych kalkulacji)
+
+GET    /api/project-costing/cost-categories?segmentCode=&isActive=
+POST   /api/project-costing/cost-categories
+PATCH  /api/project-costing/cost-categories/:id
+DELETE /api/project-costing/cost-categories/:id
+```
+
+> **Typy elementów** (`ps_element_types`): własność `project_schedule`. Lista dostępna przez `GET /api/project-schedule/element-types?segmentCode=`. `project_costing` nie eksponuje własnych endpointów dla typów elementów.
 
 ### 8.3 Źródła i cennik
 
@@ -640,6 +739,7 @@ GET  .../export?format=xlsx|csv
 POST .../import
 GET  .../pdf-attachments
 GET  .../snapshot
+GET  .../compare?with=<otherId>          (diff dwóch wersji — patrz §8.10)
 ```
 
 `PATCH /api/project-costing/calculations/:id` akceptuje: `price_mode`, `overhead_rate`, `markup_rate`, `target_margin_rate`, `label`, `currency`, `notes`. Zmiana `price_mode` wyzwala recalc.
@@ -678,6 +778,45 @@ GET  /api/project-costing/deals/:dealId/budget-vs-actual   (raport budżet vs re
 ```
 GET/POST/PATCH/DELETE /api/project-costing/import-column-mappings[/:id]
 ```
+
+### 8.10 Porównanie wersji kalkulacji
+
+```
+GET /api/project-costing/calculations/:id/compare?with=<otherId>
+```
+
+Parametry: `:id` = base version, `with=<otherId>` = version do porównania (obie muszą należeć do tego samego `base_code` lub być jawnie wskazane przez użytkownika). Zwraca:
+
+```typescript
+type CalculationCompareResult = {
+  base: { id: string; displayCode: string; status: string }
+  compare: { id: string; displayCode: string; status: string }
+  headerDeltas: {
+    subtotalCost: { base: number | null; compare: number | null; delta: number | null }
+    fullCost: { base: number | null; compare: number | null; delta: number | null }
+    subtotalPrice: { base: number | null; compare: number | null; delta: number | null }
+    totalMargin: { base: number | null; compare: number | null; delta: number | null }
+    marginRate: { base: number | null; compare: number | null; delta: number | null }
+  }
+  lineChanges: LineChange[]
+}
+
+type LineChange = {
+  changeType: 'added' | 'removed' | 'changed' | 'unchanged'
+  label: string
+  baseLineId: string | null; compareLineId: string | null
+  deltas: {
+    quantity?: { base: number | null; compare: number | null }
+    unitCost?: { base: number | null; compare: number | null }   // visibility: view_costs
+    unitPrice?: { base: number | null; compare: number | null }  // visibility: view_prices
+    lineCost?: { base: number | null; compare: number | null }   // visibility: view_costs
+    linePrice?: { base: number | null; compare: number | null }  // visibility: view_prices
+    lineMargin?: { base: number | null; compare: number | null } // visibility: view_margin
+  }
+}
+```
+
+Pola kosztów/marż/cen w `headerDeltas` i `lineChanges.deltas` podlegają tej samej redakcji widoczności co endpoint list/detail (§4.3). Wersje `sent`/`accepted`/`superseded` porównywalne (snapshot-based gdy obie mają snapshot).
 
 ---
 
@@ -732,7 +871,17 @@ project_costing.cost_entry.updated
 
 Subscriber `project_schedule.batch.updated`, `schedule.activated` → HTTP `GET /api/project-schedule/schedules/:id/summary` → update `total_quantity_m3/pcs`, `production_start_at/end_at`.
 
-### 10.4 `klin:project`: §3.12.
+### 10.4 Integracja z `klin:project`
+
+`klin:project` to custom entity z Data designer (`custom_entities` + `custom_entities_storage`). `project_costing` przechowuje `project_id` (UUID FK-id do `klin:project` custom entity) na `pc_calculations`.
+
+**Odczyt**: lista kalkulacji per projekt przez `GET /api/project-costing/calculations?projectId=`. Suma projektu obliczana przez serwis z `cf_offer_role` (§3.12).
+
+**Widget projektu**: wstrzyknięty przez spot na stronie `klin:project` (jeśli spot istnieje — do weryfikacji w implementacji; §16 pytanie otwarte Q1). Wyświetla: lista deali projektu z `cf_offer_role`, suma `project_total`, aktywna kalkulacja per deal, status ofert.
+
+Fallback: `/project-costing/projects/:projectId` — osobna strona z filtrem `?projectId=`.
+
+**Attach/detach**: przez endpointy `POST/DELETE .../attach-project` (§8.5). Odłączenie kalkulacji od projektu nie zmienia `cf_offer_role` na dealu — wymaga osobnej decyzji użytkownika.
 
 ---
 
@@ -761,9 +910,17 @@ Kolumny: line_type [icon], label, qty, unit, unit_cost [`view_costs`], unit_pric
 
 ### 12.3 Widok budget vs actual
 
-Strona `/project-costing/deals/:dealId/actual-costs`: tabela per kategoria — budżet (z accepted version) vs rzeczywisty (SUM cost_entries), wariancja.
+Strona `/project-costing/deals/:dealId/actual-costs`: tabela per kategoria z kolumnami: bezpośredni koszt (budżet), narzut pośredni (budżet), pełny koszt (budżet), rzeczywisty, wariancja, wariancja %. Dane z `GET /api/project-costing/deals/:dealId/budget-vs-actual`.
 
-### 12.4 Strony backend
+### 12.4 Porównanie wersji kalkulacji
+
+Strona `/project-costing/calculations/:id/compare?with=<otherId>` (lub modal z version selectorem). Widok side-by-side:
+- Nagłówek: sumy base vs compare (koszty/ceny/marża — redagowane wg §4), ze strzałkami kierunku zmiany (↑/↓) i kolorem DS.
+- Tabela linii: kolumna „Zmiana" (added/removed/changed/unchanged) + pole deltas. `added` = zielone tło, `removed` = czerwone przekreślenie, `changed` = żółte wyróżnienie.
+- Sekcje zwijalne.
+- Uruchamiane z dropdown wersji kalkulacji (przycisk „Porównaj z...").
+
+### 12.5 Strony backend
 
 `/settings`, `/segments[/id]`, `/templates[/id]`, `/price-sources`, `/price-catalog[/id]`, `/price-list-rules`, `/calculations[/id]`, `/deals/:dealId/actual-costs`.
 
@@ -793,22 +950,23 @@ Strona `/project-costing/deals/:dealId/actual-costs`: tabela per kategoria — b
 
 **Suma MVP**: 4+3.5+3.5+1.5+2+0.5+1+0.5+0.5 = **17 dni roboczych**.
 
-### `project_costing` — v1 (~22 dni roboczych)
+### `project_costing` — v1 (~23 dni roboczych)
 
 | Zadanie | Rozmiar |
 |---------|---------|
 | Import XLSX/CSV + kreator mapowania + walidacja (`exceljs`) | L (3 dni) |
 | Eksport XLSX/CSV (redakcja widoczności) + cennik import/eksport | M (2 dni) |
 | Szablony kalkulacji z hierarchią linii + generowanie z szablonu | M (2 dni) |
-| Wersjonowanie: lifecycle statusy, duplicate, activate, mark-accepted/rejected, unlock + audit log | M (2.5 dnia) |
+| Wersjonowanie: lifecycle statusy, duplicate, activate, mark-accepted/rejected, unlock + audit log | M (2 dni) |
 | `apply-to-deal` via command bus | S (1 dzień) |
 | PDF oferty ze snapshota (`@react-pdf/renderer`, hierarchiczna tabela) | L (3 dni) |
-| Koszty rzeczywiste `CostEntry` (CRUD + simple import + raport budżet vs actual) | M (2 dni) |
+| Koszty rzeczywiste `CostEntry` (CRUD + raport budżet vs actual z pełnym podziałem kosztów) | M (2 dni) |
 | **Kalkulacja standalone**: attach/detach deal+project (endpoints + UI „Przypnij"), `project_id`, `investment_key`, ownership scope | M (1.5 dnia) |
-| **Detekcja duplikatów inwestycji**: pg_trgm index, `/duplicate-investment-candidates`, UI notice, `set-primary-offer` via command bus | M (2 dni) |
+| **Detekcja duplikatów inwestycji**: pg_trgm + NIP matching, `/duplicate-investment-candidates`, UI notice, `set-primary-offer` safe sequence | M (2.5 dnia) |
+| **Porównanie wersji kalkulacji**: API `/compare` + UI side-by-side | M (2 dni) |
 | i18n PL/EN + testy jednostkowe serwisów | M (2 dni) |
 
-**Suma v1**: 3+2+2+2.5+1+3+2+1.5+2+2 = **22 dni roboczych**.
+**Suma v1**: 3+2+2+2+1+3+2+1.5+2.5+2+2 = **23 dni roboczych**.
 
 ### `project_costing` — v2 (~14 dni roboczych)
 
@@ -825,11 +983,11 @@ Strona `/project-costing/deals/:dealId/actual-costs`: tabela per kategoria — b
 
 **Suma v2**: 1+2.5+2+2+2+1+0.5+3 = **14 dni roboczych**.
 
-**Total project_costing**: 17+22+14 = **53 dni roboczych**.
+**Total project_costing**: 17+23+14 = **54 dni roboczych**.
 
 ---
 
-## 15. Ryzyki
+## 15. Ryzyka
 
 | # | Ryzyko | P-stwo | Wpływ | Mitygacja |
 |---|--------|--------|-------|-----------|
@@ -842,7 +1000,7 @@ Strona `/project-costing/deals/:dealId/actual-costs`: tabela per kategoria — b
 | R7 | Koszty rzeczywiste: brak integracji z fakturami v1 | Wysokie | Niski | Import XLSX v1; integracje v2 |
 | R8 | Snapshot `jsonb` rośnie (5000 linii × N wersji) | Niskie | Niski | Tylko przy `sent`; compress opcjonalnie |
 | R9 | pg_trgm false-positives przy zbyt niskim threshold | Niskie | Niski | Threshold konfigurowalny (default 0.5); user decyduje |
-| R10 | `cf_offer_role` update na obu dealach: partial failure | Niskie | Średni | Oba command bus calls w jednej transakcji lub compensating action |
+| R10 | `cf_offer_role` safe sequence: Krok 2 (promote) fail po Krok 1 (demote) succeed → brak primary | Niskie | Średni | Akcja kompensująca (re-promote old) w catch — §3.12; sekwencja idempotent, retry-safe |
 
 ---
 
@@ -880,6 +1038,9 @@ Strona `/project-costing/deals/:dealId/actual-costs`: tabela per kategoria — b
 | A15 | Offer snapshot tworzony przy mark-sent; PDF generowany ze snapshota | Immutability oferowanej ceny |
 | A16 | CostEntry w project_costing (nie osobnym module) | Spójność danych budżet vs realizacja w jednym module |
 | A17 | pc_price_list_rules: priority = im wyższy, tym bardziej szczegółowy | Intuicyjne; item>category>segment>global |
+| A21 | Version compare: matching linii po `label` + `sort_order` + `cost_category_id` (brak stabilnego line-id między wersjami) | Kalkulacje mogą mieć różne line IDs nawet przy duplikacji |
+| A22 | Budget vs actual: `calculation_id` required na `pc_cost_entries`; `deal_id`/`project_id` opcjonalne | Spójność z konkretną wersją oferty |
+| A23 | NIP klienta: pobrany z `company.cf_nip` przez customers API (read-only); brak przechowywania w pc_calculations | Unika duplikacji danych; zależność przez read-only API call |
 
 ---
 
@@ -936,4 +1097,5 @@ apps/mercato/src/modules/project_costing/
 | 2026-10-19 | v1–v4: patrz poprzednie rewizje |
 | 2026-10-19 | v5 — Oferta = frozen snapshot (pc_offer_snapshots); typy linii (section/item/note/subtotal) + hierarchia (parent_line_id) + markup_pct z dziedziczeniem; cykl życia wersji: draft/sent/superseded/accepted/rejected + numeracja base_code-R{revision}; layered price list (pc_price_list_rules); koszty rzeczywiste CostEntry (pc_cost_entries); marża ukryta domyślnie; deal_id nullable; effort: MVP 17d, v1 17d, v2 14d = 48d |
 | 2026-10-19 | v5 patch (a) — @svar-ui/react-gantt MIT/PRO split zweryfikowany z tarball (patrz project_schedule §3); bez wpływu na model danych project_costing |
+| 2026-10-19 | v6 — mode C per-item (line_full_cost×(1+effective_markup)), redistyb. §3.6 tylko dla B; cf_offer_role: read+write (nie read-only), safe two-step z compensating action; budget formula: line_full_cost per kat., direct+overhead kolumny, calculation_id required; investment detection: NIP matching + deal search bez kalkulacji; compare API + UI side-by-side; §8.1-8.2 expand; §10.4 expand; §12.3/12.4 compare UI; effort v1 22→23d, total 53→54d; combined 83→84d; R10 fix; A2/A12 fix; A21-A23 |
 | 2026-10-19 | v5 patch (b) — Odpowiedzi Marka: kalkulacja może istnieć bez deala (deal_id+project_id nullable, project_id/investment_name/investment_location/investment_key na pc_calculations, ownership standalone=created_by, attach/detach-deal/project endpoints); detekcja duplikatów inwestycji (pg_trgm, duplicate-investment-candidates, UI notice bez automatyzacji, set-primary-offer via command bus, audit log); effort v1 17→22d; total 48→53d; combined 78→83d; Pytania otwarte Q1/Q2 usunięte (odpowiedziane) |
