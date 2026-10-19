@@ -131,13 +131,17 @@ Analogiczne do kalkulacji: `segment_code`, linie z `line_type`, `parent_line_id`
 | `id` | `uuid` PK | |
 | `organization_id` | `uuid` NOT NULL | |
 | `tenant_id` | `uuid` NOT NULL | |
-| `deal_id` | `uuid` NULL | FK-id → `customer_deals.id` (nullable — patrz §15 Pytania otwarte) |
+| `deal_id` | `uuid` NULL | FK-id → `customer_deals.id`; NULL = kalkulacja standalone (wycena wewnętrzna, przetarg przed wyborem GC) |
+| `project_id` | `uuid` NULL | FK-id → `klin:project` custom entity id; NULL = niepowiązana z projektem; dołączana później |
+| `investment_name` | `text` NULL | nazwa inwestycji (wolny tekst, do fuzzy-match) |
+| `investment_location` | `text` NULL | lokalizacja inwestycji (wolny tekst) |
+| `investment_key` | `text` NULL | normalizowany klucz: `lower(trim(investment_name)) \|\| '\|' \|\| lower(trim(investment_location))`; aktualizowany przez serwis |
 | `segment_code` | `text` NULL | |
 | `base_code` | `text` NOT NULL | bazowy numer, np. `K/2026/001` |
 | `revision` | `int` NOT NULL DEFAULT 1 | numer rewizji; display = `base_code-R{revision}` |
 | `label` | `text` NOT NULL | |
 | `status` | `text` NOT NULL DEFAULT `'draft'` | `draft` \| `sent` \| `superseded` \| `accepted` \| `rejected` |
-| `is_active_version` | `bool` NOT NULL DEFAULT false | jedna true per deal |
+| `is_active_version` | `bool` NOT NULL DEFAULT false | jedna true per deal (gdy `deal_id != NULL`); dla kalkulacji standalone: informacyjne |
 | `currency` | `char(3)` NOT NULL DEFAULT `'PLN'` | |
 | `price_mode` | `text` NOT NULL DEFAULT `'line_prices'` | `line_prices` \| `target_margin` \| `markup` |
 | `overhead_rate` | `numeric(6,4)` DEFAULT 0 | koszty pośrednie jako % kosztu |
@@ -175,6 +179,10 @@ CREATE UNIQUE INDEX pc_calculations_active_unique
 Constraints: `CHECK (status IN ('draft','sent','superseded','accepted','rejected'))`, `CHECK (price_mode IN ('line_prices','target_margin','markup'))`.
 
 **Numeracja**: serwis przypisuje `base_code = K/{YYYY}/{NNN}` (auto-increment per tenant). `revision` startuje od 1 i rośnie przy każdym odlokowaniu/duplikacji. Display code: `base_code-R{revision}` gdy `revision > 1`, sam `base_code` gdy `revision = 1`.
+
+**Kalkulacja standalone** (bez deala): `deal_id = NULL`, `project_id = NULL`. Może być tworzona i edytowana niezależnie. `apply-to-deal` i `forecast_value` działają wyłącznie gdy `deal_id != NULL`. `project_id` może być dołączony w dowolnym momencie przez endpoint `attach-project`. Deal dołączany przez `attach-deal`. Scope „own" dla standalone: `created_by = current_user_id`.
+
+**Indeks `investment_key`**: `CREATE INDEX pc_calculations_investment_key_trgm ON pc_calculations USING gin(investment_key gin_trgm_ops)` — wymaga rozszerzenia `pg_trgm`. Używany do wyszukiwania duplikatów inwestycji (§3.12).
 
 #### `pc_calculation_lines` — linie kalkulacji (z hierarchią i typami)
 
@@ -400,38 +408,70 @@ PDF klienta generowany **zawsze ze snapshota** — żadne zmiany konfiguracji ce
 ### 3.9 Cykl życia wersji i `is_active_version`
 
 **Statusy**: `draft` → `sent` → `accepted` | `rejected` | `superseded`.
-- `superseded`: gdy powstaje nowa wersja z tej samej `base_code` (odblokowanie lub duplicate).
+- `superseded`: gdy powstaje nowa wersja z tej samej `base_code`.
 - `accepted`/`rejected`: zmiana ręczna (klient podjął decyzję).
-- `is_active_version = true`: wersja zasilająca `deal.value_amount` (ustawiany przy `activate` i przy `accepted`).
+- `is_active_version = true`: tylko gdy `deal_id != NULL`; wersja zasilająca `deal.value_amount`.
 
-**Odblokowanie** (admin only): tworzy nową wersję `(base_code, revision + 1)` ze statusem `draft`; oryginał → `superseded`. Wpis w `pc_calculation_audit_log` z `action = 'unlocked'`, `reason` obowiązkowy.
+**Odblokowanie** (admin only): nowa wersja `(base_code, revision + 1)`, `draft`; oryginał → `superseded`. Wpis w `pc_calculation_audit_log`.
 
-**Duplikacja jako nowa wersja**: `POST .../duplicate` kopiuje linie do nowej wersji `(base_code, max_revision + 1)`.
-
-**Reconciliacja z rev 4 statusami**: `active` → usunięty (zastąpiony przez `is_active_version`); `locked` → usunięty (zastąpiony przez `sent`); `archived` → zastąpiony przez `superseded`/`rejected`.
+**Duplikacja jako nowa wersja**: `POST .../duplicate` kopiuje linie.
 
 ### 3.10 Waluta kalkulacji
 
-Waluta = `customer_deals.value_currency` przy tworzeniu (lub `pc_settings.default_currency`). Jednowalutowe v1.
+Waluta = `customer_deals.value_currency` gdy `deal_id != NULL`, else `pc_settings.default_currency`. Jednowalutowe v1.
 
 ### 3.11 Prognoza wartości = wartość × prawdopodobieństwo
 
-`forecast_value = is_active_version.subtotal_price × deal.probability / 100`
+**Tylko gdy `deal_id != NULL`**:
+```
+forecast_value = is_active_version.subtotal_price × deal.probability / 100
+```
 
-Recalculate both up and down przy:
-- Zmianie `is_active_version` (nowa aktywna wersja → inna wartość).
-- Zmianie `deal.probability` (subscriber na `customers.deal.updated`).
-- `apply-to-deal` (§8.7) ustawia `deal.value_amount = subtotal_price`.
+Kalkulacje standalone (bez deala) nie wchodzą do prognozy lejka. Recalculate przy zmianie `is_active_version`, `deal.probability`, po `apply-to-deal`.
 
-Widget dashboardu „Prognoza lejka": `SUM(forecast_value)` per etap pipeline lub per miesiąc `expected_close_at`.
+Widget dashboardu „Prognoza lejka": `SUM(forecast_value)` per etap pipeline lub `expected_close_at`.
 
-### 3.12 `cf_offer_role` i reguła sumy projektu
+### 3.12 `cf_offer_role`, reguła sumy projektu i detekcja duplikatów inwestycji
 
-`cf_offer_role` (id: `73f8260a-94c2-42d1-abc4-c08c4177be9f`): moduł wyłącznie odczytuje.
+**`cf_offer_role`** (id: `73f8260a-94c2-42d1-abc4-c08c4177be9f`): read-only przez API entities. Aktualizacja wyłącznie przez `customers.deals.update` command bus (§8.7), nie bezpośrednio.
 
-Jeden primary offer per inwestycja (`klin:project`):
-- `project_total = SUM(deal.value_amount WHERE cf_offer_role = 'primary' AND deal.status NOT IN ('lost','archived'))`.
-- Deale `alternative` widoczne w tabeli projektu, nie wliczane do sumy.
+**Reguła sumy projektu** (gdy `project_id != NULL`):
+```
+project_total = SUM(deal.value_amount)
+  WHERE cf_offer_role = 'primary'
+    AND deal.status NOT IN ('lost', 'archived')
+    AND calc.project_id = :project_id
+```
+Deale `alternative` widoczne w tabeli projektu, nie wliczane.
+
+**Detekcja duplikatów inwestycji**:
+
+Gdy kalkulacja jest dołączana do deala/projektu (lub gdy `investment_name`/`investment_location` jest ustawiane), serwis sprawdza podobne kalkulacje w tej samej organizacji przez `pg_trgm`:
+
+```sql
+SELECT c.id, c.base_code, c.deal_id, c.investment_name,
+       similarity(c.investment_key, :target_key) AS score
+FROM pc_calculations c
+WHERE c.organization_id = :org AND c.tenant_id = :tenant AND c.id != :this_id
+  AND c.investment_key IS NOT NULL
+  AND similarity(c.investment_key, :target_key) > 0.5
+ORDER BY score DESC
+LIMIT 10;
+```
+
+Wynik: `GET /api/project-costing/calculations/:id/duplicate-investment-candidates`.
+
+**UI notice** (brak automatyzacji — user decyduje):
+> „Istnieje już oferta dla innego wykonawcy (${dealName}, ${similarity}% podobieństwo nazwy inwestycji). Upewnij się, która powinna być główna."
+
+Przyciski per kandydat: „Ta jest główna" / „Tamta jest główna" / „Ignoruj".
+
+Po wyborze: `POST /api/project-costing/calculations/:id/set-primary-offer` → serwis wywołuje `customers.deals.update` command bus:
+- Wybrany deal: `customFields: { cf_offer_role: 'primary' }`.
+- Poprzedni primary deal: `customFields: { cf_offer_role: 'alternative' }`.
+- Zmiana logowana: `pc_calculation_audit_log` (`action = 'set_primary_offer'`, `meta: { changed_deal_id, previous_role, new_role }`).
+
+`pg_trgm` wymagane: `CREATE EXTENSION IF NOT EXISTS pg_trgm;` w migracji.
 
 ### 3.13 Koszty rzeczywiste vs budżet
 
@@ -470,7 +510,10 @@ margin_actual    = subtotal_price − actual_total_cost  (total_amount SUM)
 
 ### 4.4 Scope kalkulacji (`calculation_scope`)
 
-`"all"` (default) | `"own"` (filtr po właścicielu deala). Admin widzi zawsze wszystko.
+`"all"` (default) | `"own"`:
+- Gdy `deal_id != NULL`: „own" filtruje po właścicielu deala.
+- Gdy `deal_id IS NULL` (standalone): „own" filtruje po `created_by = current_user_id`.
+- Admin (`project_costing.admin`) zawsze widzi wszystkie.
 
 ---
 
@@ -579,13 +622,19 @@ DELETE    /api/project-costing/calculations/:id    (tylko draft)
 
 POST .../duplicate           (nowa rewizja: base_code + revision+1)
 POST .../recalc              (przelicz linie + narzut + tryb)
-POST .../activate            (is_active_version → true)
+POST .../activate            (is_active_version → true; wymaga deal_id != NULL)
 POST .../mark-sent           (snapshot + status=sent)
-POST .../mark-accepted       (status=accepted, is_active_version=true)
+POST .../mark-accepted       (status=accepted, is_active_version=true gdy deal_id != NULL)
 POST .../mark-rejected       (status=rejected)
 POST .../unlock              (admin: nowa rewizja draft, stara=superseded, audit log)
-POST .../apply-to-deal       (value_amount przez command bus — §8.7)
+POST .../apply-to-deal       (value_amount przez command bus; wymaga deal_id != NULL)
 POST .../generate-pdf        (z snapshota)
+POST .../attach-deal         (dołącz deal: body { dealId }; sprawdza duplikaty inwestycji)
+DELETE .../attach-deal       (odłącz deal; is_active_version → false)
+POST .../attach-project      (dołącz project: body { projectId })
+DELETE .../attach-project    (odłącz project)
+GET  .../duplicate-investment-candidates  (fuzzy-match §3.12)
+POST .../set-primary-offer   (ustaw cf_offer_role via command bus §3.12)
 
 GET  .../export?format=xlsx|csv
 POST .../import
@@ -744,7 +793,7 @@ Strona `/project-costing/deals/:dealId/actual-costs`: tabela per kategoria — b
 
 **Suma MVP**: 4+3.5+3.5+1.5+2+0.5+1+0.5+0.5 = **17 dni roboczych**.
 
-### `project_costing` — v1 (~17 dni roboczych)
+### `project_costing` — v1 (~22 dni roboczych)
 
 | Zadanie | Rozmiar |
 |---------|---------|
@@ -755,9 +804,11 @@ Strona `/project-costing/deals/:dealId/actual-costs`: tabela per kategoria — b
 | `apply-to-deal` via command bus | S (1 dzień) |
 | PDF oferty ze snapshota (`@react-pdf/renderer`, hierarchiczna tabela) | L (3 dni) |
 | Koszty rzeczywiste `CostEntry` (CRUD + simple import + raport budżet vs actual) | M (2 dni) |
-| i18n PL/EN + testy jednostkowe serwisów | S (1.5 dnia) |
+| **Kalkulacja standalone**: attach/detach deal+project (endpoints + UI „Przypnij"), `project_id`, `investment_key`, ownership scope | M (1.5 dnia) |
+| **Detekcja duplikatów inwestycji**: pg_trgm index, `/duplicate-investment-candidates`, UI notice, `set-primary-offer` via command bus | M (2 dni) |
+| i18n PL/EN + testy jednostkowe serwisów | M (2 dni) |
 
-**Suma v1**: 3+2+2+2.5+1+3+2+1.5 = **17 dni roboczych**.
+**Suma v1**: 3+2+2+2.5+1+3+2+1.5+2+2 = **22 dni roboczych**.
 
 ### `project_costing` — v2 (~14 dni roboczych)
 
@@ -774,7 +825,7 @@ Strona `/project-costing/deals/:dealId/actual-costs`: tabela per kategoria — b
 
 **Suma v2**: 1+2.5+2+2+2+1+0.5+3 = **14 dni roboczych**.
 
-**Total project_costing**: 17+17+14 = **48 dni roboczych**.
+**Total project_costing**: 17+22+14 = **53 dni roboczych**.
 
 ---
 
@@ -788,21 +839,20 @@ Strona `/project-costing/deals/:dealId/actual-costs`: tabela per kategoria — b
 | R4 | Rounding drift redistributowania — residual per ostatnia linia | Niskie | Niski | Max 0.01 PLN |
 | R5 | Race condition `activate` / partial unique index | Niskie | Wysoki | Transakcja SERIALIZABLE per `deal_id` |
 | R6 | Optimistic lock deala przy `apply-to-deal` | Średnie | Średni | Pobierz `deal.updatedAt` tuż przed dispatch |
-| R7 | Koszty rzeczywiste: brak integracji z fakturami w v1 — użytkownicy pomijają ręczne wpisy | Wysokie | Niski | Import XLSX w v1; integracje w v2 |
-| R8 | Snapshot `jsonb` może rosnąć (5000 linii × N wersji) | Niskie | Niski | Snapshot tworzony tylko przy `sent`; compress jsonb opcjonalnie |
-| R9 | `deal_id` nullable: kalkulacja bez deala musi mieć inny zakres `is_active_version` | Niskie | Średni | Partial unique index skips gdy `deal_id IS NULL` (§2.2) |
+| R7 | Koszty rzeczywiste: brak integracji z fakturami v1 | Wysokie | Niski | Import XLSX v1; integracje v2 |
+| R8 | Snapshot `jsonb` rośnie (5000 linii × N wersji) | Niskie | Niski | Tylko przy `sent`; compress opcjonalnie |
+| R9 | pg_trgm false-positives przy zbyt niskim threshold | Niskie | Niski | Threshold konfigurowalny (default 0.5); user decyduje |
+| R10 | `cf_offer_role` update na obu dealach: partial failure | Niskie | Średni | Oba command bus calls w jednej transakcji lub compensating action |
 
 ---
 
 ## 16. Pytania otwarte do Marka
 
-1. **Kalkulacja bez deala**: Czy kalkulacja może istnieć bez powiązanego deala (przetarg wewnętrzny, wycena wstępna)? Jeśli tak — `deal_id` nullable, brak `is_active_version` constraint dla takich kalkulacji. **Założenie domyślne w spec**: `deal_id` nullable (zdefiniowano), `is_active_version` nie dotyczy kalkulacji bez deala.
+1. **Spot `klin:project`**: Czy strona `klin:project` ma spot na widget modułu? Fallback: `/project-costing/projects/:projectId`.
 
-2. **Desygnacja primary offer**: Kto wyznacza `cf_offer_role = 'primary'` i czy zmienia się automatycznie gdy inny GC wygra przetarg? Czy moduł powinien proponować zmianę `cf_offer_role` przy `accepted` na innym dealu tego samego projektu?
+2. **Widoczność marży przy accepted offer**: Czy sprzedawca (sales) powinien widzieć marżę wersji `accepted` po zamknięciu deala, mimo że marża jest ukryta domyślnie?
 
-3. **Spot `klin:project`**: Czy strona `klin:project` ma spot na widget modułu? Fallback: `/project-costing/projects/:projectId`.
-
-4. **Widoczność marży przy accepted offer**: Czy sprzedawca (sales) powinien widzieć marżę wersji `accepted` po zamknięciu deala, mimo że marża jest ukryta domyślnie?
+3. **pg_trgm threshold**: Domyślny próg similarity 0.5 dla detekcji duplikatów inwestycji — czy odpowiedni? (Wyższy = mniej false-positives, niższy = więcej podpowiedzi.)
 
 ---
 
@@ -813,7 +863,10 @@ Strona `/project-costing/deals/:dealId/actual-costs`: tabela per kategoria — b
 | A1 | Siatka: react-data-grid v7 (MIT, ~50 KB) | Najlżejsza z Excel-like UX |
 | A2 | Tryby A/B/C + dziedziczenie markup_pct: jednolita redistrybuowanie §3.6; margin_rate z rzeczywistych sum | Spójność; markup per item/sekcja nie zastępuje trybów B/C ale współdziała |
 | A3 | project_costing → project_schedule; schedule nie zależy od costing | Brak circular dependency |
-| A4 | deal_id nullable (kalkulacja może istnieć bez deala) | Rozwiązanie pytania C z rev 5 per default assumption |
+| A4 | deal_id nullable ✅ (Marek potwierdził); project_id nullable; ownership standalone = created_by | Odpowiedź Marka na pytanie C |
+| A18 | investment_key = lower(trim(name)) \|\| '\|' \|\| lower(trim(location)); pg_trgm threshold = 0.5 | Prosty normalizowany klucz; próg konfigurowalny |
+| A19 | cf_offer_role zmiana: brak automatyzmu; user decyduje przez UI; command bus | Odpowiedź Marka — no silent automation |
+| A20 | attach-deal sprawdza duplikaty inwestycji i pokazuje notice; nie blokuje | Informowanie bez blokady |
 | A5 | Waluta = waluta deala (jednowalutowe v1) | Eliminuje konwersje |
 | A6 | Import: 5000 pozycji / 10 MB | §6.4 |
 | A7 | Auto-save: debounce 800 ms | Minimalizuje requesty |
@@ -882,4 +935,5 @@ apps/mercato/src/modules/project_costing/
 |------|--------|
 | 2026-10-19 | v1–v4: patrz poprzednie rewizje |
 | 2026-10-19 | v5 — Oferta = frozen snapshot (pc_offer_snapshots); typy linii (section/item/note/subtotal) + hierarchia (parent_line_id) + markup_pct z dziedziczeniem; cykl życia wersji: draft/sent/superseded/accepted/rejected + numeracja base_code-R{revision}; layered price list (pc_price_list_rules); koszty rzeczywiste CostEntry (pc_cost_entries); marża ukryta domyślnie; deal_id nullable; effort: MVP 17d, v1 17d, v2 14d = 48d |
-| 2026-10-19 | v5 patch — @svar-ui/react-gantt MIT/PRO split zweryfikowany z tarball (patrz project_schedule §3); bez wpływu na model danych project_costing |
+| 2026-10-19 | v5 patch (a) — @svar-ui/react-gantt MIT/PRO split zweryfikowany z tarball (patrz project_schedule §3); bez wpływu na model danych project_costing |
+| 2026-10-19 | v5 patch (b) — Odpowiedzi Marka: kalkulacja może istnieć bez deala (deal_id+project_id nullable, project_id/investment_name/investment_location/investment_key na pc_calculations, ownership standalone=created_by, attach/detach-deal/project endpoints); detekcja duplikatów inwestycji (pg_trgm, duplicate-investment-candidates, UI notice bez automatyzacji, set-primary-offer via command bus, audit log); effort v1 17→22d; total 48→53d; combined 78→83d; Pytania otwarte Q1/Q2 usunięte (odpowiedziane) |

@@ -60,7 +60,7 @@ Właściciel `ps_element_types` (typy elementów) i `ps_schedule_tasks` (zadania
 |---------|-----------|
 | Kto posiada `ps_element_types`, `ps_schedule_tasks`, `ps_production_batches`? | `project_schedule` |
 | Jak `project_costing` czyta dane? | HTTP API + events |
-| Czy `project_schedule` importuje z `project_costing`? | NIE — tylko FK-id (calculation_id, deal_id, calculation_line_id) jako opaque UUID |
+| Czy `project_schedule` importuje z `project_costing`? | NIE — tylko FK-id (calculation_id, deal_id, calculation_line_id) jako opaque UUID; `ps_schedules.deal_id` nullable (harmonogram może istnieć bez deala) |
 | Skąd `project_schedule` bierze prawdopodobieństwo do prognozy? | Parametr query `?probability=` albo `deal.probability` pobrany przez consumer (project_costing lub dashboard) |
 
 ---
@@ -86,7 +86,7 @@ Seed `segment_code = 'precast_concrete'`: floor_slab, wall, column, beam, stairc
 | `id` | `uuid` PK | |
 | `organization_id` | `uuid` NOT NULL | |
 | `tenant_id` | `uuid` NOT NULL | |
-| `deal_id` | `uuid` NOT NULL | FK-id → customer_deals |
+| `deal_id` | `uuid` NULL | FK-id → customer_deals; NULL = harmonogram bez deala (kalkulacja standalone) |
 | `calculation_id` | `uuid` NULL | FK-id → pc_calculations (opaque; ON DELETE SET NULL) |
 | `schedule_type` | `text` NOT NULL DEFAULT `'offer'` | `offer` \| `execution` |
 | `offer_schedule_id` | `uuid` NULL | FK → ps_schedules.id — referencja do harmonogramu ofertowego dla `execution` |
@@ -628,9 +628,9 @@ Przy każdej zmianie `planned_start_at`/`planned_end_at` zadania (drag&drop) →
 
 | Moduł | MVP | v1 | v2 | Suma |
 |-------|-----|----|----|------|
-| `project_costing` | 17 d | 17 d | 14 d | 48 d |
+| `project_costing` | 17 d | 22 d | 14 d | 53 d |
 | `project_schedule` | 15 d | 5 d | 10 d | 30 d |
-| **Łącznie** | **32 d** | **22 d** | **24 d** | **78 d** |
+| **Łącznie** | **32 d** | **27 d** | **24 d** | **83 d** |
 
 ---
 
@@ -732,4 +732,5 @@ apps/mercato/src/modules/project_schedule/
 | 2026-10-19 | v1 (rev 3) — inicjalna spec |
 | 2026-10-19 | v2 (rev 4) — Gantt MVP, @svar-ui, ps_element_types, ps_import_column_mappings, LRM |
 | 2026-10-19 | v3 (rev 5) — …(jak poprzednio)… |
-| 2026-10-19 | v3 patch (rev 5 update) — @svar-ui/react-gantt 2.8.1 MIT/PRO zweryfikowane z tarball: MIT core ma WBS ✅, drag&drop ✅, dep links ✅, React 19/Next.js ✅; FS/SS/FF/SF auto-scheduling = PRO only; CPM/baselines/MS Project = PRO; milestones [niezwer.]; zaktualizowano §3.1 tabela, §3.2 (MIT/PRO split), §3.3, GanttChart.tsx, R1, A1; dodano pytanie otwarte o SVAR PRO vs impl. własna (§15 pkt 5) |
+| 2026-10-19 | v3 patch (b) — ps_schedules.deal_id nullable (kalkulacja standalone może mieć harmonogram bez deala); combined table zaktualizowane: project_costing 53d + project_schedule 30d = 83d |
+| 2026-10-19 | v3 patch (a) — @svar-ui/react-gantt 2.8.1 MIT/PRO zweryfikowane z tarball: MIT core ma WBS ✅, drag&drop ✅, dep links ✅, React 19/Next.js ✅; FS/SS/FF/SF auto-scheduling = PRO only; CPM/baselines/MS Project = PRO; milestones [niezwer.]; zaktualizowano §3.1 tabela, §3.2 (MIT/PRO split), §3.3, GanttChart.tsx, R1, A1; dodano pytanie otwarte o SVAR PRO vs impl. własna (§15 pkt 5) |
