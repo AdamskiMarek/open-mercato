@@ -3,6 +3,7 @@
 **Dokument**: SPEC ONLY (plan testów niezależny od specyfikacji PR #10, brak kodu)
 **Data**: 2026-10-19
 **Autor**: Copilot (plan testów na podstawie wymagań biznesowych Marka Adamskiego)
+**Rewizja**: rev 4 (2026-10-20) — decyzje koordynacyjne z `.ai/vision.md`, `.ai/decisions.md`, `.ai/om-architecture-checklist.md`
 
 ---
 
@@ -78,6 +79,10 @@ Zasady (zgodnie z `.ai/qa/AGENTS.md` i wzorcem `packages/core/src/modules/sync_e
 - Dane testowe: fixtures tworzone per test przez API (helpery `@open-mercato/core/helpers/integration/*`, np. `crmFixtures`, `authFixtures`, `generalFixtures`), sprzątanie w `finally`; nigdy nie polegać na danych seed/demo. Bezpośrednie asercje na DB (np. idempotentność, constrainty) — jak w TC-SX-001 przez klienta `pg`; kolejki — `drainIntegrationQueue`.
 - Testy zależne od modułu harmonogramu oznaczyć metadanymi `__integration__/meta.ts` (`requiredModules`), żeby były pomijane, gdy moduł nie jest włączony.
 - Nie umieszczać wykonywalnych `.spec.ts` w `.ai/qa/tests` (katalog tylko na współdzielony config Playwright).
+- Każda trasa API modułu ma test Playwright w `__integration__` dodany w tej samej zmianie co trasa (checklista architektury, „Wycena i testy”).
+- Role w testach: OM ma role `superadmin`/`admin`/`employee`. Role biznesowe używane w scenariuszach (Handlowiec, Manager, Obsługa) to role testowe tworzone per test (`createRoleFixture`) albo przez `setup.ts` modułu, z nadanymi feature'ami z `acl.ts` modułu. Widoczność kosztu/marży i edycja narzutu = feature'y ACL (nazwy wg speki, np. `<moduł>.cost.view`, `<moduł>.margin.view`, `<moduł>.markup.edit`), nie osobne ustawienia.
+- „Audit trail” w scenariuszach = wpis w `audit_logs` z zapisu wykonanego komendą (z undo); bez własnych tabel audytu.
+- Asercje na komunikatach UI: na locale `pl`, dokładny tekst; klucz i18n musi mieć też tłumaczenie `en`.
 
 ---
 
@@ -349,9 +354,11 @@ Podstawowe operacje kalkulacji, arytmetyka finansowa, zaokrąglenia, jednostki, 
 
 Łatwy import z XLSX/CSV, kreator mapowania, walidacja, eksport zgodny z Excelem.
 
+**Import XLSX jest w MVP** (decyzja D9/D29): scenariusze importu TC-IMP-001..007 mają etap MVP i priorytet P0–P1. Import działa asynchronicznie (`ProgressJob` + worker kolejki) — w testach Playwright kolejka opróżniana przez `drainIntegrationQueue`.
+
 #### TC-IMP-001: Import XLSX — mapowanie kolumn
 
-- **Priorytet**: P1 | **Poziom**: E2E/UI + Integration
+- **Priorytet**: P1 | **Etap**: MVP | **Poziom**: E2E/UI + Integration
 - **Warunki wstępne**: Plik XLSX: Pozycja | Ilość | Cena
 - **Kroki**:
   1. Kliknij "Import"
@@ -363,10 +370,11 @@ Podstawowe operacje kalkulacji, arytmetyka finansowa, zaokrąglenia, jednostki, 
 - **Oczekiwane wyniki**:
   - Wiersze zaimportowane, sumy przeliczone
   - Mapowanie zapamiętane dla kolejnych importów z tego pliku
+  - Import uruchomiony jako `ProgressJob` (postęp widoczny, nie blokuje żądania HTTP)
 
 #### TC-IMP-002: Import CSV — kodowanie UTF-8 i ANSI
 
-- **Priorytet**: P1 | **Poziom**: Integration + E2E
+- **Priorytet**: P1 | **Etap**: MVP | **Poziom**: Integration + E2E
 - **Kroki**:
   1. CSV UTF-8 z polskimi znakami: "śruba M10 × 50mm"
   2. CSV ANSI (Windows-1250)
@@ -377,7 +385,7 @@ Podstawowe operacje kalkulacji, arytmetyka finansowa, zaokrąglenia, jednostki, 
 
 #### TC-IMP-003: Import — separator (przecinek / średnik / tab)
 
-- **Priorytet**: P1 | **Poziom**: Integration
+- **Priorytet**: P1 | **Etap**: MVP | **Poziom**: Integration
 - **Kroki**:
   1. CSV z ";", CSV z ","
   2. Import
@@ -387,18 +395,18 @@ Podstawowe operacje kalkulacji, arytmetyka finansowa, zaokrąglenia, jednostki, 
 
 #### TC-IMP-004: Import — przecinek dziesiętny (1.5 vs 1,5)
 
-- **Priorytet**: P1 | **Poziom**: Integration
+- **Priorytet**: P1 | **Etap**: MVP | **Poziom**: Integration
 - **Kroki**:
-  1. XLSX/CSV: "1.5 m³", "100,50 PLN" (polski format)
+  1. XLSX/CSV: "1.5 m³", "100,50 PLN", "1 234,56" (polski format z separatorem tysięcy spacją)
   2. Import
 - **Oczekiwane wyniki**:
-  - Rozpoznane jako 1.5 i 100.50
+  - Rozpoznane jako 1.5, 100.50 i 1234.56
   - Logika: jeśli separator=",", to "," = kropka, "." = separator tysiąca
   - Brak błędów parsowania
 
 #### TC-IMP-005: Import — błędy w wierszach (złe dane)
 
-- **Priorytet**: P1 | **Poziom**: Integration
+- **Priorytet**: P1 | **Etap**: MVP | **Poziom**: Integration
 - **Kroki**:
   1. XLSX: Wiersz 3 brakuje ilości, Wiersz 5 cena = "abc", Wiersz 7 = puste
   2. Import
@@ -409,7 +417,7 @@ Podstawowe operacje kalkulacji, arytmetyka finansowa, zaokrąglenia, jednostki, 
 
 #### TC-IMP-006: Import — duże pliki i limity
 
-- **Priorytet**: P2 | **Poziom**: Performance
+- **Priorytet**: P1 | **Etap**: MVP | **Poziom**: Performance
 - **Kroki**:
   1. XLSX: 5000 wierszy × 10 kolumn (~5 MB)
   2. Import, monit RAM/CPU, czas
@@ -420,18 +428,20 @@ Podstawowe operacje kalkulacji, arytmetyka finansowa, zaokrąglenia, jednostki, 
 
 #### TC-IMP-007: Import XLSX — scalone komórki, formuły, makra
 
-- **Priorytet**: P2 | **Poziom**: Integration
+- **Priorytet**: P1 | **Etap**: MVP | **Poziom**: Integration
 - **Kroki**:
-  1. XLSX: scalone komórki, formuły (=SUM), makra
+  1. XLSX: scalone komórki, formuły (=SUM) z zapisaną wartością i bez zapisanej wartości, wiele arkuszy, makra
   2. Import
 - **Oczekiwane wyniki**:
   - Ignoruj formatowanie, bierz wartości
+  - Formuła bez zapisanej wartości: wiersz oznaczony błędem („brak wartości formuły”), nie liczony po stronie serwera
+  - Wiele arkuszy: użytkownik wybiera arkusz w kreatorze
   - Makra = ignoruj (bezpieczeństwo)
   - Scalone komórki: pierwsze komórka scalona zawiera wartość
 
 #### TC-IMP-008: Eksport XLSX — zgodny z polskim Excelem
 
-- **Priorytet**: P1 | **Poziom**: E2E/UI
+- **Priorytet**: P1 | **Etap**: do potwierdzenia w specy (decyzje obejmują import; eksport XLSX nie jest przypisany do etapu) | **Poziom**: E2E/UI
 - **Kroki**:
   1. Kalkulator z 5 pozycjami, różne jednostki, marże
   2. Eksport XLSX
@@ -487,6 +497,7 @@ Kalkulacja bez deala, podpięcie deala i projektu, rozpoznawanie inwestycji, wyb
   3. Każdy deal ma swoją kalkulację
 - **Oczekywane wyniki**:
   - Oba deale przypisane do tej samej inwestycji
+  - Przy zapisie oferty Deal 2 (inny wykonawca, ta sama inwestycja) system pokazuje dokładnie komunikat „Istnieje już oferta dla innego wykonawcy — wskaż, która jest główna” (jak w TC-DEAL-005)
   - Widget inwestycji podsumowuje: 2 oferty, wartości, oferta główna
 
 #### TC-DEAL-004: Oferta główna vs alternatywna — wybór
@@ -499,8 +510,8 @@ Kalkulacja bez deala, podpięcie deala i projektu, rozpoznawanie inwestycji, wyb
 - **Oczekywane wyniki**:
   - System pokazuje komunikat: "Istnieje już oferta główna. Zmienić na nową?"
   - Użytkownik potwierdza
-  - Audit trail: kto, kiedy, stara→nowa
-  - Deal A → alternatywna, Deal B → główna
+  - Audit trail (`audit_logs`): kto, kiedy, stara→nowa
+  - Deal A → alternatywna, Deal B → główna — w jednej transakcji; w bazie nigdy dwie oferty `primary` na inwestycję (unikalność częściowa `WHERE offer_role='primary'`)
 
 #### TC-DEAL-005: Komunikat — wielokrotne oferty dla tej samej inwestycji
 
@@ -510,8 +521,9 @@ Kalkulacja bez deala, podpięcie deala i projektu, rozpoznawanie inwestycji, wyb
   2. Zaloguj się jako użytkownik i przejdź do Deal 3 nowego generalnego
   3. Spróbuj podpiąć do tej samej inwestycji
 - **Oczekiwane wyniki**:
-  - Komunikat: "Ta inwestycja ma już ofertę dla innego wykonawcy. Którą ustawić jako główną?"
-  3-button choice: Nowa (Deal 3) | Stara (Deal A/B) | Anuluj
+  - Komunikat dokładnie: „Istnieje już oferta dla innego wykonawcy — wskaż, która jest główna”
+  - Wybór: Nowa (Deal 3) jako główna | Istniejąca (Deal A/B) zostaje główna | Anuluj
+  - Po wyborze: dokładnie jedna oferta `primary` na inwestycję, pozostałe `alternative`; suma lejka liczy tylko oferty główne
 
 #### TC-DEAL-006: Inwestycja — dopasowanie po e-Zamówienia BZP
 
@@ -718,19 +730,22 @@ Reguły warstwowe, historyczność, proweniencja ceny.
 
 Role, widoczność kosztów/marży/cen, multi-tenant izolacja, uprawnienia do edycji.
 
+Role Handlowiec/Manager/Obsługa są rolami testowymi z nadanymi feature'ami z `acl.ts` (patrz §2). „Admin ustawia widoczność” = nadanie/odebranie feature'a roli, nie osobne ustawienie modułu. Zasada szczelności: rola bez feature'a marży nie widzi też kosztu (inaczej marżę da się policzyć z ceny i kosztu).
+
 #### TC-PERM-001: Widoczność kosztów — konfiguracja per firma + rola
 
 - **Priorytet**: P0 | **Poziom**: Integration + API
 - **Warunki wstępne**: Firma A, role: Handlowiec, Manager, Obsługa
 - **Kroki**:
-  1. Admin ustawi: Handlowiec = widzi koszty
-  2. Obsługa = nie widzi
+  1. Admin nadaje roli Handlowiec feature'y widoczności kosztu i marży (`acl.ts`)
+  2. Rola Obsługa bez tych feature'ów
   3. Zaloguj się jako Handlowiec i Obsługa
   4. Otwórz tę samą kalkulację
 - **Oczekiwane wyniki**:
   - Handlowiec: kolumna "Koszt" widoczna
   - Obsługa: kolumna "Koszt" ukryta (puste lub "-")
   - API: oba żądania mają odpowiednie filtry (koszt vrócony/schowany)
+  - Rola z feature'em kosztu, ale bez feature'a marży: konfiguracja odrzucona albo koszt też ukryty (ukryta marża = ukryty koszt)
 
 #### TC-PERM-002: Widoczność marży — domyślnie ukryta
 
@@ -738,18 +753,19 @@ Role, widoczność kosztów/marży/cen, multi-tenant izolacja, uprawnienia do ed
 - **Kroki**:
   1. Kalkulator otwarty
   2. Kolumna "Marża" — czy widoczna?
-  3. Admin włączy widoczność dla Managers
+  3. Admin nadaje roli Manager feature widoczności marży (`acl.ts`)
   4. Zaloguj się jako Manager
 - **Oczekiwane wyniki**:
   - Domyślnie: kolumna "Marża" ukryta dla wszystkich poza Adminem
   - Po włączeniu: Manager widzi
-  - Handlowiec (bez konfigu) = ukryta
+  - Handlowiec (bez feature'a) = ukryta
+  - Dla roli bez feature'a marża i koszt nie wyciekają przez: wyszukiwarkę (`query_index`/search), snapshoty komend w `action_logs`/`audit_logs`, payloady eventów (tylko ID), endpointy porównania wersji (`/compare`), eksport XLSX
 
 #### TC-PERM-003: Widoczność cen sprzedaży — edycja narzutu
 
 - **Priorytet**: P1 | **Poziom**: Integration + UI
 - **Kroki**:
-  1. Admin: "Handlowiec może edytować narzut"
+  1. Admin nadaje roli Handlowiec feature edycji narzutu (`acl.ts`)
   2. Handlowiec otwiera pozycję
   3. Czy może zmienić narzut z 20% na 30%?
 - **Oczekiwane wyniki**:
@@ -787,12 +803,12 @@ Role, widoczność kosztów/marży/cen, multi-tenant izolacja, uprawnienia do ed
 
 - **Priorytet**: P1 | **Poziom**: Integration + UI
 - **Kroki**:
-  1. Deal wygrana, status = "Zaakceptowana"
+  1. Deal wygrany (status OM: `closure_outcome = won`), wersja oferty zaakceptowana
   2. Admin firmy: zmień ustawienie "Widoczność marży po zamknięciu deala" na ON/OFF
   3. Zaloguj się jako Manager, Handlowiec, Obsługa
   4. Otwórz closed deal
 - **Oczekiwane wyniki**:
-  - Ustawienie PER FIRMA (nie per rola): gdy OFF — żadna rola nie widzi marży po zamknięciu
+  - Ustawienie PER FIRMA (nie per rola, ustawienie modułu przez `ModuleConfigService`): gdy OFF — żadna rola nie widzi marży po zamknięciu
   - Gdy ON — wszystkie role z uprawnieniem do marży widzą ją też po zamknięciu
   - Zmiana ustawienia firmy natychmiastowo skuteczna (bez re-logowania)
   - Dotyczy tylko wersji zaakceptowanej, nie roboczych
@@ -1106,12 +1122,14 @@ Kalkulacja jednowalutowa, kursy wymiany, zaokrąglenie per waluta, zmiana waluty
 
 Kalkulacja, partie, prognoza działają; brak Ganttu; włączanie/wyłączanie modułu.
 
+Moduł harmonogramu jest włączony w buildzie (`modules.ts`); „ON/OFF per firma” to przełącznik w runtime (ustawienie modułu przez `ModuleConfigService` / feature toggle — mechanizm wg speki), który blokuje menu, widgety/zakładki i API. Testy zależne od włączonego Gantta mają `requiredModules` w `__integration__/meta.ts`.
+
 #### TC-NOSCHED-001: Kalkulacja + partie/daty bez modułu harmonogramu
 
 - **Priorytet**: P1 | **Poziom**: Integration
 - **Warunki wstępne**: Firma B z wyłączonym modułem harmonogramu
 - **Kroki**:
-  1. Firma B: w ustawieniach "Moduł harmonogramu" = OFF
+  1. Firma B: przełącznik modułu harmonogramu = OFF (`ModuleConfigService`)
   2. Otwórz kalkulator w Firmie B
   3. Dodaj pozycje z datą produkcji i datą dostawy bezpośrednio w liniach kalkulacji
   4. Dodaj partie: element "Słup SB-01", ilość 10 szt., data produkcji 2026-11-15, data dostawy 2026-11-30
@@ -1132,8 +1150,8 @@ Kalkulacja, partie, prognoza działają; brak Ganttu; włączanie/wyłączanie m
   2. GET `/api/v1/schedule/tasks?deal_id=X`
   3. Sprawdź UI: menu boczne, zakładki na dealu, zakładki na kalkulacji
 - **Oczekiwane wyniki**:
-  - API: 404 lub 403 z komunikatem "Moduł harmonogramu niedostępny dla tej organizacji"
-  - UI: brak zakładki "Harmonogram" w menu i na stronach deal/projekt
+  - API: 404 lub 403 z komunikatem "Moduł harmonogramu niedostępny dla tej organizacji" — blokada w guardzie trasy, nie tylko w UI
+  - UI: brak pozycji "Harmonogram" w menu bocznym i brak zakładki na stronach deal/projekt (spot `detail:customers.deal:tabs`)
   - Widget Gantta nie ładowany (brak importu JS)
   - Użytkownik Firmy A (z harmonogramem) wywołując te same endpointy dla SWOJEGO deala → 200 OK
 
@@ -1155,13 +1173,13 @@ Kalkulacja, partie, prognoza działają; brak Ganttu; włączanie/wyłączanie m
 - **Priorytet**: P2 | **Poziom**: Integration + E2E
 - **Warunki wstępne**: Firma B (moduł OFF) z 10 kalkulacjami z datami/partiami
 - **Kroki**:
-  1. Admin Firmy B: ustawienia → "Moduł harmonogramu" = ON
+  1. Admin Firmy B: przełącznik modułu harmonogramu = ON (`ModuleConfigService`)
   2. Odśwież aplikację
   3. Sprawdź: czy istniejące daty/partie są widoczne w nowym Ganttcie?
-  4. Odwróć: "Moduł harmonogramu" = OFF ponownie
+  4. Odwróć: przełącznik = OFF ponownie
 - **Oczekiwane wyniki**:
   - Włączenie: zakładka Gantt pojawia się; istniejące partie mogą być opcjonalnie zmigrowne do zadań Ganttu (lub pozostają jako daty w kalkulacji)
-  - Wyłączenie: Gantt znika z UI; dane harmonogramu zachowane w DB (nie kasowane); partie/daty w kalkulacji nadal widoczne
+  - Wyłączenie: Gantt znika z menu i zakładek, API harmonogramu zwraca 403/404; dane harmonogramu zachowane w DB (nie kasowane); partie/daty w kalkulacji nadal widoczne
   - Brak utraty danych przy obu operacjach
 
 ---
@@ -1264,7 +1282,7 @@ Automatyczne tworzenie, idempotentność, ponowne otwarcie, deal bez harmonogram
 - **Priorytet**: P0 | **Poziom**: Integration
 - **Warunki wstępne**: Deal X ze statusem "Propozycja"; harmonogram ofertowy z 5 zadaniami
 - **Kroki**:
-  1. Zmień status Deal X → "Wygrana" (lub zdarzenie `deal.won`)
+  1. Zamknij Deal X jako wygrany (`closure_outcome = won`, zdarzenie `customers.deal.won`)
   2. Sprawdź harmonogram
 - **Oczekiwane wyniki**:
   - Harmonogram wykonawczy tworzony AUTOMATYCZNIE (bez klikania użytkownika)
@@ -1279,7 +1297,7 @@ Automatyczne tworzenie, idempotentność, ponowne otwarcie, deal bez harmonogram
 - **Priorytet**: P0 | **Poziom**: Integration
 - **Warunki wstępne**: Deal X, harmonogram wykonawczy już istnieje (po pierwszym wygraniu)
 - **Kroki**:
-  1. Wyemituj zdarzenie `deal.won` ponownie (np. system retry, błąd integracji, podwójny klik)
+  1. Wyemituj zdarzenie `customers.deal.won` ponownie (np. system retry, błąd integracji, podwójny klik)
   2. Sprawdź liczbę harmonogramów wykonawczych dla Deal X
 - **Oczekiwane wyniki**:
   - Tylko jeden harmonogram wykonawczy (constraint unikowy na deal_id + typ)
@@ -1569,7 +1587,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 - **Oczekiwane wyniki**:
   - Jedno żądanie wygrywa (serialized): inwestycja ma jedną ofertę główną
   - Drugie żądanie: 409 Conflict lub wymusza potwierdzenie ("Oferta główna właśnie zmieniona na B. Nadpisać na C?")
-  - Brak stanu inconsistentnego: nigdy dwie oferty główne jednocześnie
+  - Brak stanu inconsistentnego: nigdy dwie oferty główne jednocześnie (gwarancja w bazie: unikalność częściowa `WHERE offer_role='primary'`, asercja przez `pg`)
   - Audit trail: dwa wpisy (zmiana A→B, i opcjonalne B→C)
 
 #### TC-CONC-005: Równoległy import XLSX — dwa importy tej samej kalkulacji
@@ -1593,7 +1611,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 | Typ | Opis | Ilość |
 |-----|------|-------|
 | **Organizacje** | 3 firmy (A, B, C), różne konfiguracje ról, uprawnień, walut, modułów | 3 |
-| **Użytkownicy** | Admin (Firma A), Handlowiec (A), Manager (A/B), Obsługa (B), Klient (portal) | 8 |
+| **Użytkownicy** | Admin (Firma A), Handlowiec (A), Manager (A/B), Obsługa (B), Klient (portal) — role biznesowe tworzone per test (`createRoleFixture`/`createUserFixture`) z feature'ami z `acl.ts` | 8 |
 | **Deale** | 5 dealów w różnych statusach (Nowy, Propozycja, Wygrana, Przegrana, Zamknięta) | 5 |
 | **Projekty/Inwestycje** | 3 inwestycje (Hala A, Kompleks, Łącznica) z różnymi ID (e-Zamówienia, TED, BIP) | 3 |
 | **Kalkulacje** | 12 kalkulacji (różne statusy, wersje, ceny, marże, jednostki, waluty) | 12 |
@@ -1603,7 +1621,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 | **Koszty rzeczywiste** | 20 wpisów kosztów (verschiedne kategorie, daty, kwoty) | 20 |
 | **Kursy walut** | Kursy historyczne EUR/PLN, USD/PLN, JPY/PLN dla testów zamrożenia kursu | 10 rekordów |
 | **Partie produkcji** | 30 partii dla testu prognozy (różne jednostki, daty, prawdopodobieństwa) | 30 |
-| **Zdarzenia deal.won** | Duplikaty i sekwencje dla testu idempotentności | 5 zdarzeń |
+| **Zdarzenia customers.deal.won** | Duplikaty i sekwencje dla testu idempotentności | 5 zdarzeń |
 
 ---
 
@@ -1663,7 +1681,9 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 | **Poprawność walutowa** | Kurs zamrożony w wersji, zaokrąglenia per waluta ISO 4217 (TC-CUR-001 do TC-CUR-005) | TBD |
 | **Edycja równoległa** | Optimistic locking 409 + brak utraty danych (TC-CONC-001 do TC-CONC-005) | TBD |
 | **Integracja z dealami/projektami** | Cena → szansa (TC-DEAL-002), oferta główna (TC-DEAL-004) | TBD |
-| **Obsługa XLSX/CSV** | Kodowania, separatory, walidacja (TC-IMP-*), bezpieczeństwo (TC-SEC-*) | TBD |
+| **Obsługa XLSX/CSV (MVP)** | Import XLSX w MVP: kodowania, separatory, „1 234,56”, scalone komórki, formuły bez wartości, wiele arkuszy, `ProgressJob` (TC-IMP-001..007), bezpieczeństwo (TC-SEC-*) | TBD |
+| **Komunikat duplikatu oferty** | Dokładnie „Istnieje już oferta dla innego wykonawcy — wskaż, która jest główna” przy zapisie oferty do innego wykonawcy na tę samą inwestycję (TC-DEAL-003, TC-DEAL-005) | TBD |
+| **Pokrycie tras API** | Każda trasa API ma test Playwright w `__integration__` w tej samej zmianie | TBD |
 | **Zamrożenie oferty po wysłaniu** | Brak edycji, snapshot PDF, kurs zamrożony (TC-VER-*, TC-CUR-002) | TBD |
 | **Harmonogram wykonawczy** | Automatyczny, idempotentny, baseline (TC-EXEC-001 do TC-EXEC-005) | TBD |
 | **Firma bez modułu harmonogramu** | Kalkulacja/prognoza działają, brak endpointów Ganttu (TC-NOSCHED-*) | TBD |
@@ -1699,7 +1719,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
    - ~~**Rekomendacja**: Per-role (Manager=widzi, Handlowiec=nie)~~ **ODRZUCONE**: decyzja właściciela systemu jest per firma, nie per rola.
 
 7. **Trigger harmonogramu ofertowego → wykonawczego** (TC-GANTT-008) — ✅ **ROZSTRZYGNIĘTE**
-   - **Decyzja**: Tworzony AUTOMATYCZNIE, idempotentnie, gdy deal zostanie wygrany (zdarzenie `deal.won`). Brak ręcznego wyzwalania.
+   - **Decyzja**: Tworzony AUTOMATYCZNIE, idempotentnie, gdy deal zostanie wygrany (zdarzenie `customers.deal.won`, subscriber `persistent: true`). Brak ręcznego wyzwalania.
    - ~~**Rekomendacja**: Na żądanie (użytkownik kliknie "Zaakceptuj i utwórz harmonogram wykonawczy")~~ **ODRZUCONE**: automatyzm zapewnia, że żaden deal nie zostanie przeoczony.
 
 8. **Lista pól do audytu** (brak TC)
@@ -1761,7 +1781,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 ## 23. Podsumowanie
 
 **Dokument**: Niezależny plan testów — spec only
-**Liczba scenariuszy**: 109 (rev 3 bez zmian liczby; rev 2: 109; rev 1 miał 72)
+**Liczba scenariuszy**: 109 (rev 3 i rev 4 bez zmian liczby; rev 2: 109; rev 1 miał 72)
 **Liczba wniosków do speki**: 20 (15 oryginalnych + 5 nowych w rev 2)
 **Status**: SPEC ONLY — bez kodu, bez testów wykonywalnych
 
@@ -1773,6 +1793,16 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 ---
 
 ## Changelog
+
+### Rev 4 — 2026-10-20
+
+**Decyzje koordynacyjne** (`.ai/vision.md`, `.ai/decisions.md`, część testowa `.ai/om-architecture-checklist.md`):
+- TC-DEAL-005: dokładny komunikat „Istnieje już oferta dla innego wykonawcy — wskaż, która jest główna”; ten sam komunikat oczekiwany w TC-DEAL-003 (ta sama sytuacja: zapis oferty do innego wykonawcy na tę samą inwestycję). TC-DEAL-004 i TC-CONC-004 (ręczna / równoległa zmiana oferty głównej) to inna sytuacja — komunikaty bez zmian
+- Import XLSX w MVP (D9, D29): TC-IMP-001..007 oznaczone `Etap: MVP`; TC-IMP-006 i TC-IMP-007 P2 → P1; TC-IMP-008 (eksport) — etap do potwierdzenia w specy; dodano `ProgressJob`, „1 234,56”, formuły bez zapisanej wartości, wiele arkuszy
+- Uprawnienia przez feature'y w `acl.ts`, role biznesowe jako role testowe (TC-PERM-001..003, fixtures); szczelność marży (ukryta marża = ukryty koszt) i brak wycieku przez search/`action_logs`/eventy/`/compare`/eksport (TC-PERM-001, TC-PERM-002)
+- Przełącznik harmonogramu per firma przez `ModuleConfigService` z blokadą menu, zakładek/widgetów i API (TC-NOSCHED-001, -002, -004); ustawienie marży po zamknięciu przez `ModuleConfigService` (TC-PERM-006)
+- Statusy deala wg OM: `closure_outcome = won`, zdarzenie `customers.deal.won` (TC-PERM-006, TC-EXEC-001, TC-EXEC-002, fixtures, §22 pkt 7)
+- Unikalność oferty głównej w bazie (TC-DEAL-004, TC-CONC-004); audit = `audit_logs`; §2 i §21: test każdej trasy API w tej samej zmianie, asercje komunikatów na locale `pl` z tłumaczeniem `en`
 
 ### Rev 3 — 2026-10-20
 
@@ -1812,5 +1842,5 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 ---
 
 **Koniec dokumentu**
-*Data wygenerowania: 2026-10-19 | Rev 2: 2026-10-19 | Rev 3: 2026-10-20*
+*Data wygenerowania: 2026-10-19 | Rev 2: 2026-10-19 | Rev 3: 2026-10-20 | Rev 4: 2026-10-20*
 
