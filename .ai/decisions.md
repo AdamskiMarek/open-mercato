@@ -113,3 +113,4 @@ Data „≤2026-10-20” oznacza decyzję obowiązującą na 2026-10-20, bez pot
 | P8 | 2026-10-20 | Cezar używa Copilota (limit odnawia się 1. dnia miesiąca); gdy limit się skończy, runnerem jest Kod. | Marek | active |
 | P9 | ≤2026-10-20 | Kod robi niezależny przegląd architektury (lista kontrolna: `om-architecture-checklist.md`). | Marek | active |
 | P10 | 2026-10-20 | Pliki wizji i decyzji są aktualizowane, gdy zmienia się kierunek. | Marek | active |
+| P11 | 2026-10-20 | Nie wyceniamy w dniach: speki zawierają tylko podział zakresu MVP / v1 / v2, bez sekcji i tabel estymat dniowych; raporty i prompty też bez dni. | Marek (przez Koordynatora) | active |
