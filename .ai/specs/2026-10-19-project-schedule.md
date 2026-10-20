@@ -6,17 +6,28 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-19 |
-| **Rewizja** | 2026-10-19 (v7 — Marek decisions, optional module, auto-scheduling server-side, ScheduleSource contract) |
+| **Rewizja** | 2026-10-20 (rev 8a — P0 architecture, MVP cut, OM sections, honest estimate; poprzednio v7 2026-10-19) |
 | **Moduł** | `project_schedule` (`apps/mercato/src/modules/project_schedule`) |
-| **Zależności upstream** | `customers`, `dictionaries`, `dashboards`, `attachments`, `notifications` |
+| **Zależności upstream** | **`project_costing` (moduł bazowy)**, `customers`, `dictionaries`, `dashboards`, `attachments`, `notifications`, `configs`, `feature_toggles`, `audit_logs`, `query_index`, `progress` |
 | **Powiązany spec** | `.ai/specs/2026-10-19-project-costing-offer-calculator.md` |
-| **Kierunek zależności** | `project_costing` → konsumuje `project_schedule`; odwrotna zależność zabroniona |
+| **Kierunek zależności** | rev 8a: `project_schedule` (opcjonalny) **zależy od** `project_costing` (baza) i rejestruje provider `ScheduleSource` w DI; `project_costing` nigdy nie importuje `project_schedule` (Kod P0-1) |
+
+---
+
+## TLDR
+
+- **Co:** opcjonalny moduł aplikacji `project_schedule`: harmonogram produkcji z Ganttem (WBS, milestone'y, zależności FS/SS/FF/SF + lag, auto-przesuwanie z przypinaniem, baseline), partie produkcji i prognoza 6 mies. Jeden Gantt na inwestycję (D23).
+- **Faza (rev 8a):** cały moduł poza MVP — **v1** (34 d), integracje zewnętrzne i CPM w **v2** (16 d). MVP kalkulatora działa bez niego (partie w kalkulacji, `ScheduleSource` embedded).
+- **Architektura:** `project_schedule` **zależy od** `project_costing` (moduł bazowy) i rejestruje `InternalScheduleSource` w `scheduleSourceRegistry` (DI). Costing nigdy nie importuje schedule. Zero HTTP między modułami: typy elementów przez `elementTypeService`, kalkulacje przez `calculationLookupService`, sumy w costingu przez komendę `refresh_schedule_totals`.
+- **Włączanie per organizacja:** `schedule.enabled` w ModuleConfigService (`module_configs`) + feature'y ACL + blokady w menu, zakładce deala i API; `feature_toggles` wyłącznie jako globalny kill-switch per tenant (§1.0).
+- **Gantt:** SVAR React Gantt MIT core + własny auto-scheduling, CPM, baseline, undo i linia „dziś”; **bez SVAR PRO** (D21).
+- **Wycena:** 50 d (MVP 0 / v1 34 / v2 16); oba moduły 151 d (§13).
 
 ---
 
 ## Streszczenie
 
-Moduł `project_schedule` dostarcza interaktywny harmonogram produkcji z widokiem Gantt (WBS + drag & drop od MVP). Rev 5 dodaje:
+Moduł `project_schedule` dostarcza interaktywny harmonogram produkcji z widokiem Gantt (WBS + drag & drop; rev 8a: cały moduł w v1). Rev 5 dodaje:
 - **Dwa typy harmonogramów**: `offer` (szacunki na etapie ofertowania) i `execution` (harmonogram realizacji).
 - **WBS z hierarchią** (`parent_task_id`) i **milestones** (zero-duration).
 - **Zależności zadań**: FS / SS / FF / SF + lag (dni, może być ujemny); walidacja cykli.
@@ -24,27 +35,76 @@ Moduł `project_schedule` dostarcza interaktywny harmonogram produkcji z widokie
 - **ProductionBatch** powiązany z zadaniem WBS i opcjonalnie z linią kalkulacji (`calculation_line_id` = opaque UUID).
 - **Prognoza 6 miesięcy** (tygodnie i miesiące) z opcjonalnym ważeniem prawdopodobieństwem deala.
 
-> **Moduł opcjonalny**: `project_schedule` jest opcjonalny per firma (feature toggle). `project_costing` działa poprawnie bez tego modułu dzięki abstrakcji `ScheduleSource` (patrz `project_costing` §7a). Gdy moduł jest wyłączony, costing korzysta z `calculation_embedded` lub `xlsx_import` source.
+> **Moduł opcjonalny**: `project_schedule` jest opcjonalny per firma (organizację) — §1.0. `project_costing` działa poprawnie bez tego modułu dzięki abstrakcji `ScheduleSource` (patrz `project_costing` §7a). Gdy moduł jest wyłączony, costing korzysta z `calculation_embedded` lub `xlsx_import` source.
 
-Właściciel `ps_schedule_tasks` (zadania WBS) i `ps_production_batches` (partie produkcji). **Typy elementów** (`pc_element_types`) są własnością `project_costing` i referencjonowane przez `element_type_code` (string, nie FK). `project_costing` czyta dane przez API i events.
+Właściciel `ps_schedule_tasks` (zadania WBS) i `ps_production_batches` (partie produkcji). **Typy elementów** (`pc_element_types`) są własnością `project_costing` i referencjonowane przez `element_type_code` (string, nie FK). Rev 8a: `project_costing` dostaje dane wyłącznie przez `ScheduleSource` zarejestrowany przez ten moduł w DI (zero HTTP).
+
+---
+
+## 0. Architecture (rev 8a)
+
+```
+project_costing (BAZA)                               project_schedule (OPCJONALNY KONSUMENT)
+  ScheduleSource, scheduleSourceRegistry   <─register── di.ts: InternalScheduleSource
+  elementTypeService                       <─resolve─── typy elementów (element_type_code)
+  calculationLookupService                 <─resolve─── cross-deal Gantt per inwestycja
+  projectCostingSettings                   <─resolve─── schedule.enabled per organizacja
+  komenda refresh_schedule_totals          <─execute─── subscriber na własne eventy schedule (kolejka, debounce)
+  eventy project_costing.calculation.*     ──event────> subscribers/calculationActivated.ts, calculationDeleted.ts
+customers: eventy customers.deal.won ──────────────────> subscribers/dealWon.ts (offer → execution)
+```
+
+- Kierunek: `project_schedule` → `project_costing` (import typów/tokenów DI, subskrypcja eventów). Odwrotnie nic: costing nie zna eventów, tras ani tabel schedule (`packages/core/AGENTS.md` § Cross-Module Coupling).
+- Zero HTTP między modułami. Wszystkie wcześniejsze wywołania HTTP (`GET /api/project-costing/element-types`, `GET /api/project-schedule/schedules/:id/summary` wołane przez costing) zastąpione serwisami DI.
+- Brak relacji ORM i constraintów DB do tabel `pc_*`; `calculation_id`, `calculation_line_id` to FK-id; sprzątanie przez subscriber `project_costing.calculation.deleted`.
+- Zapisy przez komendy (`audit_logs`, undo), CRUD przez `makeCrudRoute` + indexer, `openApi` na trasach. Eventy z payloadem = ID.
+- Gdy moduł nie jest w buildzie albo jest wyłączony: costing działa (fallback `EmbeddedScheduleSource`); `packages/core/src/__tests__/module-decoupling.test.ts` jako wzór testu.
+
+
 
 ---
 
 ## 1. Cel i zakres
 
-### 1.1 Faza MVP — Interaktywny harmonogram z WBS i Gantt
+### 1.0 Włączanie modułu per organizacja (rev 8a, decyzja Koordynatora (d))
 
-> Moduł aktywowany per firma przez feature toggle. Gdy nieaktywny, `project_costing` używa `ScheduleSource = calculation_embedded`.
+„Firma” = organizacja OM (D15). Zweryfikowano w kodzie core (gałąź spec, 2026-10-20):
+- **Build:** moduły włącza lista w `apps/mercato/src/modules.ts`; nie ma rejestru modułów włączanego w runtime.
+- **`feature_toggles` działa per tenant:** `packages/core/src/modules/feature_toggles/lib/feature-flag-check.ts` rozwiązuje toggle po `(identifier, tenantId)` (klucz cache `feature_toggles:resolution:{identifier}:{tenantId}`, override `FeatureToggleOverride` szukany po `tenantId`) — brak wymiaru organizacji.
+- **`ModuleConfigService` nie ma natywnego scope organizacji:** `packages/core/src/modules/configs/lib/module-config-service.ts` — `getRecord` szuka po `(moduleId, name, tenantId)` i fallbacku globalnym; `organizationId` zapisywany jest tylko jako metadana. Wartość per organizacja = osobna nazwa klucza z `organizationId` (costing §2.2).
+
+Mechanizm (potwierdzony przez Koordynatora 2026-10-20): **włącznik per organizacja = ModuleConfigService (`module_configs`)**, razem z feature'ami ACL i blokadami w menu i API; **`feature_toggles` = wyłącznie globalny kill-switch per tenant**. Wszystkie warunki muszą być spełnione:
+
+| Warstwa | Mechanizm | Zakres | Rola |
+|---|---|---|---|
+| 1. Build | `project_schedule` w `apps/mercato/src/modules.ts` | instancja | moduł istnieje w aplikacji |
+| 2. Tenant | feature toggle `project_schedule` (moduł `feature_toggles`), domyślnie włączony | tenant | **tylko globalny kill-switch** — operator może awaryjnie wyłączyć moduł w całym tenancie; nie służy do włączania per firma |
+| 3. Organizacja | ustawienie `schedule.enabled` w ModuleConfigService (`module_configs`; `project_costing`, klucz `org:{organizationId}:settings`, czytany przez `projectCostingSettings`) | organizacja | **włącznik per firma** — admin organizacji (`project_costing.admin`) |
+| 4. Użytkownik | feature'y ACL `project_schedule.view/edit/import/export/admin` (§9) | rola | kto w organizacji widzi i edytuje harmonogram |
+
+`isScheduleEnabled(ctx) = !killSwitchOff(tenantId) && settings(organizationId).schedule.enabled`; dostęp użytkownika dodatkowo wymaga feature'a ACL. Blokady, gdy `false`:
+- **menu:** pozycje backendu `project-schedule` ukryte (guard w definicji strony/menu);
+- **zakładka deala:** widget `DealScheduleTab` na `detail:customers.deal:tabs` nie renderuje się (warunek w widgecie, dane z endpointu statusu);
+- **API:** route guard we wszystkich trasach `/api/project-schedule/*` → `404 { code: 'MODULE_DISABLED' }` (jeden wspólny wrapper; test integracyjny per grupa tras);
+- **DI/costing:** `InternalScheduleSource.isAvailable()` = `false` → costing przechodzi na `EmbeddedScheduleSource`;
+- **subscribery** schedule (np. `dealWon`) są no-op dla organizacji z wyłączonym modułem.
+
+Wyłączenie nie usuwa danych (Q4 w costing §16). Ustawienie trzyma costing, bo moduł bazowy jest zawsze obecny, a schedule tylko je czyta przez DI — kierunek zależności się nie odwraca.
+
+
+### 1.1 Zakres harmonogramu z WBS i Gantt (rev 8a: przeniesiony z MVP do **v1**)
+
+> Rev 8a (Kod p15): moduł nie wchodzi do MVP; MVP kalkulatora liczy prognozę z partii w kalkulacji (`calculation_embedded`). Gdy moduł nieaktywny w organizacji, `project_costing` używa `ScheduleSource = calculation_embedded`.
 
 - `ps_schedules` z typem `offer` / `execution` + `auto_scheduling_enabled`.
 - `ps_schedule_tasks`: hierarchia WBS, milestones, pola baseline, `is_pinned` (manual override).
 - `ps_task_dependencies`: FS/SS/FF/SF + lag; walidacja cykli.
 - `ps_production_batches`: partia produkcji powiązana z zadaniem; `element_type_code` (string, ref do `pc_element_types`).
-- Gantt z WBS tree, milestones, dependency arrows — od MVP.
+- Gantt z WBS tree, milestones, dependency arrows (v1).
 - Zakładka „Harmonogram" na karcie Deala.
 - Prognoza 6 miesięcy (LRM rounding).
 
-### 1.2 Faza v1 — Import/eksport, baseline i auto-scheduling
+### 1.2 Faza v1 (cd.) — Import/eksport, baseline i auto-scheduling
 
 - Import/eksport XLSX/CSV harmonogramu.
 - `ps_import_column_mappings`.
@@ -52,7 +112,7 @@ Właściciel `ps_schedule_tasks` (zadania WBS) i `ps_production_batches` (partie
 - **Auto-scheduling server-side** (FS/SS/FF/SF + lag propagacja; `is_pinned` manual override; `auto_scheduling_enabled` per harmonogram).
 - Trigger `offer → execution` gdy deal WON (subscriber `customers.deal.won`; idempotent).
 - **Cross-deal Gantt** per inwestycja/projekt.
-- Zdarzenia dla `project_costing` (batch.updated, schedule.activated).
+- Odświeżanie sum w `project_costing` przez komendę `refresh_schedule_totals` (DI) z subscribera tego modułu.
 
 ### 1.3 Faza v2 — Integracje zewnętrzne i krytyczna ścieżka
 
@@ -60,16 +120,18 @@ Właściciel `ps_schedule_tasks` (zadania WBS) i `ps_production_batches` (partie
 - Import MS Project XML (v2+ — potwierdzone przez Marka).
 - **Algorytm CPM** (Critical Path Method — ES/EF/LS/LF/float) server-side; renderowanie `is_critical_path` przez custom CSS overlay na pasku.
 
-### 1.4 Granica z `project_costing`
+### 1.4 Granica z `project_costing` (rev 8a)
 
 | Pytanie | Odpowiedź |
 |---------|-----------|
-| Kto posiada typy elementów? | `project_costing` (`pc_element_types`); `project_schedule` referencjonuje przez `element_type_code` (string) — brak FK-id do costing |
+| Kierunek zależności? | `project_schedule` → zależy od `project_costing` (baza). Costing nie importuje, nie resolve'uje i nie wymaga schedule. |
+| Kto posiada typy elementów? | `project_costing` (`pc_element_types`); `project_schedule` czyta je przez serwis DI `elementTypeService` i referencjonuje przez `element_type_code` (string) — brak FK do costing |
 | Kto posiada `ps_schedule_tasks`, `ps_production_batches`? | `project_schedule` |
-| Jak `project_costing` czyta dane? | HTTP API + events |
-| Czy `project_schedule` importuje z `project_costing`? | NIE — tylko opaque string `element_type_code`; `calculation_id`, `deal_id`, `calculation_line_id` = opaque UUID FK-id |
-| Czy `project_schedule` jest wymagany do działania kosztorysowania? | NIE — moduł opcjonalny; costing używa `ScheduleSource` abstraction (patrz costing §7a) |
-| Skąd `project_schedule` bierze prawdopodobieństwo do prognozy? | Parametr query `?probability=` albo `deal.probability` pobrany przez consumer (project_costing lub dashboard) |
+| Jak `project_costing` dostaje dane harmonogramu? | Przez `ScheduleSource`: `project_schedule` rejestruje `InternalScheduleSource` w `scheduleSourceRegistry` (DI). Zero HTTP. |
+| Jak sumy w `pc_calculations` są odświeżane? | Subscriber schedule na własne eventy → komenda costingu `refresh_schedule_totals` (DI, kolejka z debounce) |
+| Czy `project_schedule` jest wymagany przez costing? | NIE — fallback `EmbeddedScheduleSource` (costing §7a) |
+| Skąd prawdopodobieństwo do prognozy? | Parametr `?probability=` albo `deal_snapshot` kalkulacji (przez `calculationLookupService`) |
+
 
 ---
 
@@ -79,9 +141,11 @@ Właściciel `ps_schedule_tasks` (zadania WBS) i `ps_production_batches` (partie
 
 `organization_id` + `tenant_id`, UUID PK, FK-id bez ORM relation, `updated_at`.
 
+**Rev 8a:** każda encja domenowa `ps_*` ma `deleted_at timestamptz NULL` (soft delete, `packages/core/AGENTS.md` § Database Entities); zapytania i indeksy unikalne filtrują `deleted_at IS NULL`. FK-id do tabel `pc_*` bez constraintu DB.
+
 ### 2.2 Tabele
 
-> **Uwaga**: tabela `ps_element_types` została przeniesiona do `project_costing` jako `pc_element_types` (rev 7). `project_schedule` referencjonuje typy elementów przez `element_type_code` (opaque string) pobrany z `GET /api/project-costing/element-types`.
+> **Uwaga**: tabela `ps_element_types` została przeniesiona do `project_costing` jako `pc_element_types` (rev 7). `project_schedule` referencjonuje typy elementów przez `element_type_code` (opaque string) pobrany z serwisu DI `elementTypeService` (rev 8a; zamiast `GET /api/project-costing/element-types`).
 
 #### `ps_schedules` — głowa harmonogramu
 
@@ -91,7 +155,7 @@ Właściciel `ps_schedule_tasks` (zadania WBS) i `ps_production_batches` (partie
 | `organization_id` | `uuid` NOT NULL | |
 | `tenant_id` | `uuid` NOT NULL | |
 | `deal_id` | `uuid` NULL | FK-id → customer_deals; NULL = harmonogram bez deala (kalkulacja standalone) |
-| `calculation_id` | `uuid` NULL | FK-id → pc_calculations (opaque; ON DELETE SET NULL) |
+| `calculation_id` | `uuid` NULL | FK-id → pc_calculations (bez constraintu DB; rev 8a: przy `project_costing.calculation.deleted` subscriber tego modułu ustawia NULL) |
 | `schedule_type` | `text` NOT NULL DEFAULT `'offer'` | `offer` \| `execution` |
 | `offer_schedule_id` | `uuid` NULL | FK → ps_schedules.id — referencja do harmonogramu ofertowego dla `execution` |
 | `label` | `text` NOT NULL | |
@@ -248,7 +312,7 @@ Kolumny: id, organization_id, tenant_id, provider_id, label, inbound_webhook_sec
 
 | Biblioteka | Licencja | React-native | WBS tree | Milestones | Dep links | FS/SS/FF/SF auto | CPM | Baseline UI | Bundle (~) | Uwagi |
 |------------|----------|--------------|----------|------------|-----------|-----------------|-----|-------------|-----------|-------|
-| **@svar-ui/react-gantt MIT core** | **MIT ✅** | **✅ TS, React 19/Next.js** | **✅** | [niezwer.] | **✅** | ❌ PRO | ❌ PRO | ❌ PRO | ~100–200 KB [niezwer.] | Zweryfikowano z tarball; 17 @svar-ui/* + date-fns |
+| **@svar-ui/react-gantt MIT core** | **MIT ✅** | **✅ TS, React 19/Next.js** | **✅** | **✅** (rev 8a, review Kod p20) | **✅** | ❌ PRO | ❌ PRO | ❌ PRO | ~100–200 KB [niezwer.] | Zweryfikowano z tarball; 17 @svar-ui/* + date-fns |
 | @svar-ui/react-gantt PRO | Komercyjna | ✅ | ✅ | ✅ | ✅ | ✅ + lag | ✅ | ✅ (S-curve) | — | Otwarto-źródłowe core, PRO paywall |
 | frappe-gantt | MIT | Nie (JS) | ❌ | ❌ | FS only | ❌ | ❌ | ❌ | ~50 KB | **Niewystarczający** — brak WBS/milestones |
 | DHTMLX Gantt | Podwójna lic. | Nie | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ~200 KB | npm MIT **niereliable**; weryfikacja z vendorem |
@@ -269,15 +333,20 @@ Kolumny: id, organization_id, tenant_id, provider_id, label, inbound_webhook_sec
 - ✅ Grid z edycją w komórce, sort, reorder
 - ✅ Edit form, toolbar, menu kontekstowe, wirtualizacja, RestDataProvider, lokalizacja
 
-**Wyłącznie w SVAR PRO (commercial open-core) — NIE kupujemy PRO (decyzja Marka rev 7)**:
+**Decyzja (rev 8a, D21, zamknięte pytanie pkt 20): Gantt = własna implementacja na SVAR MIT core, BEZ SVAR PRO.** Uzasadnienie: PRO dla SaaS wymaga licencji Application ($1,899); tańsza Developer ($749) zabrania użycia w SaaS; własny kod daje pełną kontrolę (bez uzależnienia od vendora, licencji per produkt i paywalla przy kolejnych funkcjach). Koszt świadomie przyjęty: ~10,5 d (auto-scheduling 3,5 + własne elementy UI ~2 + CPM 3 + kalendarz dni roboczych 2), ujęty w wycenie §12.
+
+Fakty SVAR wg review Kod (p20): w MIT są summary, **milestone'y**, zależności (wyświetlanie/edycja), hierarchia, drag/resize, edycja w gridzie, szablony pasków (baseline da się narysować samemu), wirtualizacja, import z Excela. `wbs_code` = własna kolumna (kody WBS są w PRO). W MIT **nie ma undo przy drag ani linii „dziś”** (vertical markers) — robimy je sami.
+
+**Wyłącznie w SVAR PRO — NIE kupujemy (D21)**:
 - ❌ Auto-scheduling FS/SS/FF/SF z lag i constraints → **własna implementacja server-side** (v1, patrz §3a)
 - ❌ Critical Path Method (CPM, slack, deadlines) → **własna implementacja server-side** (v2, CPM w `lib/critical-path.ts`)
 - ❌ Baselines / progress line / S-curve → **własne overlays/markery** (custom task renderer)
 - ❌ Working calendars, resources → poza scope
 - ❌ MS Project import/export (wbudowane) → **server-side parser XML** (v2)
 - ❌ Summary-task automation, split tasks
+- ❌ Undo/redo, vertical markers (linia „dziś”), kody WBS → **własne**: stos undo dla operacji drag (komendy z undo), marker „dziś” w szablonie skali, `wbs_code` jako kolumna
 
-**Milestones**: nie wymienione wprost w MIT feature list [niezweryfikowane — dokumentacja SVAR sugeruje obsługę "milestone" task type; weryfikacja w svar.dev/react/gantt przed implementacją; fallback: custom task renderer z diamond shape].
+**Milestones**: ✅ w MIT (rev 8a — wg review Kod p20; usunięto [niezwer.] i plan B).
 
 **Implikacje dla projektu:**
 - WBS tree, drag&drop, dependency links: ✅ MIT — bez dodatkowych kosztów.
@@ -287,14 +356,16 @@ Kolumny: id, organization_id, tenant_id, provider_id, label, inbound_webhook_sec
 - **Baseline wizualizacja**: custom overlay/marker na pasku zadania (`baseline_start/end_at`).
 - **MS Project import/export**: server-side parser (v2, `exceljs`/`xml2js`), nie PRO.
 
-### 3.3 Wymagania Gantt w MVP
+### 3.3 Wymagania Gantt (rev 8a: v1)
 
 - **WBS tree**: ✅ MIT.
-- **Milestones** (zero-duration, diamond): [niezweryfikowane w MIT — weryfikacja przed implementacją; plan B: custom task renderer].
+- **Milestones** (zero-duration, diamond): ✅ MIT.
 - **Drag & drop** (move + resize): ✅ MIT. Po przesunięciu → PATCH do API → serwis propaguje daty successor-ów (gdy `auto_scheduling_enabled = true`; §3a) → live update w Gantt.
 - **Dependency links** (strzałki): ✅ MIT. Etykiety typ (FS/SS/FF/SF) + lag = custom CSS nad linkami.
 - **Przełącznik Day / Week / Month**: ✅ MIT.
 - **Baseline overlay** (v1): custom rendering — dla każdego zadania z `baseline_start_at` rysowany dodatkowy cienki pasek (np. szary, za/przed głównym) przez custom task renderer w @svar-ui. Tooltip: `Baseline: ${baseline_start} – ${baseline_end} | Odchylenie: ${start_variance_days}d start, ${end_variance_days}d koniec`.
+- **Linia „dziś”** i **undo przy drag**: własne (brak w MIT).
+- **`wbs_code`**: własna kolumna w gridzie.
 - **SSR**: `dynamic(() => import('./GanttChart'), { ssr: false })`.
 
 ---
@@ -403,16 +474,21 @@ export type MonthlyForecast = { month: string; quantityM3: number; quantityPcs: 
 export type WeeklyForecast  = { week: string; quantityM3: number; quantityPcs: number; weightedM3: number; weightedPcs: number }
 ```
 
-### 5.2 API konsumowane przez `project_costing` (gdy `project_schedule` aktywny)
+### 5.2 Kontrakty DI między modułami (rev 8a — zastępuje „API konsumowane przez `project_costing`”)
 
-```
-GET /api/project-schedule/schedules?calculationId=&dealId=
-GET /api/project-schedule/schedules/:id/summary
-GET /api/project-schedule/schedules/:id/forecast?months=6&probability=
-GET /api/project-schedule/batches?scheduleId=&calculationId=
-```
+Kierunek: `project_schedule` używa kontraktów `project_costing` i rejestruje w nim swój provider. Zero HTTP.
 
-> **Typy elementów**: `project_schedule` czyta `GET /api/project-costing/element-types` — odwrotna zależność względem poprzednich rewizji. Brak własnego endpointu dla element-types w `project_schedule`.
+| Kontrakt (DI) | Właściciel | Użycie w `project_schedule` |
+|---|---|---|
+| `scheduleSourceRegistry.register(InternalScheduleSource)` | costing | `di.ts` tego modułu rejestruje provider; `getBatches`/`getSummary`/`isAvailable` czytają `ps_*` przez `schedule.service` |
+| `elementTypeService` | costing | lista i walidacja `element_type_code` w formularzach i imporcie |
+| `calculationLookupService.getById / listByInvestment` | costing | powiązanie harmonogramu z kalkulacją, cross-deal Gantt (§7.3) |
+| `projectCostingSettings` | costing | `schedule.enabled` per organizacja (§1.0) |
+| komenda `project_costing.calculations.refresh_schedule_totals` | costing | wywoływana z subscribera tego modułu po `schedule.rescheduled` / `batch.*` (kolejka, debounce) |
+
+Endpointy `/api/project-schedule/*` (§6) służą UI i klientom zewnętrznym, nie innym modułom.
+
+> **Typy elementów**: `project_schedule` czyta je przez `elementTypeService` (DI). Brak własnego endpointu dla element-types w `project_schedule`.
 
 ### 5.3 Zdarzenia
 
@@ -430,21 +506,24 @@ project_schedule.batch.deleted
 project_schedule.batch.status_changed
 project_schedule.import.completed       (clientBroadcast: true)
 project_schedule.sync.webhook_received  (v2)
+project_schedule.schedule.rescheduled   (rev 8a: jeden event z listą ID po propagacji, zamiast task.updated per zadanie — szczegóły rev 8b, Kod p12)
 ```
 
-### 5.4 Brak odwrotnej zależności i opcjonalność modułu
+Rev 8a: payload = ID (`id`, `scheduleId`, `organizationId`, `tenantId`, `calculationId?`); `clientBroadcast` tylko z ID.
 
-`project_schedule` nie importuje kodu z `project_costing`. `calculation_id` i `calculation_line_id` to opaque UUID FK-id. `element_type_code` to opaque string (kod z `pc_element_types.code`; `project_schedule` może działać z dowolnym kodem bez walidacji FK). `segment_code` to opaque string.
+### 5.4 Kierunek zależności i opcjonalność modułu (rev 8a)
 
-`project_costing` nie ma twardej zależności od `project_schedule`: gdy moduł wyłączony, `InternalScheduleSource.isAvailable()` zwraca `false` i `ScheduleSourceRegistry` wybiera `EmbeddedScheduleSource`. Żaden `import` z `project_schedule` nie istnieje w kodzie `project_costing` — wyłącznie HTTP calls when available.
+`project_schedule` zależy od `project_costing`: może importować typy (`ScheduleSource`, `ProductionBatchSummary`) i tokeny DI costingu oraz subskrybować `project_costing.calculation.*`. `calculation_id` i `calculation_line_id` to FK-id bez constraintu DB; `element_type_code` i `segment_code` to stringi.
+
+`project_costing` nie ma żadnej zależności od `project_schedule`: nie importuje jego kodu, nie zna jego eventów ani tras. Gdy moduł jest nieobecny w buildzie albo wyłączony w organizacji (§1.0), w `scheduleSourceRegistry` nie ma `InternalScheduleSource` albo zwraca on `isAvailable() = false`, a costing używa `EmbeddedScheduleSource`. Subscribery `calculationActivated.ts`/`calculationDeleted.ts` są po stronie właściwego modułu — tego (konsumenta).
 
 ---
 
 ## 6. API modułu `project_schedule`
 
-Prefix: `/api/project-schedule/`. Optimistic locking.
+Prefix: `/api/project-schedule/`. Optimistic locking. Rev 8a: każda trasa za wspólnym guardem `isScheduleEnabled` (§1.0) → `404 MODULE_DISABLED`; `openApi` na trasach; CRUD przez `makeCrudRoute` + indexer; zapisy przez komendy.
 
-> **Typy elementów**: brak własnych endpointów w `project_schedule` — zarządzane przez `GET/POST/PATCH/DELETE /api/project-costing/element-types`.
+> **Typy elementów**: brak własnych endpointów w `project_schedule` — zarządza nimi `project_costing` (UI administracji); ten moduł czyta je przez `elementTypeService` (DI).
 
 ### 6.1 Harmonogramy
 
@@ -463,7 +542,7 @@ GET .../export?format=xlsx|csv
 POST .../import
 ```
 
-**Cross-deal Gantt per inwestycja**: `GET /api/project-schedule/investment-schedules?investmentId=&projectId=` — agreguje harmonogramy wielu deali powiązanych z daną inwestycją/projektem. Zwraca tasks z `dealId` i `calculationId` per każde zadanie. UI: `/project-schedule/investments/:investmentId/gantt`.
+**Cross-deal Gantt per inwestycja**: `GET /api/project-schedule/investment-schedules?investmentId=` — agreguje harmonogramy wielu deali powiązanych z daną inwestycją (rev 8a: `projectId` usunięte — jedna encja inwestycji `pc_investments`). Zwraca tasks z `dealId` i `calculationId` per każde zadanie. UI: `/project-schedule/investments/:investmentId/gantt`.
 
 ### 6.3 Zadania WBS
 
@@ -512,7 +591,9 @@ POST /api/project-schedule/schedules/:id/import-ms-project
 
 ## 7. UI / UX
 
-### 7.1 Zakładka „Harmonogram" na karcie Deala (MVP)
+### 7.1 Zakładka „Harmonogram" na karcie Deala (v1)
+
+Rev 8a: widget renderuje się tylko gdy `isScheduleEnabled` dla organizacji i użytkownik ma `project_schedule.view` (§1.0).
 
 Spot: `detail:customers.deal:tabs` (oddzielna zakładka od project_costing).
 
@@ -534,7 +615,7 @@ Zawartość:
 // Import przez: dynamic(() => import('./GanttChart'), { ssr: false })
 import { Gantt } from '@svar-ui/react-gantt'
 // MIT core: WBS tree ✅, drag&drop ✅, dependency links ✅, React 19 ✅
-// Milestones: [niezweryfikowane — weryfikacja przed implementacją]
+// Milestones: ✅ MIT (rev 8a); linia „dziś” i undo przy drag: własne
 // FS/SS/FF/SF auto-scheduling: PRO only; MIT renderuje linki (custom etykiety type/lag)
 // Baseline overlay: custom rendering (not PRO) — dodatkowy div per task
 // Dokładne API props (@svar-ui/react-gantt): zweryfikuj w svar.dev/react/gantt/docs
@@ -546,7 +627,7 @@ Drag&drop callback → `PATCH /api/project-schedule/tasks/:id`.
 
 ### 7.3 Cross-deal Gantt per inwestycja/projekt
 
-Strona `/project-schedule/investments/:investmentId/gantt`. Aggregowany widok Gantt zadań ze wszystkich harmonogramów powiązanych z daną inwestycją (`pc_investments.id` via `ps_schedules.calculation_id` → `pc_calculations.investment_id`). Zadania kolorowane per deal. Umożliwia planowanie zasobów produkcyjnych dla całej inwestycji.
+Strona `/project-schedule/investments/:investmentId/gantt`. Aggregowany widok Gantt zadań ze wszystkich harmonogramów powiązanych z daną inwestycją. Rev 8a (bez joinu do tabel costingu): `calculationLookupService.listByInvestment(investmentId)` (DI, costing) zwraca ID kalkulacji, a ten moduł filtruje `ps_schedules WHERE calculation_id IN (...)`. To zależność schedule → costing (dozwolona), nie odwrotnie. Zadania kolorowane per deal. Umożliwia planowanie zasobów produkcyjnych dla całej inwestycji.
 
 Breadcrumb: Inwestycja → Deale → Harmonogramy. Filtry: status harmonogramu, typ (offer/execution), deal.
 
@@ -582,7 +663,7 @@ Max 5000 zadań / 10 MB. Timeout 30 s.
 | `project_schedule.import` | Import XLSX/CSV |
 | `project_schedule.export` | Eksport XLSX/CSV |
 
-Domyślnie: `admin` → wszystkie; `manager` → `view`, `edit`, `import`, `export`; `sales` → `view`.
+Rev 8a — role OM (`superadmin`, `admin`, `employee`; ról `manager`/`sales` nie ma): `admin` → wszystkie; `employee` → `view`, `edit`, `import`, `export` (propozycja). Feature'y w `setup.ts` `defaultRoleFeatures`. `project_schedule.admin` obejmuje integracje zewnętrzne; włącznik modułu w organizacji wymaga `project_costing.admin` (ustawienie costingu, §1.0).
 
 ---
 
@@ -654,93 +735,102 @@ Przy każdej zmianie `planned_start_at`/`planned_end_at` zadania (drag&drop) →
 
 ---
 
-## 12. Fazy i szacowanie wysiłku
+## 12. Fazy i szacowanie wysiłku (rev 8a — przeliczone od zera)
 
-### Faza MVP (~14 dni roboczych)
+Metoda i stawki jak w costing §14: prace domenowe (D) osobno od narzutu OM (O: per encja 0,5 d — migracja, zod, komendy z undo, `makeCrudRoute` + `openApi` + indexer, granty; per ekran 0,4 d; i18n; ~0,1 d testu integracyjnego na trasę; unit Jest), plus bufor 10%. Gantt bez SVAR PRO (D21) — koszt własnych elementów jest w pozycjach D3, D4 (v1) i D5–D6 (v2).
 
-| Zadanie | Rozmiar |
-|---------|---------|
-| `ps_schedules` (schedule_type, offer_schedule_id, auto_scheduling_enabled) — migracje | S (0.5 dnia) |
-| `ps_schedule_tasks` (WBS, parent_task_id, is_milestone, baseline cols, is_pinned) — migracje + API | M (1.5 dnia) |
-| `ps_task_dependencies` (FS/SS/FF/SF + lag, walidacja cykli) — migracje + API | M (1.5 dnia) |
-| `ps_production_batches` (task_id, calculation_line_id, element_type_code) — migracje + API | S (0.5 dnia) |
-| Pozostałe API: schedules CRUD, bulk tasks, forecast endpoint (pro-rata LRM + prob. weighting) | M (2 dni) |
-| ACL features + setup.ts + analytics.ts | S (1 dzień) |
-| `GanttChart.tsx` (@svar-ui/react-gantt MIT: WBS ✅, drag&drop ✅, dep links ✅; milestones [niezwer.]; custom: dep type labels + baseline overlay; drag&drop callback → reschedule endpoint) | L (4 dni) |
-| `DealScheduleTab` widget + panel boczny (is_pinned toggle) + miniatura prognozy | M (3 dni) |
+### Faza MVP (0 dni)
 
-**Suma MVP**: 0.5+1.5+1.5+0.5+2+1+4+3 = **14 dni roboczych**.
+Moduł poza MVP (Kod p15). MVP kalkulatora: partie produkcji w kalkulacji i prognoza 6 mies. przez `EmbeddedScheduleSource` (costing §14 MVP D10).
 
-### Faza v1 (~11.5 dnia roboczych)
+### Faza v1 (34 dni roboczych)
 
-| Zadanie | Rozmiar |
-|---------|---------|
-| `ps_import_column_mappings` + Import/eksport XLSX/CSV (zadania + batche) | M (1.5 dnia) |
-| Baseline capture (offer → execution, `create-execution` endpoint; idempotent) | M (1.5 dnia) |
-| Wariancja baseline: API response, Gantt tooltip/overlay, baseline overlay renderer | S (1 dzień) |
-| **Auto-scheduling server-side** (propagacja FS/SS/FF/SF + lag, forward-pass DAG, `reschedule` endpoint) | L (3 dni) |
-| **Cross-deal Gantt** per inwestycja/projekt (`investment-schedules` endpoint + `/investments/:id/gantt` page) | M (2 dni) |
-| **Offer → execution trigger** (subscriber `customers.deal.won`; `create-execution` idempotent) | S (0.5 dnia) |
-| Zdarzenia + subscriber w `project_costing` (update sum w pc_calculations) | S (0.5 dnia) |
-| Backend strony: lista harmonogramów | S (0.5 dnia) |
-| i18n PL/EN + testy serwisów (cycle detection, LRM rounding, variance, auto-scheduling) | S (0.5 dnia) |
+Encje: 5 (`ps_schedules`, `ps_schedule_tasks`, `ps_task_dependencies`, `ps_production_batches`, `ps_import_column_mappings`). Trasy API: 33 (schedules CRUD 4 + activate/lock/duplicate/capture-baseline/create-execution 5 + summary/forecast/export/import 4, investment-schedules 1, tasks 4 + batch 1 + reschedule 1, task-dependencies 4, production-batches 4 + batch 1, import-column-mappings 4). Ekrany: 4 (lista harmonogramów, szczegóły/Gantt, ustawienia, Gantt inwestycji); zakładka deala liczona w D.
 
-**Suma v1**: 1.5+1.5+1+3+2+0.5+0.5+0.5+0.5 = **11 dni roboczych**.
+| # | Zadanie | Dni |
+|---|---------|-----|
+| D1 | Szkielet modułu, gating per organizacja (§1.0: guard API, menu, widget), rejestracja `InternalScheduleSource` w DI, subscribery `calculationActivated`/`calculationDeleted` | 1,5 |
+| D2 | Logika domenowa: harmonogramy offer/execution, WBS (summary z dzieci), zależności z walidacją cykli, partie | 3 |
+| D3 | Własny silnik auto-scheduling (max po wszystkich poprzednikach, milestone 0, konwencja daty końca, naruszenia przypiętych zadań, `schedule.rescheduled`) — zamiast SVAR PRO | 3,5 |
+| D4 | Gantt: SVAR MIT core + własne: etykiety zależności, linia „dziś”, undo przy drag, baseline overlay, `wbs_code`; zakładka deala | 5 |
+| D5 | Baseline capture, offer → execution (`customers.deal.won`, persistent, idempotent), wariancja | 2 |
+| D6 | Cross-deal Gantt per inwestycja (`calculationLookupService`) | 2 |
+| D7 | Import/eksport XLSX harmonogramu (ProgressJob + worker) | 2,5 |
+| D8 | Prognoza z harmonogramu (LRM) + odświeżanie sum costingu (komenda DI, kolejka, debounce) | 1,5 |
+| | **Suma prac domenowych** | **21** |
+| O1 | Narzut OM per encja: 5 × 0,5 | 2,5 |
+| O2 | `CrudForm`/`DataTable`: 4 ekrany × ~0,4 | 1,5 |
+| O3 | i18n pl/en | 0,5 |
+| O4 | Testy integracyjne: 33 trasy × ~0,1 | 3,5 |
+| O5 | Testy unit (scheduler, cykle, LRM, wariancja) | 2 |
+| | **Suma narzutu OM** | **10** |
+| B | Bufor 10% | 3 |
+| | **Suma v1** | **34** |
 
-### Faza v2 (~10 dni roboczych)
+### Faza v2 (16 dni roboczych)
 
-| Zadanie | Rozmiar |
-|---------|---------|
-| `ps_external_integrations` + provider interface + registry | M (1.5 dnia) |
-| Inbound webhook (Standard Webhooks HMAC, idempotentność) | M (1.5 dnia) |
-| Outbound webhook (date-change, queue retry) | M (1.5 dnia) |
-| Import MS Project XML (`xml2js`) — v2+ potwierdzone | L (2.5 dnia) |
-| **Algorytm CPM** (critical path: forward/backward pass, ES/EF/LS/LF/float; pola na ps_schedule_tasks v2; rendering `is_critical_path` custom CSS) | L (3 dni) |
+| # | Zadanie | Dni |
+|---|---------|-----|
+| D1 | `ps_external_integrations` + provider interface + registry | 1,5 |
+| D2 | Inbound webhook (Standard Webhooks HMAC, idempotentność) | 1,5 |
+| D3 | Outbound webhook (zmiana dat, retry przez kolejkę) | 1,5 |
+| D4 | Import MS Project XML (D25: od v2) | 2,5 |
+| D5 | Własny CPM (forward/backward pass, float, `is_critical_path`) — zamiast SVAR PRO | 3 |
+| D6 | Kalendarz dni roboczych w auto-schedulingu i wariancji — zamiast SVAR PRO | 2 |
+| | **Suma prac domenowych** | **12** |
+| O | Narzut OM: 1 encja (0,5), ~5 tras (0,5), testy (1), i18n (0,5) | 2,5 |
+| B | Bufor 10% | 1,5 |
+| | **Suma v2** | **16** |
 
-**Suma v2**: 1.5+1.5+1.5+2.5+3 = **10 dni roboczych**.
-
-**Łącznie `project_schedule`**: 14+11+10 = **35 dni roboczych**.
+**Łącznie `project_schedule`**: 0 + 34 + 16 = **50 dni roboczych**.
 
 ---
 
-## 13. Podsumowanie zbiorcze (oba moduły)
+## 13. Podsumowanie zbiorcze (oba moduły) — rev 8a
 
 | Moduł | MVP | v1 | v2 | Suma |
 |-------|-----|----|----|------|
-| `project_costing` | 17 d | 28.5 d | 14 d | 59.5 d |
-| `project_schedule` | 14 d | 11 d | 10 d | 35 d |
-| **Łącznie** | **31 d** | **39.5 d** | **24 d** | **94.5 d** |
+| `project_costing` | 40 d | 45 d | 16 d | 101 d |
+| `project_schedule` | 0 d | 34 d | 16 d | 50 d |
+| **Łącznie** | **40 d** | **79 d** | **32 d** | **151 d** |
+
+Jednostka: dzień roboczy doświadczonego dewelopera znającego OM. Każda faza zawiera osobne pozycje na narzut OM (encje, ekrany, i18n, testy) i bufor 10%. Szczegóły: costing §14, schedule §12. Tabela identyczna jak w costing §14.
+
+**Porównanie z szacunkiem Kod (review PR #10, 2026-10-19):** Kod: przycięte MVP ~25–30 d, całość ~150–170 d, MVP bez przycięcia ~50–60 d; rev 7: 94,5 d. Rev 8a: MVP 40 d = ~31,5 d dla zakresu Kod (górna granica jego widełek) + import XLSX w MVP (decyzja Koordynatora (a): ~3,5 d domeny + ~1,5 d narzutu) + bufor 3,5 d. Całość 151 d mieści się w widełkach Kod. Różnica względem rev 7 (+56,5 d) to głównie narzut OM liczony jawnie (~52 d we wszystkich fazach), bufor (~15 d) i własny Gantt bez SVAR PRO (~10,5 d: auto-scheduling 3,5 + własne elementy UI ~2 + CPM 3 + kalendarz dni roboczych 2).
 
 ---
 
-## 14. Ryzyka
+## 14. Risks (rev 8a — z ryzykiem rezydualnym)
 
-| # | Ryzyko | P-stwo | Wpływ | Mitygacja |
-|---|--------|--------|-------|-----------|
-| R1 | @svar-ui/react-gantt MIT: milestones [niezwer.]; auto-scheduling = własna implementacja server-side (NIE PRO — decyzja Marka) | Niskie | Średni | Milestones: weryfikacja w docs + plan B custom renderer; auto-scheduling: §3a + testy propagacji |
-| R2 | SSR Next.js + @svar-ui/react-gantt — wymaga DOM | Średnie | Średni | `dynamic(..., { ssr: false })` |
-| R3 | Walidacja cykli w dużych WBS (setki zależności) — wydajność DFS | Niskie | Niski | DFS O(V+E); dla typowych budowlanych WBS (<200 zadań) bez problemu |
-| R4 | LRM rounding przy bardzo krótkich batchach (<3 dni) | Niskie | Niski | Min 1 dzień; residual absorbowany przez miesiąc/tydzień z max overlap |
-| R5 | Baseline capture: jeśli execution schedule nie istnieje — brak baseline | Niskie | Niski | `capture-baseline` wymaga istnienia execution schedule lub tworzy je implicitly |
-| R6 | calculation_line_id = opaque UUID: przy usunięciu linii kalkulacji batch ma orphaned FK | Niskie | Niski | ON DELETE SET NULL lub serwis nulluje przy archiwizacji linii |
-| R7 | MS Project XML — wiele wersji formatu; pola zróżnicowane | Wysokie | Niski | v2 po potwierdzeniu; v1 = XLSX/CSV |
-| R8 | Kolizja zakładek deala (project_costing + project_schedule) | Niskie | Niski | Różne groupId; priorytet steruje kolejnością |
-| R9 | Auto-scheduling propagacja: nieskończona pętla przy is_pinned nieprzypisanym i cyklu | Niskie | Wysoki | Walidacja cykli przy zapisie zależności (§6.4 422 DEPENDENCY_CYCLE) + max-depth guard w propagacji |
-| R10 | Offer→execution subscriber (`customers.deal.won`): brak gwarancji dokładnie-raz | Niskie | Niski | `create-execution` idempotent (sprawdza existing execution schedule przed created) |
+| # | Scenariusz awarii | Obszar | Ważność | Mitygacja | Ryzyko rezydualne |
+|---|---|---|---|---|---|
+| R1 | Własny auto-scheduling/CPM (bez SVAR PRO) daje błędne daty | Algorytmy | Wysoka | Czysta funkcja schedulera + testy unit na przypadkach brzegowych (wielu poprzedników, milestone, pinned); szczegóły rev 8b (Kod p12) | Średnie — przypadki brzegowe wyjdą w użyciu |
+| R2 | SSR Next.js + SVAR wymaga DOM | UI | Średnia | `dynamic(..., { ssr: false })` | Niskie |
+| R3 | Walidacja cykli przy setkach zależności | Wydajność | Niska | DFS O(V+E); WBS budowlane < 200 zadań | Niskie |
+| R4 | LRM przy bardzo krótkich partiach (< 3 dni) | Prognoza | Niska | Min. 1 dzień; residual do okresu z największym overlapem | Niskie |
+| R5 | Brak execution schedule przy capture-baseline | Dane | Niska | `capture-baseline` tworzy execution, jeśli brak | Niskie |
+| R6 | Osierocone `calculation_line_id`/`calculation_id` po usunięciu w costingu | Dane | Niska | Subscriber `project_costing.calculation.deleted` nulluje FK-id | Niskie |
+| R7 | Wiele wersji formatu MS Project XML | Import (v2) | Niska | v2; v1 = XLSX/CSV | Niskie |
+| R8 | Kolizja zakładek deala (costing + schedule) | UI | Niska | Różne `groupId`, priorytet | Niskie |
+| R9 | Nieskończona propagacja przy cyklu | Algorytmy | Wysoka | Walidacja cykli przy zapisie (422 `DEPENDENCY_CYCLE`) + limit głębokości | Niskie |
+| R10 | `customers.deal.won` dostarczony więcej niż raz | Integracja | Niska | `create-execution` idempotentne; subscriber persistent | Niskie |
+| R11 | Organizacja wyłącza moduł, a dane/subscribery dalej działają | Konfiguracja | Średnia | Guard API + no-op subscriberów + `isAvailable() = false` (§1.0); test integracyjny wyłączenia | Niskie |
+| R12 | Kill-switch tenanta wyłączony przez pomyłkę ukrywa harmonogramy wszystkich organizacji | Konfiguracja | Średnia | Toggle domyślnie włączony; dane nieusuwane | Niskie |
+| R13 | Koszt własnego Gantta wyższy niż ~10,5 d | Plan | Średnia | Bufor 10%; PoC Gantta przed D4 | Średnie (świadoma decyzja D21) |
 
 ---
 
 ## 15. Pytania otwarte do Marka
 
-*(Wszystkie pytania odpowiedziane przez Marka w rev 7. Szczegóły w §16 i Changelog.)*
+*(Rev 8a: brak nowych pytań dla tego modułu. Pytanie Q4 o wyłączanie modułu w organizacji z danymi — costing §16.)*
 
 | Pytanie | Odpowiedź Marka | Implementacja |
 |---------|-----------------|---------------|
 | Rescheduling automatyczny? | TAK — auto-scheduling server-side, manual override per-task (`is_pinned`) | §3a, v1 |
-| Cross-deal Gantt? | TAK — widok per inwestycja/projekt | §6.1, §7.3, v1 |
+| Cross-deal Gantt? | TAK — widok per inwestycja | §6.1, §7.3, v1 |
 | MS Project XML? | v2+ — XLSX/CSV wystarczy na v1 | §6.7, v2 |
 | Offer → Execution trigger? | TAK — event `customers.deal.won`; idempotent | §6.1 `create-execution`, v1 |
-| SVAR PRO? | NIE — własna implementacja server-side | §3.2, §3a, §1.3 |
+| SVAR PRO? (pkt 20, **zamknięte w rev 8a**) | NIE — własna implementacja na SVAR MIT core (D21) | §3.2 (uzasadnienie: Application $1,899, Developer $749 zabrania SaaS, kontrola nad kodem); koszt ~10,5 d w §12 |
 
 ---
 
@@ -748,17 +838,17 @@ Przy każdej zmianie `planned_start_at`/`planned_end_at` zadania (drag&drop) →
 
 | # | Założenie | Uzasadnienie |
 |---|-----------|--------------|
-| A1 | @svar-ui/react-gantt v2.8.1 (MIT, zweryfikowano z tarball): WBS ✅, drag&drop ✅, dep links ✅, React 19/Next.js ✅; milestones [niezwer.]; FS/SS/FF/SF auto-scheduling = własna implementacja server-side (NIE PRO — decyzja Marka rev 7) | React-native TS, aktywna (Oct 2026); frappe-gantt niewystarczający (brak WBS/milestones); PRO nie kupujemy |
+| A1 | @svar-ui/react-gantt v2.8.1 (MIT, zweryfikowano z tarball): WBS ✅, drag&drop ✅, dep links ✅, milestones ✅ (rev 8a), React 19/Next.js ✅; auto-scheduling, CPM, baseline, undo, linia „dziś”, kody WBS = własna implementacja (NIE PRO — D21) | React-native TS, aktywna (Oct 2026); frappe-gantt niewystarczający (brak WBS/milestones); PRO nie kupujemy |
 | A2 | SSR: `dynamic(..., { ssr: false })` | Biblioteki Gantt wymagają DOM |
-| A3 | `project_schedule` nie zależy od `project_costing` | Brak circular dependency |
+| A3 | **Rev 8a (poprawione):** `project_schedule` zależy od `project_costing` (baza) i rejestruje provider `ScheduleSource` w DI; costing nie importuje schedule; zero HTTP | Jednokierunkowa zależność (Kod P0-1; `packages/core/AGENTS.md` § Cross-Module Coupling) |
 | A4 | Prognoza: endpoint `/forecast` z LRM + probability param | Precyzja LRM; probability = param (nie hardcoded) |
 | A5 | MS Project XML w v2 po potwierdzeniu | Złożony format |
 | A6 | `ps_import_column_mappings` — własna tabela | Niezależność modułów |
-| A7 | `ps_element_types` — własna tabela; costing czyta przez API | Brak circular dependency |
+| A7 | ~~`ps_element_types` — własna tabela; costing czyta przez API~~ — nieaktualne (patrz A13; rev 8a: typy przez `elementTypeService` DI); porządek numeracji/A7–A13: rev 8b | — |
 | A8 | LRM rounding m³ (3 d.p.) i szt. (int) per miesiąc i tydzień | `SUM(periodic) = batch_total` dokładnie |
 | A9 | `ps_schedules` bez `currency` | Waluta = własność kalkulacji |
 | A10 | Walidacja cykli: DFS synchroniczny | Typowe WBS < 200 zadań; wystarczające |
-| A11 | `calculation_line_id` w `ps_production_batches` = opaque UUID | `project_schedule` nie zależy od `project_costing` |
+| A11 | `calculation_line_id` w `ps_production_batches` = FK-id bez constraintu DB | Brak relacji ORM/constraintów między modułami (rev 8a: schedule zależy od costing, ale nie przez FK DB) |
 | A12 | `schedule_type: offer|execution`; baseline w polach `baseline_start/end_at` na `ps_schedule_tasks` | Upraszcza model; bez osobnej tabeli snapshot |
 | A13 | `ps_element_types` usunięte z project_schedule; typy elementów = `pc_element_types` (project_costing); referencja przez `element_type_code` string | Rev 7: project_schedule opcjonalny; costing musi posiadać element types niezależnie |
 | A14 | Auto-scheduling v1 server-side (forward-pass DAG, dni kalendarzowe); v2 = dni robocze | Decyzja Marka rev 7: NIE PRO; własna impl.; calendars = v2 |
@@ -769,7 +859,7 @@ Przy każdej zmianie `planned_start_at`/`planned_end_at` zadania (drag&drop) →
 
 ## 17. Migracje i backward compatibility
 
-Nowe tabele `ps_*` only. Kolejność: `ps_schedules` → `ps_schedule_tasks` → `ps_task_dependencies` → `ps_production_batches` → `ps_import_column_mappings` → `ps_external_integrations`.
+Nowe tabele `ps_*` only, wszystkie z `deleted_at` (rev 8a). Brak FK DB do `pc_*`. Kolejność: `ps_schedules` → `ps_schedule_tasks` → `ps_task_dependencies` → `ps_production_batches` → `ps_import_column_mappings` → `ps_external_integrations`.
 
 ---
 
@@ -777,7 +867,9 @@ Nowe tabele `ps_*` only. Kolejność: `ps_schedules` → `ps_schedule_tasks` →
 
 ```
 apps/mercato/src/modules/project_schedule/
-├── acl.ts, analytics.ts, events.ts, index.ts, setup.ts, di.ts, types.ts
+├── acl.ts, analytics.ts, events.ts, index.ts, setup.ts, di.ts (rejestracja providera w scheduleSourceRegistry), types.ts
+├── commands/                    # rev 8a: zapisy przez komendy (undo, audit_logs)
+├── workers/                     # import XLSX (ProgressJob)
 ├── api/
 │   ├── schedules/[id]?/{activate,lock,duplicate,capture-baseline,create-execution,
 │   │                    summary,forecast,export,import}/route.ts
@@ -800,8 +892,10 @@ apps/mercato/src/modules/project_schedule/
 ├── i18n/pl.json + en.json
 ├── migrations/Migration20261019*.ts
 ├── subscribers/
-│   ├── calculationActivated.ts
-│   └── dealWon.ts              # trigger offer→execution transition
+│   ├── calculationActivated.ts  # event project_costing.* (ten moduł = konsument)
+│   ├── calculationDeleted.ts    # nulluje calculation_id
+│   ├── scheduleChanged.ts       # → komenda costingu refresh_schedule_totals (kolejka, debounce)
+│   └── dealWon.ts              # trigger offer→execution transition (persistent)
 ├── widgets/DealScheduleTab.tsx
 └── lib/
     ├── schedule.service.ts
@@ -809,8 +903,50 @@ apps/mercato/src/modules/project_schedule/
     ├── forecast.ts              # pro-rata LRM + probability weighting
     ├── import.service.ts
     ├── cycle-detection.ts       # DFS cycle check
+    ├── internal-schedule.source.ts  # implementacja ScheduleSource z project_costing; rejestrowana w di.ts
+    ├── module-gate.ts           # isScheduleEnabled (§1.0): route guard, menu, widget
     └── external/provider.interface.ts + registry.ts
 ```
+
+---
+
+## 19. Final Compliance Report (rev 8a, vs `AGENTS.md`)
+
+| Reguła | Źródło | Status |
+|---|---|---|
+| Sekcje TLDR, Architecture, Data Models, API Contracts, Risks (z rezydualnym), Final Compliance Report, Changelog | `.ai/specs/AGENTS.md` § Spec Content Checklist | ✅ TLDR, §0, §2, §6, §14, §19, Changelog |
+| Kierunek zależności: opcjonalny konsument trzyma glue, baza go nie zna | `packages/core/AGENTS.md` § Cross-Module Coupling | ✅ §0, §1.4, §5 |
+| Zero HTTP / relacji ORM między modułami | `packages/core/AGENTS.md` § Never; review Kod P0-1 | ✅ |
+| Komendy, `makeCrudRoute` + indexer, `openApi` | `packages/core/AGENTS.md` § Always | ✅ §6 (szczegóły rev 8b) |
+| Feature'y ACL w `setup.ts`; role admin/employee | `packages/core/AGENTS.md` § ACL Grant Sync | ✅ §9 |
+| `deleted_at` | `packages/core/AGENTS.md` § Database Entities | ✅ §2.1 |
+| Włączanie modułu zgodne z platformą (build, feature_toggles, module_configs) | `apps/mercato/src/modules.ts`, `feature-flag-check.ts`, `module-config-service.ts` | ✅ §1.0 |
+| Import przez ProgressJob + worker | `packages/core/AGENTS.md` § Operation Progress | ✅ §12 v1 D7 (szczegóły rev 8b) |
+| Testy integracyjne każdej trasy | root `AGENTS.md` l.166 | ✅ w wycenie (§12 O4) |
+| Nowe zależności (`@svar-ui/*`) = ask first | root `AGENTS.md` l.26 | ⚠️ rev 8b (Kod p10) |
+
+## 20. Checklist compliance (`om-architecture-checklist.md`, stan 2026-10-20)
+
+| Punkt listy (Kod pN) | Wynik rev 8a |
+|---|---|
+| Komunikacja przez DI/eventy; zero HTTP (p1) | ✅ §0, §5.2 |
+| Zależność jednokierunkowa; provider w rejestrze DI bazy (p1) | ✅ §5.2, §5.4 |
+| Brak zapisów do cudzych tabel (p2) | ✅ sumy costingu przez jego komendę `refresh_schedule_totals` |
+| Jedno pojęcie inwestycji (p11) | ✅ `projectId` usunięte; inwestycja = `pc_investments` |
+| RBAC w `acl.ts`, role admin/employee (p4) | ✅ §9 |
+| Pola ukryte poza eventami (p3) | ✅ eventy tylko z ID (§5.3) |
+| Komendy + `audit_logs`; `makeCrudRoute` + `openApi` (p6) | ✅ §0, §6 |
+| `deleted_at` (p20) | ✅ §2.1 |
+| Ustawienia przez ModuleConfigService (**p7**) | ✅ **spełniony** — `schedule.enabled` w `module_configs` (§1.0) |
+| Włączanie: build + feature_toggles + blokady menu/widget/API (**p7**) | ✅ **spełniony** — §1.0: ModuleConfigService per organizacja + ACL + blokady w menu, w zakładce `detail:customers.deal:tabs` i w API (route guard); `feature_toggles` per tenant tylko jako globalny kill-switch; źródła: `packages/core/src/modules/configs/lib/module-config-service.ts`, `packages/core/src/modules/feature_toggles/lib/feature-flag-check.ts` |
+| Zakres „firmy” (**p7**) | ✅ **spełniony** — firma = organizacja (§1.0) |
+| Statusy deala / `customers.deal.won` persistent (p5) | ⚠️ subscriber `dealWon` persistent; mapowanie statusów rev 8b |
+| Import przez ProgressJob (p9) | ✅ §12 v1 D7; edge case'y rev 8b |
+| Nowe zależności = ask first (p10) | ⚠️ rev 8b |
+| Algorytmy harmonogramu (p12) | ⚠️ rev 8b (zakres i koszt w §12 v1 D3) |
+| Wycena z narzutem OM (p16) | ✅ §12 |
+| MVP pocięty po wartości (p15) | ✅ moduł poza MVP |
+| Forma speki (p20) | ✅ |
 
 ---
 
@@ -818,6 +954,7 @@ apps/mercato/src/modules/project_schedule/
 
 | Data | Zmiana |
 |------|--------|
+| 2026-10-20 | **rev 8a** — Review Kod (PR #10 rev 7) + decyzje Koordynatora/Marka. **P0-1:** kierunek odwrócony — `project_schedule` zależy od `project_costing` (baza) i rejestruje `InternalScheduleSource` w `scheduleSourceRegistry` (DI); usunięte HTTP (§5.2 `GET /api/project-costing/element-types` → `elementTypeService`; API konsumowane przez costing → kontrakty DI); join `ps_schedules.calculation_id → pc_calculations` opisany poprawnie (`calculationLookupService.listByInvestment`); subscriber `calculationActivated` po stronie tego modułu (konsumenta); odświeżanie sum costingu przez jego komendę `refresh_schedule_totals`; A3 poprawione; nowa §0 Architecture, §1.4, §5.4. **Decyzja (d) + potwierdzenie Koordynatora:** §1.0 — włącznik per organizacja = `schedule.enabled` w ModuleConfigService (`module_configs`) + feature'y ACL + blokady w menu, zakładce deala i API; `feature_toggles` wyłącznie jako globalny kill-switch per tenant (zweryfikowano w `feature-flag-check.ts` i `module-config-service.ts`; ModuleConfigService nie ma natywnego scope organizacji → klucz `org:{id}:settings`). **Pkt 20 zamknięte (D21):** Gantt własny na SVAR MIT, bez PRO (Application $1,899; Developer $749 zabrania SaaS; kontrola nad kodem); fakty SVAR: milestone'y w MIT (usunięte [niezwer.] i plan B), `wbs_code` własna kolumna, brak undo przy drag i linii „dziś” w MIT → własne. **P1-15:** cały moduł przeniesiony z MVP do v1. **P1-16:** wycena od zera z narzutem OM i buforem: 0 / 34 / 16 = 50 d; tabela zbiorcza identyczna z costing (151 d). `projectId` usunięte (jedna encja inwestycji). Role admin/employee (§9). Dodane: TLDR, Risks z ryzykiem rezydualnym, Final Compliance Report, Checklist compliance, `deleted_at`. Poza zakresem (rev 8b): Kod p12 (szczegóły algorytmu), A7/A13 (`element_type_id` w `ps_schedule_tasks`, `elementTypeId` w analytics), partie pc_/ps_, numeracja założeń. |
 | 2026-10-19 | v1 (rev 3) — inicjalna spec |
 | 2026-10-19 | v2 (rev 4) — Gantt MVP, @svar-ui, ps_element_types, ps_import_column_mappings, LRM |
 | 2026-10-19 | v3 (rev 5) — …(jak poprzednio)… |
