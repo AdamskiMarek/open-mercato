@@ -15,7 +15,7 @@ Data „≤2026-10-20” oznacza decyzję obowiązującą na 2026-10-20, bez pot
 | D4 | ≤2026-10-20 | n8n (Enka) pushuje przetargi jako deale do lejka „Przetargi” przy score ≥ 50. | Marek | active |
 | D5 | ≤2026-10-20 | Duplikaty ofert: jedna oferta na inwestycję do wielu GW, wygrać można najwyżej jedną. Pole `offer_role` = `primary`/`alternative`. Przy zapisie oferty system sprawdza ofertę do innego wykonawcy na tę samą inwestycję i pokazuje „istnieje oferta dla innego wykonawcy, wskaż główną”. | Marek; push-contract §9.1 | active |
 | D6 | 2026-10-19 | Każdy przetarg dostaje kod inwestycji. Priorytet: identyfikator e-Zamówienia → TED → BIP → własny `INV-YYYY-NNNNNN`. Podobieństwo nazwy tylko jako podpowiedź. | Marek (rev 7); plan testów §22 pkt 5 | active |
-| D7 | 2026-10-18 | Projekt/Budowa jako encja `klin:project` w Data designerze, z relacją do deali. | analiza §2, push-contract §9.5 | active (do rozstrzygnięcia vs `pc_investments` — przegląd Kod pkt 11) |
+| D7 | 2026-10-18 | Projekt/Budowa jako encja `klin:project` w Data designerze, z relacją do deali. | analiza §2, push-contract §9.5 | superseded (D63) |
 | D8 | 2026-10-18 | Koszty i kalkulacje wiszą na dealu. | analiza §2 | superseded (D10) |
 
 ## Moduł kalkulacji (costing) — tylko specyfikacja
@@ -67,11 +67,11 @@ Data „≤2026-10-20” oznacza decyzję obowiązującą na 2026-10-20, bez pot
 | D36 | 2026-10-18 | Interakcje przez `/api/customers/interactions`, nie przez deprecated `activities`. | push-contract §5.3 | active |
 | D37 | 2026-10-18 | Scoring per segment z reguł w tabelach; `probability` = max score; `cf_segments` z przecinkami na brzegach. | push-contract §7 | active |
 | D38 | 2026-10-18 | Pole `channel` (tender/inbound/outbound/referral); n8n zawsze `tender`; techniczne źródło zostaje w `source`/`cf_source`. | push-contract §9.1; analiza faza 0 pkt 3 | active |
-| D39 | 2026-10-18 | n8n wysyła `offer_role = primary` przy POST, nie wysyła go przy PUT; istniejące deale uzupełnić `primary`. | push-contract §9.1 | active |
+| D39 | 2026-10-18 | n8n wysyła `offer_role = primary` przy POST, nie wysyła go przy PUT; istniejące deale uzupełnić `primary`. | push-contract §9.1 | superseded (D64 — obowiązuje do migracji) |
 | D40 | 2026-10-18 | n8n nie nadpisuje pól ręcznych (`docs_url`, `production_start`, `volume_m3`, `pieces`). | push-contract §9.1 | active |
 | D41 | 2026-10-18 | Słownik `sales.deal_loss_reason` z 9 powodami (odblokowuje „Oznacz jako przegrany” w UI). | analiza F6; `ids.json` → `lossReasons` | active |
 | D42 | 2026-10-18 | Wynik przetargu ustawia `winner_*` i `competitor*`; n8n nie zmienia `closure_outcome` ani powodu przegranej. | push-contract §9.4 | active |
-| D43 | 2026-10-18 | n8n nie tworzy automatycznie projektów `klin:project`; zakłada je handlowiec. | push-contract §9.5 | active |
+| D43 | 2026-10-18 | n8n nie tworzy automatycznie projektów `klin:project`; zakłada je handlowiec. | push-contract §9.5 | superseded (D63) |
 | D44 | 2026-10-18 | Backfill max 30 dni, partie 20–50, 1 równoległe żądanie (VPS 2 vCPU / 4 GB). | push-contract §0, §8 | active |
 | D45 | 2026-10-18 | Własne moduły jako moduły aplikacji w forku (`apps/mercato/src/modules`), bez zmian w `packages/core`. | analiza §2 | active |
 | D46 | ≤2026-10-20 | Faza 1 u Enki (dopasowanie duplikatów inwestycji, konkurent) wstrzymana do akceptacji Marka. | Marek | active |
@@ -91,6 +91,13 @@ Data „≤2026-10-20” oznacza decyzję obowiązującą na 2026-10-20, bez pot
 | D60 | 2026-10-20 | PDF: dane firmy z `module_configs`, generowanie przez pdf-lib (zastępuje D27). | Koordynator 2026-10-20 (makieta figma bro) | active |
 | D61 | 2026-10-20 | Kalkulacja bez deala nie wchodzi do prognozy ważonej; pokazywana osobno. | Koordynator 2026-10-20 (makieta figma bro) | active |
 | D62 | 2026-10-20 | Zaokrąglanie half-up do 2 miejsc na pozycji, suma z pozycji już zaokrąglonych, konfigurowalne per organizacja; słownik jednostek z przelicznikami; priorytet identyfikatorów inwestycji: e-Zamówienia > TED > BIP > INV. | Koordynator 2026-10-19 | active |
+| D63 | 2026-10-20 | Kanoniczna encja inwestycji = `pc_investments`. Jednorazowy import z `klin:project` po `--dry-run` i akceptacji raportu, potem `klin:project` wyłączamy. Inwestycje zakłada handlowiec (n8n nie tworzy ich automatycznie). | Koordynator 2026-10-20 (Q1–Q5 z rev 8a) | active |
+| D64 | 2026-10-20 | n8n przestaje wysyłać `cf_offer_role` dopiero po wdrożeniu modułu i migracji do `pc_deal_offer_roles`; do tego czasu kontrakt Enki (D39) bez zmian. | Koordynator 2026-10-20 (Q1–Q5 z rev 8a) | active |
+| D65 | 2026-10-20 | Pierwsza oferta na inwestycji dostaje rolę primary. | Koordynator 2026-10-20 (Q1–Q5 z rev 8a) | active |
+| D66 | 2026-10-20 | Apply-to-deal = jawna komenda użytkownika (zapis wartości deala przez komendę `customers`), nie enricher. | Koordynator 2026-10-20 (Q1–Q5 z rev 8a) | active |
+| D67 | 2026-10-20 | Wyłączenie harmonogramu w organizacji zostawia dane ukryte do ponownego włączenia. | Koordynator 2026-10-20 (Q1–Q5 z rev 8a) | active |
+| D68 | 2026-10-20 | Domyślnie rola employee nie widzi kosztów ani marży; organizacja może to zmienić (przypisanie feature'ów do ról). | Koordynator 2026-10-20 (Q1–Q5 z rev 8a) | active |
+| D69 | 2026-10-20 | Ustawienia organizacji zapisywane pod kluczem `org:{id}:settings` jako obejście ograniczenia ModuleConfigService (odczyt ignoruje organizationId) — ryzyko R12. | Koordynator 2026-10-20 (Q1–Q5 z rev 8a) | active |
 
 ## Proces
 
