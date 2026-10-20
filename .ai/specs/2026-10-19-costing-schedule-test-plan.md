@@ -64,11 +64,20 @@ Mapowanie do narzędzi i konwencji repo:
 
 | Poziom | Narzędzie | Konfiguracja | Ścieżka testów | Komenda |
 |--------|-----------|--------------|----------------|---------|
-| **Unit** | Jest/Vitest | `jest.config.cjs`, `jest.config.base.cjs` | `__tests__/*.test.ts` | `yarn test` |
-| **Integration** | Jest + mock DB | `jest.config.cjs` z `createTestDb` | `__tests__/*.integration.test.ts` | `yarn test` |
-| **API** | Jest + Supertest | `jest.config.cjs` | `__tests__/*.api.test.ts` | `yarn test` |
-| **E2E/UI** | Playwright | `.ai/qa/tests/playwright.config.ts` | `__integration__/**/*.spec.ts` | `yarn test:integration` |
+| **Unit** | Jest | `apps/mercato/jest.config.cjs` (rozszerza `jest.config.base.cjs`; `testMatch: src/**/__tests__/**/*.test.(ts\|tsx)`) | `apps/mercato/src/modules/<moduł>/__tests__/*.test.ts` | `yarn test` (całość, turbo) lub `yarn workspace @open-mercato/app test src/modules/<moduł>/__tests__` |
+| **Integration** | Playwright (`@playwright/test`) | `.ai/qa/tests/playwright.config.ts` (tylko współdzielony config + discovery) | `apps/mercato/src/modules/<moduł>/__integration__/TC-*.spec.ts` | `yarn test:integration` / `yarn test:integration:ephemeral` |
+| **API** | Playwright (`request` + helpery `@open-mercato/core/helpers/integration/api`) | jw. | jw. (`__integration__/TC-*.spec.ts`) | jw. |
+| **E2E/UI** | Playwright (przeglądarka + `helpers/integration/auth`) | jw. | jw. (`__integration__/TC-*.spec.ts`) | jw. |
 | **Performance** | Custom bash/Node | `.ai/agentic.config.json` | Manualne + monit RAM/CPU | `yarn dev:profile` |
+
+Zasady (zgodnie z `.ai/qa/AGENTS.md` i wzorcem `packages/core/src/modules/sync_excel/__integration__/TC-SX-001.spec.ts`):
+
+- **Unit** = wyłącznie logika czysta, bez DB i HTTP: kalkulacje, zaokrąglenia, narzuty/marża, parser importu XLSX/CSV, walidatory zod, auto-planowanie harmonogramu (przesuwanie następników, wykrywanie cykli), prognoza produkcji.
+- **Integration / API / E2E/UI** = jeden mechanizm: Playwright w folderze `__integration__` modułu, uruchamiany na prawdziwej aplikacji i bazie (dev server lub środowisko ephemeral w Dockerze). Oznaczenia „Integration”, „API”, „UI”, „E2E” w scenariuszach opisują *warstwę asercji* (stan danych / kontrakt HTTP / interfejs), a nie osobne narzędzie.
+- Przykładowe ścieżki: `apps/mercato/src/modules/project_costing/__integration__/TC-COST-021.spec.ts`, `apps/mercato/src/modules/<moduł harmonogramu>/__integration__/TC-GANTT-001.spec.ts` (nazwy modułów robocze — ostateczne wg speki). Jeden plik `.spec.ts` na scenariusz, ID scenariusza w nazwie pliku.
+- Dane testowe: fixtures tworzone per test przez API (helpery `@open-mercato/core/helpers/integration/*`, np. `crmFixtures`, `authFixtures`, `generalFixtures`), sprzątanie w `finally`; nigdy nie polegać na danych seed/demo. Bezpośrednie asercje na DB (np. idempotentność, constrainty) — jak w TC-SX-001 przez klienta `pg`; kolejki — `drainIntegrationQueue`.
+- Testy zależne od modułu harmonogramu oznaczyć metadanymi `__integration__/meta.ts` (`requiredModules`), żeby były pomijane, gdy moduł nie jest włączony.
+- Nie umieszczać wykonywalnych `.spec.ts` w `.ai/qa/tests` (katalog tylko na współdzielony config Playwright).
 
 ---
 
@@ -1600,36 +1609,30 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 
 ## 20. Poziomy testów — mapowanie do narzędzi
 
-### Unit (Jest)
+### Unit (Jest — `__tests__` modułu)
 
-- Testy arytmetyki: zaokrąglenia (TC-COST-003), dzielenie (TC-COST-004), narzuty (TC-COST-009)
+- **Ścieżka**: `apps/mercato/src/modules/<moduł>/__tests__/*.test.ts` (dopasowanie `testMatch` z `apps/mercato/jest.config.cjs`)
+- Testy arytmetyki: zaokrąglenia (TC-COST-003), dzielenie (TC-COST-004), narzuty (TC-COST-009), marża (TC-COST-014), zaokrąglenia per waluta (TC-CUR-003)
 - Validatory zod: schema kalkulacji, cennika, kosztu
-- Helpery: parsowanie CSV, konwersje jednostek
-- **Komenda**: `yarn test --testPathPattern="__tests__/.*\\.test\\.ts"`
+- Parser importu: parsowanie XLSX/CSV, kodowania, separatory, konwersje jednostek
+- Auto-planowanie harmonogramu: przesuwanie następników, wykrywanie cykli (logika czysta, bez UI)
+- Prognoza produkcji: agregacja partii, ważenie prawdopodobieństwem, horyzont
+- **Komenda**: `yarn test` (wszystkie pakiety przez turbo) lub `yarn workspace @open-mercato/app test src/modules/<moduł>/__tests__` (tylko moduł)
 
-### Integration (Jest + createTestDb)
+### Integration / API / E2E/UI (Playwright — `__integration__` modułu)
 
-- Powiązania deal/projekt (TC-DEAL-001 do TC-DEAL-010)
-- Import/eksport XLSX/CSV (TC-IMP-001 do TC-IMP-008)
-- Wersje kalkulacji (TC-VER-001 do TC-VER-006)
-- Uprawnienia (TC-PERM-001 do TC-PERM-008)
-- **Komenda**: `yarn test --testPathPattern="__tests__/.*\\.integration\\.test\\.ts"`
-
-### API (Jest + Supertest)
-
-- CRUD routes: POST /kalkulacje, PUT /kalkulacje/:id, GET /kalkulacje
-- Filtrowanie multi-tenant (`organization_id`)
-- Response enrichment (marża, cena)
-- Error handling (400, 403, 409 concurrent edit)
-- **Komenda**: `yarn test --testPathPattern="__tests__/.*\\.api\\.test\\.ts"`
-
-### E2E/UI (Playwright)
-
-- Interaktywne testy siatki (TC-COST-021, TC-COST-022)
-- Drag-drop Gantta (TC-GANTT-001)
-- Import z kreatory mapowania (TC-IMP-001)
-- PDF generowanie i pobranie (TC-VER-006, TC-PERM-007)
-- **Komenda**: `yarn test:integration` (discovery `.ai/qa/tests/__integration__/**/*.spec.ts`)
+- **Ścieżka**: `apps/mercato/src/modules/<moduł>/__integration__/TC-<ID>.spec.ts`, np. `apps/mercato/src/modules/project_costing/__integration__/TC-COST-021.spec.ts`; wzorzec: `packages/core/src/modules/sync_excel/__integration__/` (TC-SX-001..008 + `helpers/` + `meta.ts`)
+- **Discovery**: `.ai/qa/tests/playwright.config.ts` automatycznie zbiera specy z folderów `__integration__` modułów; `.ai/qa/tests` zawiera tylko współdzielony config
+- **Warstwa danych (Integration)**: powiązania deal/projekt (TC-DEAL-*), import/eksport (TC-IMP-*), wersje (TC-VER-*), cenniki (TC-PRICE-*), prognoza (TC-FCST-*), harmonogram wykonawczy (TC-EXEC-*), bezpieczeństwo plików (TC-SEC-*), edycja równoległa (TC-CONC-*) — setup i asercje przez API (`getAuthToken`, `apiRequest`), w razie potrzeby bezpośrednio na DB (`pg`) i kolejce (`drainIntegrationQueue`)
+- **Warstwa kontraktu HTTP (API)**: CRUD kalkulacji, filtrowanie multi-tenant (`organization_id`, TC-TEN-*, TC-PERM-005), ukrywanie marży/kosztu w odpowiedziach, kody błędów (400, 403, 404, 409 concurrent edit)
+- **Warstwa UI (E2E/UI)**: siatka kalkulacji (TC-COST-021, TC-COST-022), drag-drop Gantta (TC-GANTT-001), kreator mapowania importu (TC-IMP-001), generowanie i pobranie PDF (TC-VER-006, TC-PERM-007) — logowanie przez `@open-mercato/core/helpers/integration/auth`
+- **Komendy** (z `package.json` w root):
+  - `yarn test:integration` — Playwright na działającym dev serverze (`BASE_URL`, domyślnie `http://localhost:3000`)
+  - `yarn test:integration:ephemeral` — pełny przebieg w izolowanym środowisku ephemeral (Docker, bez dev servera)
+  - `yarn test:integration:ephemeral:interactive` — jedno środowisko, wielokrotne uruchamianie wybranych specy
+  - pojedynczy plik: `npx playwright test --config .ai/qa/tests/playwright.config.ts <ścieżka-do-spec>`
+  - tylko wybrane moduły: zmienna `OM_INTEGRATION_MODULES=<moduł>[,<moduł>]`
+  - raport: `yarn test:integration:report`
 
 ### Performance (Custom bash / Node.js profiling)
 
@@ -1758,7 +1761,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 ## 23. Podsumowanie
 
 **Dokument**: Niezależny plan testów — spec only
-**Liczba scenariuszy**: 109 (rev 2; rev 1 miał 72)
+**Liczba scenariuszy**: 109 (rev 3 bez zmian liczby; rev 2: 109; rev 1 miał 72)
 **Liczba wniosków do speki**: 20 (15 oryginalnych + 5 nowych w rev 2)
 **Status**: SPEC ONLY — bez kodu, bez testów wykonywalnych
 
@@ -1770,6 +1773,14 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 ---
 
 ## Changelog
+
+### Rev 3 — 2026-10-20
+
+**Poziomy testów dopasowane do konwencji repo** (review PR #10/#11, pkt 17):
+- §2 i §20 przepisane: Unit = Jest w `apps/mercato/src/modules/<moduł>/__tests__/*.test.ts` (logika czysta: kalkulacje, zaokrąglenia, parser importu, auto-planowanie, prognoza); Integration/API/E2E/UI = Playwright w `apps/mercato/src/modules/<moduł>/__integration__/TC-*.spec.ts` wg wzorca `sync_excel/__integration__`
+- Komendy zgodne z `package.json`: `yarn test`, `yarn workspace @open-mercato/app test`, `yarn test:integration`, `yarn test:integration:ephemeral` (+ `:interactive`, `test:integration:report`, `OM_INTEGRATION_MODULES`)
+- Usunięto odwołania do narzędzi i ścieżek, których nie ma w repo lub które łamią `.ai/qa/AGENTS.md` (helper testowej bazy dla Jest, biblioteka HTTP do testów API w Jest, jestowe sufiksy plików dla poziomów Integration/API, discovery specy z katalogu `.ai/qa/tests`)
+- Doprecyzowano znaczenie oznaczeń „Integration”/„API”/„UI”/„E2E” w scenariuszach (warstwa asercji w Playwright) — oznaczenia i ID scenariuszy bez zmian, licznik 109 bez zmian
 
 ### Rev 2 — 2026-10-19
 
@@ -1801,5 +1812,5 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 ---
 
 **Koniec dokumentu**
-*Data wygenerowania: 2026-10-19 | Rev 2: 2026-10-19*
+*Data wygenerowania: 2026-10-19 | Rev 2: 2026-10-19 | Rev 3: 2026-10-20*
 
