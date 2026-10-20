@@ -26,7 +26,7 @@ Data „≤2026-10-20” oznacza decyzję obowiązującą na 2026-10-20, bez pot
 | D10 | 2026-10-19 | Kalkulacja może istnieć bez deala. | Marek; cost spec A4 | active |
 | D11 | ≤2026-10-20 | PDF oferty w pierwszej wersji. | Marek | active |
 | D12 | ≤2026-10-20 | Start od własnego cennika użytkownika; później zgodność z Sekocenbud i innymi cennikami. | Marek; cost spec §13 | active |
-| D13 | 2026-10-19 | Widoczność kalkulacji i marży to ustawienie per firma (w tym widoczność marży po zamknięciu deala). | Marek (rev 7); plan testów §22 pkt 6 | active |
+| D13 | 2026-10-19 | Widoczność kalkulacji i marży to ustawienie per firma (w tym widoczność marży po zamknięciu deala). | Marek (rev 7); plan testów §22 pkt 6 | superseded (D48, D49) |
 | D14 | 2026-10-19 | Marża liczona od ceny sprzedaży: (cena − koszt) / cena. | plan testów §22 pkt 3 | active |
 | D15 | 2026-10-19 | Firma = organizacja w OM. | plan testów §22 pkt 4 | active |
 | D16 | 2026-10-19 | Zaokrąglenie half-up do 2 miejsc per linia, konfigurowalne per firma; sumy z zaokrąglonych linii. | plan testów §22 pkt 1 | active |
@@ -45,14 +45,14 @@ Data „≤2026-10-20” oznacza decyzję obowiązującą na 2026-10-20, bez pot
 | D24 | 2026-10-19 | Harmonogram ofertowy staje się wykonawczym po wygraniu deala (automatycznie). | Marek (rev 7); plan testów §22 pkt 7 | active |
 | D25 | 2026-10-19 | Import MS Project dopiero od v2. | Marek (rev 7) | active |
 | D26 | ≤2026-10-20 | Harmonogram na razie wewnętrzny, przygotowany na późniejszą integrację zewnętrzną. | Marek | active |
-| D27 | ≤2026-10-20 | Dane do PDF z profilu firmy. | Marek | active |
+| D27 | ≤2026-10-20 | Dane do PDF z profilu firmy. | Marek | superseded (D60) |
 
 ## MVP
 
 | # | Data | Decyzja | Uzasadnienie / źródło | Status |
 |---|---|---|---|---|
 | D28 | 2026-10-19 | MVP: costing 17 d + schedule 14 d (pełny Gantt), PDF i wersje w v1; razem 94,5 d. | cost spec §14 (rev 7) | superseded (D29) |
-| D29 | ≤2026-10-20 | MVP przycięte wg Kod: siatka, tryby A i C, prosty cennik, mark-sent ze snapshotem i PDF, apply-to-deal, RBAC, partie produkcji bez Gantta. | przegląd Kod pkt 15 | active |
+| D29 | ≤2026-10-20 | MVP przycięte wg Kod: siatka, tryby A i C, prosty cennik, mark-sent ze snapshotem i PDF, apply-to-deal, RBAC, partie produkcji bez Gantta. | przegląd Kod pkt 15 | superseded (D50) |
 | D30 | ≤2026-10-20 | Bez formuł w MVP; w v1 `quantity_expr` z bezpiecznym parserem (bez eval). | przegląd Kod pkt 14 | active |
 
 ## Faza 0 — integracja n8n → OM
@@ -75,6 +75,22 @@ Data „≤2026-10-20” oznacza decyzję obowiązującą na 2026-10-20, bez pot
 | D44 | 2026-10-18 | Backfill max 30 dni, partie 20–50, 1 równoległe żądanie (VPS 2 vCPU / 4 GB). | push-contract §0, §8 | active |
 | D45 | 2026-10-18 | Własne moduły jako moduły aplikacji w forku (`apps/mercato/src/modules`), bez zmian w `packages/core`. | analiza §2 | active |
 | D46 | ≤2026-10-20 | Faza 1 u Enki (dopasowanie duplikatów inwestycji, konkurent) wstrzymana do akceptacji Marka. | Marek | active |
+| D47 | 2026-10-20 | Przełącznik modułu harmonogramu per organizacja w `module_configs` (ModuleConfigService) + feature'y ACL + blokady menu, zakładki deala i API; `feature_toggles` tylko jako globalny kill-switch modułu per tenant. | Koordynator 2026-10-20 (makieta figma bro) | active |
+| D48 | 2026-10-20 | Widoczność marży/kosztu: feature'y w `acl.ts` (RBAC); ustawienie organizacji to tylko domyślne przypisanie feature'ów do ról (admin/employee/własne). Ukryta marża = ukryty koszt. | Koordynator 2026-10-20; przegląd Kod P0-3 | active |
+| D49 | 2026-10-20 | Marża odsłania się po `closure_outcome` (won lub lost), zgodnie z ustawieniem organizacji (doprecyzowanie D13). | Koordynator 2026-10-20 (makieta figma bro) | active |
+| D50 | 2026-10-20 | MVP = D29 + import XLSX + `offer_role` (ręczne wskazanie inwestycji z podpowiedzią po kodzie) + linia typu note + ręczne partie i import harmonogramu dla firm bez Gantta. | Koordynator 2026-10-20 (a) + Koordynator 2026-10-20 (makieta figma bro) | active |
+| D51 | 2026-10-20 | Komunikat przy drugiej ofercie dla tej samej inwestycji dokładnie: „Istnieje już oferta dla innego wykonawcy — wskaż, która jest główna”. | Marek przez Koordynatora 2026-10-20 | active |
+| D52 | 2026-10-20 | Inwestycja = jedna encja (nie `klin:project` obok `pc_investments`); spec wskazuje, którą zostawiamy, i migrację `klin:project`. | Koordynator 2026-10-20 (c) | active |
+| D53 | 2026-10-20 | Jeden Gantt na inwestycję = osobny rekord (doprecyzowanie D23). | Koordynator 2026-10-20 (makieta figma bro) | active |
+| D54 | 2026-10-20 | Kolizja z przypiętym zadaniem: ostrzeżenie + propozycja odpięcia. Auto-przesuwanie następników tylko w przód; przy wcześniejszym terminie tylko propozycja przesunięcia. Start przy kilku poprzednikach od najpóźniejszego. | Koordynator 2026-10-20 (makieta figma bro) | active |
+| D55 | 2026-10-20 | Konwencja dat harmonogramu: koniec włącznie; FS = dzień po końcu + lag; kamień milowy 0 dni; dni kalendarzowe. | Koordynator 2026-10-20 (makieta figma bro) | active |
+| D56 | 2026-10-20 | Import harmonogramu zastępuje dane po potwierdzeniu; błędne wiersze odrzucane z raportem. | Koordynator 2026-10-20 (makieta figma bro) | active |
+| D57 | 2026-10-20 | „Przelicz z cennika” dotyczy tylko linii bez override. „Nowa rewizja” to jedna akcja (unlock + duplicate scalone). | Koordynator 2026-10-20 (makieta figma bro) | active |
+| D58 | 2026-10-20 | Mark-sent blokują: błędy importu, brak pozycji, ujemne ceny. Tylko ostrzeżenie: ujemna marża, pusta sekcja. Brak deala nie blokuje. | Koordynator 2026-10-20 (makieta figma bro) | active |
+| D59 | 2026-10-20 | apply-to-deal to przycisk, działa tylko z aktywnej wersji. | Koordynator 2026-10-20 (makieta figma bro) | active |
+| D60 | 2026-10-20 | PDF: dane firmy z `module_configs`, generowanie przez pdf-lib (zastępuje D27). | Koordynator 2026-10-20 (makieta figma bro) | active |
+| D61 | 2026-10-20 | Kalkulacja bez deala nie wchodzi do prognozy ważonej; pokazywana osobno. | Koordynator 2026-10-20 (makieta figma bro) | active |
+| D62 | 2026-10-20 | Zaokrąglanie half-up do 2 miejsc na pozycji, suma z pozycji już zaokrąglonych, konfigurowalne per organizacja; słownik jednostek z przelicznikami; priorytet identyfikatorów inwestycji: e-Zamówienia > TED > BIP > INV. | Koordynator 2026-10-19 | active |
 
 ## Proces
 

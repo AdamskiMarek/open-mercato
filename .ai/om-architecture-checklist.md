@@ -27,8 +27,8 @@
 
 ## Konfiguracja i włączanie modułów
 - [ ] Ustawienia modułu przez `ModuleConfigService` (`module_configs`), nie własna tabela ustawień. (Kod p7)
-- [ ] Włączanie funkcji per tenant przez `feature_toggles` + blokada menu, widgetów i API; moduły włącza build, nie rejestr w runtime. (Kod p7)
-- [ ] Spec definiuje zakres „firmy” (decyzja: firma = organizacja OM) i dobiera do niego mechanizm — `feature_toggles` działa per tenant. (Kod p7)
+- [ ] Włączanie modułu per organizacja przez `module_configs` (ModuleConfigService) + feature'y ACL + blokada menu, widgetów i API; `feature_toggles` tylko jako globalny kill-switch modułu per tenant; moduły włącza build, nie rejestr w runtime. (Kod p7, D47)
+- [ ] Spec definiuje zakres „firmy” (decyzja: firma = organizacja OM) i dobiera do niego mechanizm: per organizacja `module_configs`, per tenant tylko kill-switch `feature_toggles`. (Kod p7, D47)
 
 ## Dane z CRM (deale)
 - [ ] Statusy deala zgodne z OM: `open` + `closure_outcome`, eventy `customers.deal.won/lost`, archiwum = `deleted_at`; subscriber `persistent: true`; snapshot statusu w naszej encji. (Kod p5)
