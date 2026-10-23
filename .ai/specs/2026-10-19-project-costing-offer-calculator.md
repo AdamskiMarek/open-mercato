@@ -1487,7 +1487,7 @@ Każda encja i trasa z fazy przechodzi przez konwencje repo: migracja i snapshot
 
 ## 16. Pytania otwarte do Marka (rev 8b)
 
-**Zamknięte** (`.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`): D1–D82; D83 — `.ai/decisions.md` z tego PR, gałąź `spec/rev8e`):
+**Zamknięte** (`.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`): D1–D82; D83 — `.ai/decisions.md`@3f00542, gałąź `develop_OM_CRM`):
 
 | # | Temat | Rozstrzygnięcie |
 |---|---|---|
@@ -1703,7 +1703,7 @@ Brak punktów ⚠️. Ryzyka rezydualne: §15 (R1, R2, R15, R16).
 
 ## 22. Decision traceability (D1–D83)
 
-Źródło: `.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`, merge PR #13) dla D1–D82; D83 — `.ai/decisions.md` z tego PR (gałąź `spec/rev8e`, Koordynator 2026-10-23). D49 jest aktywna w fazie v1 (D75). Zakres D1–D83: 74 aktywnych i 9 zastąpionych. D70 i D71 są warunkowe — obowiązują, gdy Q6 ≠ (a) (Q6 otwarte, §16). Tabela obejmuje wszystkie aktywne decyzje; w kolumnach wskazane są sekcje, które je realizują, w obu specach (schedule ma skrót w schedule §21). Decyzje zastąpione nie są cytowane w tekście spec: D3 superseded by D4; D7 superseded by D63; D8 superseded by D10; D13 superseded by D48, D49; D27 superseded by D60; D28 superseded by D29; D29 superseded by D50; D39 superseded by D64 (z okresem przejściowym do migracji); D43 superseded by D63.
+Źródło: `.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`, merge PR #13) dla D1–D82; D83 — `.ai/decisions.md`@3f00542 (gałąź `develop_OM_CRM`, merge PR #14; Koordynator 2026-10-23). D49 jest aktywna w fazie v1 (D75). Zakres D1–D83: 74 aktywnych i 9 zastąpionych. D70 i D71 są warunkowe — obowiązują, gdy Q6 ≠ (a) (Q6 otwarte, §16). Tabela obejmuje wszystkie aktywne decyzje; w kolumnach wskazane są sekcje, które je realizują, w obu specach (schedule ma skrót w schedule §21). Decyzje zastąpione nie są cytowane w tekście spec: D3 superseded by D4; D7 superseded by D63; D8 superseded by D10; D13 superseded by D48, D49; D27 superseded by D60; D28 superseded by D29; D29 superseded by D50; D39 superseded by D64 (z okresem przejściowym do migracji); D43 superseded by D63.
 
 Bilans: 74 aktywnych, z czego 63 realizowanych w specach i 11 N/A (D4, D31, D32, D34, D35, D36, D37, D38, D41, D44, D46). N/A to kontrakt n8n → `customers` albo Enka: specy go nie zmieniają, moduły tylko czytają dane deala.
 

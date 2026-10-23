@@ -636,19 +636,19 @@ Inwestycję zakłada handlowiec w module kalkulacji; n8n inwestycji nie tworzy. 
 #### TC-DEAL-010: Inwestycja — rozdzielanie i wybór oferty głównej
 
 - **Priorytet**: P2 | **Etap**: v1 | **Poziom**: Integration + E2E/UI + `pg`
-- **Warunki wstępne**: Inwestycja „Kompleks” z trzema ofertami: Deal 1 (oryginał, oferta główna), Deal 2 i Deal 3 (alternatywne); admin. Rozdzielenie: Deal 1 i Deal 2 zostają w „Hala A”, Deal 3 przechodzi do nowej „Hala B”
+- **Warunki wstępne**: Inwestycja „Kompleks” z trzema ofertami: Deal 1 (oryginał, oferta główna), Deal 2 i Deal 3 (alternatywne); admin. Rozdzielenie: Deal 1 i Deal 2 zostają w inwestycji źródłowej „Kompleks” (nazwa bez zmian po podziale), Deal 3 przechodzi do nowej inwestycji „Hala B”
 - **Kroki**:
   1. Rozdziel inwestycję, akceptując domyślny wybór oferty głównej
-  2. Na świeżych danych: rozdziel, w kroku podziału wybierz Deal 2 jako ofertę główną „Hala A”
-  3. Na świeżych danych: w kroku podziału zaznacz dwie oferty główne dla „Hala A” (UI i API)
+  2. Na świeżych danych: rozdziel, w kroku podziału wybierz Deal 2 jako ofertę główną „Kompleks”
+  3. Na świeżych danych: w kroku podziału zaznacz dwie oferty główne dla „Kompleks” (UI i API)
   4. Po każdym kroku: przez `pg` policz oferty główne na inwestycję
 - **Oczekiwane wyniki**:
   - Rozdzielenie niedostępne w MVP (brak akcji w UI, API odrzuca)
-  - Krok podziału pokazuje wybór oferty głównej osobno dla każdej inwestycji po podziale („Hala A” i „Hala B”); domyślnie zaznaczona dotychczasowa oferta główna (oryginał, Deal 1) w „Hala A”, a w „Hala B” jej jedyna oferta (Deal 3)
-  - Krok 1: „Hala A” — Deal 1 główna, Deal 2 alternatywna; „Hala B” — Deal 3 główna (pierwsza oferta na inwestycji)
-  - Krok 2: „Hala A” — Deal 2 główna, Deal 1 alternatywna
+  - Krok podziału pokazuje wybór oferty głównej osobno dla każdej inwestycji po podziale („Kompleks” i „Hala B”); domyślnie zaznaczona dotychczasowa oferta główna (oryginał, Deal 1) w „Kompleks”, a w „Hala B” jej jedyna oferta (Deal 3)
+  - Krok 1: „Kompleks” — Deal 1 główna, Deal 2 alternatywna; „Hala B” — Deal 3 główna (pierwsza oferta na inwestycji)
+  - Krok 2: „Kompleks” — Deal 2 główna, Deal 1 alternatywna
   - Krok 3: odrzucone z komunikatem dokładnie „Istnieje już oferta dla innego wykonawcy — wskaż, która jest główna”; rozdzielenie nie wykonane, dane bez zmian
-  - Krok 4: przez `pg` w każdej inwestycji po podziale („Hala A” i „Hala B”) dokładnie jedna oferta główna
+  - Krok 4: przez `pg` w każdej inwestycji po podziale („Kompleks” i „Hala B”) dokładnie jedna oferta główna
   - Audit trail rozdzielenia
 
 #### TC-DEAL-011: Pierwsza oferta na inwestycji — automatycznie główna
@@ -890,7 +890,7 @@ Numeracja wersji, statusy, zamrożenie, PDF, porównanie wersji, wysłanie (blok
 - **Kroki**:
   1. Jako employee: kliknij „Wyślij”
   2. Jako employee: wywołaj wysłanie przez API, także z potwierdzeniem ostrzeżeń
-  3. Sprawdź treść komunikatu, body odpowiedzi API oraz wpisy audytu i historii akcji widoczne dla R
+  3. Sprawdź treść komunikatu, body odpowiedzi API oraz wpisy audytu i historii akcji widoczne dla employee
   4. Jako admin: wyślij tę samą wersję, potwierdź ostrzeżenie o ujemnej marży
   5. Jako employee: wyślij wersję z dodatnią marżą
   6. Jako employee: edytuj wersję z ujemną marżą i obserwuj siatkę i podgląd
@@ -2308,7 +2308,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 
 ## Załącznik: Traceability TC → D
 
-Źródło: `.ai/decisions.md`@b544719 (develop_OM_CRM) — 73 aktywne decyzje, w tym D75–D82 i poprawiona D71. D83: rozstrzygnięte przez Koordynatora 2026-10-23 (decisions.md w PR rev 8e). N/A = decyzja bez zachowania testowanego w tym planie.
+Źródło: `.ai/decisions.md`@b544719 (develop_OM_CRM) — 73 aktywne decyzje, w tym D75–D82 i poprawiona D71. D83: `.ai/decisions.md`@3f00542 (develop_OM_CRM, merge PR #14), rozstrzygnięte przez Koordynatora 2026-10-23. N/A = decyzja bez zachowania testowanego w tym planie.
 
 | D | Treść skrócona | TC | Uwagi |
 |---|---|---|---|
@@ -2385,7 +2385,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 | D80 | Następnik kamienia milowego tego samego dnia | TC-GANTT-009 | |
 | D81 | Wartość z „Zastosuj do deala” wygrywa; n8n tylko pola przetargowe | TC-DEAL-016 | |
 | D82 | Gantt własny, zewnętrzna biblioteka tylko PoC w v1 | N/A | zależności, nie zachowanie; scenariusze Gantta bez nazwy biblioteki |
-| D83 | Rozdzielenie w v1; wybór oferty głównej, domyślnie oryginał | TC-DEAL-010 | etap v1; źródło: Rozstrzygnięte przez Koordynatora 2026-10-23 (decisions.md w PR rev 8e) |
+| D83 | Rozdzielenie w v1; wybór oferty głównej, domyślnie oryginał | TC-DEAL-010 | etap v1; źródło: `.ai/decisions.md`@3f00542 (Rozstrzygnięte przez Koordynatora 2026-10-23) |
 
 **Decyzje zastąpione — nie testujemy:**
 - D3 — zastąpione przez D4

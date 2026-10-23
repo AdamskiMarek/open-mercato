@@ -993,7 +993,7 @@ apps/mercato/src/modules/project_schedule/
 
 ## 21. Decision traceability (D1–D83)
 
-Zakres D1–D83: `.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`) dla D1–D82; D83 — `.ai/decisions.md` z gałęzi `spec/rev8e`. Pełna tabela wszystkich aktywnych decyzji (z N/A i powodami) jest w costing §22. Poniżej decyzje realizowane w tej specyfikacji. Decyzje zastąpione nie są cytowane (lista „superseded by” w costing §22).
+Zakres D1–D83: `.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`) dla D1–D82; D83 — `.ai/decisions.md`@3f00542 (gałąź `develop_OM_CRM`). Pełna tabela wszystkich aktywnych decyzji (z N/A i powodami) jest w costing §22. Poniżej decyzje realizowane w tej specyfikacji. Decyzje zastąpione nie są cytowane (lista „superseded by” w costing §22).
 
 | D | Decyzja (skrót) | Sekcje tej specyfikacji |
 |---|---|---|
