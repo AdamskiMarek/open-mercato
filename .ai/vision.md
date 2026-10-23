@@ -1,6 +1,6 @@
 # Klin #1 — wizja produktu
 
-**Stan na:** 2026-10-20
+**Stan na:** 2026-10-23
 **Zasada aktualizacji:** ten plik aktualizujemy za każdym razem, gdy Marek zmieni kierunek produktu. Zmianę dopisujemy też jako nowy wiersz w `decisions.md` (stary wiersz dostaje status `superseded`). Plik opisuje kierunek, nie szczegóły implementacji — te są w specach w `.ai/specs/`.
 
 ## Czym jest Klin #1
@@ -8,6 +8,7 @@
 - Źródła przetargów: e-Zamówienia (cała Polska) i TED (wszystkie kraje).
 - CRM: Open Mercato (OM), instancja open-mercato.pl (Dokploy). To jest instancja testowa Marka.
 - Przetargi trafiają do OM jako deale w lejku „Przetargi”.
+- Część OM Klina to trzy moduły aplikacji: kalkulacja ofert (costing, baza), harmonogram (schedule, opcjonalny per firma) oraz projekty i dokumentacja realizacji (delivery, opcjonalny). Cykl: przetarg → oferta → wygrana → realizacja z dokumentacją.
 
 ## Dla kogo
 - Pierwsza nisza: zakłady prefabrykacji żelbetowej (prefabrykaty betonowe).
@@ -57,6 +58,16 @@
 - Na razie wewnętrzny, przygotowany na późniejszą integrację zewnętrzną.
 - Dane do PDF z profilu firmy.
 
+### 5. Projekty i dokumentacja realizacji (moduł delivery, tylko specyfikacja)
+- Po wygranym przetargu handlowiec jedną akcją zakłada projekt realizacji z szablonu segmentu. Projekt nie powstaje automatycznie.
+- Projekt: etapy, zadania, kamienie milowe powiązane z pozycjami oferty, członkowie, foldery z uprawnieniami.
+- Bez własnego Gantta: harmonogram wykonawczy jest w module schedule; projekt działa też bez niego.
+- Dokumenty z rewizjami (rewizji nie da się zmienić; do produkcji idzie najnowsza zatwierdzona). Import dokumentacji przetargowej z e-Zamówień; z TED tylko link.
+- Pliki w storage w UE, nie na serwerze aplikacji. Domyślnie najtańszy dostawca w UE w pełni zgodny z naszym modułem storage (dziś według porównania cenników OVHcloud); zapasowo Backblaze B2 z adapterem. Firma wybiera wariant: nasz storage z limitem w abonamencie i dopłatą ponad limit albo własny storage/dysk (od v1/v2).
+- Retencja ustawiana per firma (podpowiedź: koniec gwarancji i rękojmi). Nic nie jest usuwane automatycznie; usunięcie plików tylko przez administratora.
+- Później: akceptacje, transmittale, RFI, protokoły odbioru, Google Drive (v1); gwarancja, jakość per partia, inne dyski, OCR (v2).
+- E-dziennik budowy, rękojmia, zabezpieczenie Pzp i retencja dokumentów to tematy do weryfikacji prawnej, nie funkcje.
+
 ## MVP modułów costing/schedule (po przeglądzie Kod)
 - W MVP: siatka, tryby ceny A i C, prosty cennik, mark-sent ze snapshotem i PDF, apply-to-deal, RBAC, partie produkcji bez Gantta.
 - Bez formuł w MVP. W v1 `quantity_expr` z bezpiecznym parserem (ilość z wymiarów).
@@ -64,7 +75,7 @@
 ## Zasady produktowe i procesowe
 - Marek decyduje tylko o sprawach biznesowych i produktowych. Proces, modele i skille ustalają Koordynator i Cezar.
 - Cały kod OM idzie przez Cezara. Wszystko zostaje w forku `AdamskiMarek/open-mercato`; nigdy nie pushujemy do `open-mercato/open-mercato`.
-- Moduły costing i schedule: żadnej implementacji, dopóki Marek wprost nie powie „implementujemy”.
+- Moduły costing, schedule i delivery: żadnej implementacji, dopóki Marek wprost nie powie „implementujemy”.
 - Przed kodem powstaje osobny plan testów, pisany innym modelem niż spec i bez czytania speki.
 - Merge tylko po „merguj”.
 - „Gotowe” = dowód: testy + zrzuty ekranu albo przebieg na instancji testowej open-mercato.pl.
@@ -73,7 +84,9 @@
 - Własne moduły jako moduły aplikacji w forku, bez zmian w `packages/core`.
 
 ## Czego (jeszcze) nie robimy
-- Nie implementujemy modułów costing i schedule (tylko specyfikacja).
+- Nie implementujemy modułów costing, schedule i delivery (tylko specyfikacja).
+- Nie trzymamy plików projektów na serwerze aplikacji (VPS) ani nie przepuszczamy ich przez pamięć aplikacji.
+- Delivery nie ma własnego Gantta.
 - Nie kupujemy SVAR PRO.
 - Nie włączamy całego modułu `sales` pod kalkulator.
 - Nie ma formuł w MVP kalkulatora.

@@ -6,10 +6,10 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-19 |
-| **Rewizja** | 2026-10-23 (rev 8h — zakres traceability D1–D97: D95–D97 N/A; poprzednio rev 8f — zakres traceability D1–D94: D91 realizowana, D84–D90 i D92–D94 N/A; poprzednio rev 8e — zakres traceability D1–D83, D83 N/A; poprzednio rev 8d, rev 8c, rev 8b 2026-10-23, rev 8a 2026-10-20) |
+| **Rewizja** | 2026-10-23 (rev 8i — zmiana na potrzeby `project_delivery` (D98, D100): provider harmonogramu wykonawczego w `executionScheduleRegistry` costingu, zakres zbiorczy trzech modułów; poprzednio rev 8h — zakres traceability D1–D97: D95–D97 N/A; poprzednio rev 8f — zakres traceability D1–D94: D91 realizowana, D84–D90 i D92–D94 N/A; poprzednio rev 8e — zakres traceability D1–D83, D83 N/A; poprzednio rev 8d, rev 8c, rev 8b 2026-10-23, rev 8a 2026-10-20) |
 | **Moduł** | `project_schedule` (`apps/mercato/src/modules/project_schedule`) |
 | **Zależności upstream** | **`project_costing` (moduł bazowy)**, `customers`, `dictionaries`, `dashboards`, `attachments`, `notifications`, `configs`, `feature_toggles`, `audit_logs`, `query_index`, `progress` |
-| **Powiązany spec** | `.ai/specs/2026-10-19-project-costing-offer-calculator.md` |
+| **Powiązany spec** | `.ai/specs/2026-10-19-project-costing-offer-calculator.md`; zmiana na potrzeby project_delivery (D98): `.ai/specs/2026-10-23-project-delivery-docs.md` — `project_delivery` nie importuje `project_schedule` i odwrotnie; spotykają się w `executionScheduleRegistry` costingu (§5.2) |
 | **Kierunek zależności** | rev 8a: `project_schedule` (opcjonalny) **zależy od** `project_costing` (baza) i rejestruje provider `ScheduleSource` w DI; `project_costing` nigdy nie importuje `project_schedule` (Kod P0-1) |
 
 ---
@@ -53,7 +53,10 @@ project_costing (BAZA)                               project_schedule (OPCJONALN
   komenda refresh_schedule_totals          <─execute─── subscriber na własne eventy schedule (kolejka, debounce)
   eventy project_costing.calculation.*     ──event────> subscribers/calculationActivated.ts, calculationDeleted.ts
 customers: eventy customers.deal.won ──────────────────> subscribers/dealWon.ts (offer → execution)
+  executionScheduleRegistry                <─register── di.ts: InternalExecutionScheduleProvider (zmiana na potrzeby project_delivery, D100)
 ```
+
+> **Zmiana na potrzeby project_delivery (D98, D100):** trzeci moduł `project_delivery` (projekty realizacji i dokumentacja) nie ma własnego Gantta. Harmonogram wykonawczy jest tutaj. `project_delivery` nie importuje `project_schedule` i nie subskrybuje jego eventów. Czyta stan i uruchamia fazę wykonawczą wyłącznie przez `executionScheduleRegistry` (rejestr w costingu), w którym ten moduł rejestruje providera (§5.2). Bez `project_schedule` delivery działa (provider nieobecny albo `isAvailable = false`).
 
 - Kierunek: `project_schedule` → `project_costing` (import typów/tokenów DI, subskrypcja eventów). Odwrotnie nic: costing nie zna eventów, tras ani tabel schedule (`packages/core/AGENTS.md` § Cross-Module Coupling).
 - Zero HTTP między modułami. Wszystkie wcześniejsze wywołania HTTP (`GET /api/project-costing/element-types`, `GET /api/project-schedule/schedules/:id/summary` wołane przez costing) zastąpione serwisami DI.
@@ -523,6 +526,7 @@ Kierunek: `project_schedule` używa kontraktów `project_costing` i rejestruje w
 | `calculationLookupService.getById / listByInvestment` | costing | powiązanie harmonogramu z kalkulacją, cross-deal Gantt (§7.3) |
 | `projectCostingSettings` | costing | `schedule.enabled` per organizacja (§1.0) |
 | komenda `project_costing.calculations.refresh_schedule_totals` | costing | wywoływana z subscribera tego modułu po `schedule.rescheduled` / `batch.*` (kolejka, debounce) |
+| `executionScheduleRegistry.register(InternalExecutionScheduleProvider)` — **zmiana na potrzeby project_delivery (D100)** | costing (rejestr) | `di.ts` rejestruje providera: `isAvailable(ctx)` = `false`, gdy `schedule.enabled` wyłączony w organizacji (§1.0, D67); `findForInvestment(investmentId)` → `{ scheduleId, phase }` rekordu inwestycji (D77) albo `null`; `ensureExecution({ investmentId, dealId })` → istniejący rekord inwestycji (gdy go brak — `POST /schedules` z `investmentId` przez komendę tego modułu) i komenda `create_execution` (idempotentna, §2.2; 409 `SCHEDULE_ALREADY_EXISTS` traktowane jako sukces z istniejącym ID). Konsument: `project_delivery` (v1, delivery §4.1). Zapis wyłącznie komendami tego modułu |
 
 Endpointy `/api/project-schedule/*` (§6) służą UI i klientom zewnętrznym, nie innym modułom.
 
@@ -820,12 +824,15 @@ Jak w costing §14: każda encja i trasa przez migracje, zod, komendy z undo i `
 
 ---
 
-## 13. Zakres zbiorczy (oba moduły)
+## 13. Zakres zbiorczy (trzy moduły)
+
+Zmiana na potrzeby project_delivery (D98): tabela obejmuje trzeci moduł.
 
 | Moduł | MVP | v1 | v2 |
 |---|---|---|---|
 | `project_costing` | costing §14 MVP | costing §14 v1 | costing §14 v2 |
 | `project_schedule` | — (moduł nie wchodzi do MVP) | §12 v1 | §12 v2 |
+| `project_delivery` | delivery §11 MVP (bez harmonogramu) | delivery §11 v1 (+ link/uruchomienie harmonogramu przez provider z §5.2) | delivery §11 v2 |
 
 Tabela identyczna jak w costing §14 „Zakres zbiorczy”.
 
@@ -1029,6 +1036,8 @@ Zakres D1–D97: `.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`) dla D1�
 
 D83 (split inwestycji w v1, wybór oferty głównej) — N/A w tej specyfikacji: to komenda `project_costing.investments.split` (costing §2.2, §3.12). Rekord harmonogramu inwestycji (D77) zostaje przy inwestycji źródłowej; nowa inwestycja zaczyna bez harmonogramu.
 
+Zmiana na potrzeby project_delivery (D98–D115): D98 (trzy moduły) i D100 (brak Gantta w delivery, provider w `executionScheduleRegistry`) realizowane w §0, §5.2 i §13. Pozostałe D99, D101–D115 — N/A w tej specyfikacji (projekt realizacji, dokumenty, storage, retencja: delivery §19).
+
 D84–D90 i D92–D94 — N/A w tej specyfikacji (realizacja w costing §3.10, §14, §18a):
 - D84–D89 (waluty, kursy `NBP_A`, waluta bazowa, `decimal_places`, `snapshot_data.fx`, job kursów): harmonogram nie liczy kwot ani kursów; sumy kosztów pochodzą z costing przez DI.
 - D90 (bez `sales`, `catalog`, `@dainamite/cpq`): harmonogram nie korzysta z ofert ani produktów.
@@ -1047,6 +1056,7 @@ D95–D97 — N/A w tej specyfikacji (realizacja w costing §3.10, §15, §18b; 
 
 | Data | Zmiana |
 |------|--------|
+| 2026-10-23 | **rev 8i** — zmiana na potrzeby project_delivery (D98, D100), bez zmian w modelu danych, trasach i eventach. Nagłówek „Powiązany spec” + notka w §0 (trzy moduły). §5.2: rejestracja `InternalExecutionScheduleProvider` w `executionScheduleRegistry` costingu (`isAvailable`, `findForInvestment`, `ensureExecution` → `create_execution`, idempotentne). §13 „Zakres zbiorczy (trzy moduły)”. §21: akapit o D98–D113. |
 | 2026-10-23 | **rev 8h** — traceability D1–D97 (§21): D95–D97 (waluta bez źródła kursu, jedno źródło kursu, c46ad643) N/A z powodami — dotyczą costing. Źródło D95–D97: `.ai/decisions.md` z tego PR; D84–D94: @0f0c6aa. |
 | 2026-10-23 | **rev 8f** — traceability D1–D94 (§21): D91 (`exceljs`, `sync_excel` nieużywany) realizowana w §8.1; D84–D90 i D92–D94 N/A z powodami (waluty, PDF, `workflows`, `perspectives`, `@open-mercato/scheduler` — dotyczą costing). Źródło D84–D94: `.ai/decisions.md` z tego PR. |
 | 2026-10-23 | **rev 8e** — traceability D1–D83 (§21): D83 (split inwestycji, costing) N/A w tej specyfikacji; rekord harmonogramu inwestycji (D77) zostaje przy inwestycji źródłowej. |

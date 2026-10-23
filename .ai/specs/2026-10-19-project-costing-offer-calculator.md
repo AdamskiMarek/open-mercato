@@ -6,12 +6,12 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-19 |
-| **Rewizja** | 2026-10-23 (rev 8h — domknięcie walut: D95 (waluta bez źródła kursu nie może być walutą oferty ani pozycji, 422 `CURRENCY_NO_RATE_SOURCE` — propozycja; Q12 zamknięte), D96 (wariant (a) dla R24, błąd daty do upstream tylko jako issue), D97 (c46ad643 z pierwszym PR modułu); traceability D1–D97; poprzednio rev 8g — poprawki po review PR #16: konwencja daty mark-sent (data kalendarzowa Europe/Warsaw jako `${D}T00:00:00Z`, odczyt `source = 'NBP_A'`, `date ≤ D`, `date DESC`, limit 1), lookup core o 00:00–02:00 (CEST) / 00:00–01:00 (CET) widzi dzień D-1, `fx` przy walucie bazowej z `provider_source: null`, zakres i sposób odczytu trasy walut, R24 (wiele źródeł kursu w podsumowaniu deali); poprzednio rev 8f — D84–D94: waluty przez moduł OM `currencies` (dostawca `NBP_A`, kurs ręczny tylko w drafcie, waluta bazowa z `BaseCurrencyService`), stan walut wg logu Koordynatora, błąd daty kursu w core (R23), Q12; poprzednio rev 8e — D83: split inwestycji w v1, nity n8n przy D81 (`bulk-update-owner`, lookup + POST/PUT, `auth: null`, R21); poprzednio rev 8d, rev 8c, rev 8b 2026-10-23, rev 8a 2026-10-20) |
+| **Rewizja** | 2026-10-23 (rev 8i — zmiana na potrzeby `project_delivery` (D98–D101): rejestr `executionScheduleRegistry`, metody `getWinningOffer`/`listStructure`/`getSnapshotSectionPriceTotals` w `calculationLookupService`, zakres zbiorczy trzech modułów; poprzednio rev 8h — domknięcie walut: D95 (waluta bez źródła kursu nie może być walutą oferty ani pozycji, 422 `CURRENCY_NO_RATE_SOURCE` — propozycja; Q12 zamknięte), D96 (wariant (a) dla R24, błąd daty do upstream tylko jako issue), D97 (c46ad643 z pierwszym PR modułu); traceability D1–D97; poprzednio rev 8g — poprawki po review PR #16: konwencja daty mark-sent (data kalendarzowa Europe/Warsaw jako `${D}T00:00:00Z`, odczyt `source = 'NBP_A'`, `date ≤ D`, `date DESC`, limit 1), lookup core o 00:00–02:00 (CEST) / 00:00–01:00 (CET) widzi dzień D-1, `fx` przy walucie bazowej z `provider_source: null`, zakres i sposób odczytu trasy walut, R24 (wiele źródeł kursu w podsumowaniu deali); poprzednio rev 8f — D84–D94: waluty przez moduł OM `currencies` (dostawca `NBP_A`, kurs ręczny tylko w drafcie, waluta bazowa z `BaseCurrencyService`), stan walut wg logu Koordynatora, błąd daty kursu w core (R23), Q12; poprzednio rev 8e — D83: split inwestycji w v1, nity n8n przy D81 (`bulk-update-owner`, lookup + POST/PUT, `auth: null`, R21); poprzednio rev 8d, rev 8c, rev 8b 2026-10-23, rev 8a 2026-10-20) |
 | **Moduł** | `project_costing` (`apps/mercato/src/modules/project_costing`) |
 | **Nisza v1** | Prefabrykacja żelbetowa |
 | **Docelowo** | Cała branża budowlana (multi-segment) |
 | **Zależności upstream** | `customers`, `dictionaries`, `dashboards`, **`currencies` (wymagany; już w presecie `crm`: `apps/mercato/src/modules.ts` l.92, `packages/create-app/src/lib/starter-presets.ts` l.91 — D84)**, `attachments`, `notifications`, `directory`, `configs` (ModuleConfigService), `audit_logs`, `query_index`, `progress` (ProgressJob), `feature_toggles` |
-| **Moduł powiązany** | `project_schedule` (spec: `.ai/specs/2026-10-19-project-schedule.md`) — **opcjonalny konsument**: zależy od `project_costing` i rejestruje swój provider `ScheduleSource` w DI. `project_costing` = moduł bazowy, nigdy nie importuje `project_schedule` (rev 8a, Kod P0-1) |
+| **Moduł powiązany** | `project_schedule` (spec: `.ai/specs/2026-10-19-project-schedule.md`) — **opcjonalny konsument**: zależy od `project_costing` i rejestruje swój provider `ScheduleSource` w DI. `project_costing` = moduł bazowy, nigdy nie importuje `project_schedule` (rev 8a, Kod P0-1). **Zmiana na potrzeby project_delivery (D98):** `project_delivery` (spec: `.ai/specs/2026-10-23-project-delivery-docs.md`) — drugi **opcjonalny konsument**: zależy od `project_costing`, czyta kontrakty DI z §0.2; costing nigdy nie importuje `project_delivery`. `project_delivery` i `project_schedule` nie importują się nawzajem — spotykają się w rejestrze `executionScheduleRegistry` costingu |
 | **Wyłączone upstream** | `sales`, `catalog`, `@dainamite/cpq` (D18, D90), `workflows` (MVP; kandydat w v2 — D93), `sync_excel` (tylko CSV; XLSX na `exceljs` — D91), `business_rules` (rev 8b: przeliczniki jednostek `catalog` są per produkt — nie używamy, §2.4) |
 
 ---
@@ -61,6 +61,8 @@ project_costing  (moduł BAZOWY; zawsze włączony w buildzie)
 project_schedule (moduł OPCJONALNY; rejestruje InternalScheduleSource w scheduleSourceRegistry)
 ```
 
+> **Zmiana na potrzeby project_delivery (D98, D100):** obok `project_schedule` stoi drugi moduł opcjonalny `project_delivery` (projekty realizacji i dokumentacja). Zależy od `project_costing` tak samo jak schedule (typy i tokeny DI, eventy `project_costing.*`). Costing posiada dodatkowo generyczny `executionScheduleRegistry` (DI): `project_schedule` rejestruje w nim providera harmonogramu wykonawczego, a `project_delivery` go czyta. Dzięki temu delivery i schedule nie importują się nawzajem. Szczegóły: delivery §0.1–§0.2.
+
 Reguły (źródło: `packages/core/AGENTS.md` § Cross-Module Coupling, l.240–250 na gałęzi spec):
 - `project_costing` **nie importuje, nie resolve'uje i nie wymaga** `project_schedule`. Nie zna nazw jego eventów, tras ani tabel.
 - `project_schedule` może importować typy i tokeny DI z `project_costing` (to konsument; costing jest bazą). Swoje powiązania (provider, subscribery, widget) trzyma u siebie.
@@ -76,6 +78,10 @@ Reguły (źródło: `packages/core/AGENTS.md` § Cross-Module Coupling, l.240–
 | `elementTypeService` | read-only lista/lookup `pc_element_types` | `project_costing` | costing, `project_schedule` (zamiast `GET /api/project-costing/element-types`) |
 | `calculationLookupService` | read-only: `getById`, `listByInvestment(investmentId)` (ID + pola niewrażliwe) | `project_costing` | `project_schedule` (cross-deal Gantt, schedule §7.3) |
 | `projectCostingSettings` | odczyt ustawień per organizacja (§2.2 „Ustawienia”) | `project_costing` | costing; `project_schedule` (włącznik `schedule.enabled`) |
+| `calculationLookupService.getWinningOffer(dealId, ctx)` — **zmiana na potrzeby project_delivery (D99)** | `{ calculationId, snapshotId, investmentId, offerRole, calculationStatus, closureOutcome, segmentCode, currency } \| null`; wersja deala w statusie `sent`/`accepted` z istniejącym `pc_offer_snapshots`, rola z `pc_deal_offer_roles`; bez kosztu i marży (§4.3) | `project_costing` | `project_delivery` (komenda „wygrany przetarg → realizacja”) |
+| `calculationLookupService.listStructure(calculationId, ctx)` — **zmiana na potrzeby project_delivery (D101)** | sekcje i pozycje (`lineId`, `parentLineId`, `lineType`, `label`, `sortOrder`, `unit`, `quantity`); bez cen, kosztów i marży | `project_costing` | `project_delivery` (linki kamieni milowych) |
+| `calculationLookupService.getSnapshotSectionPriceTotals(snapshotId, ctx)` — **v1, zmiana na potrzeby project_delivery (D101)** | sumy cen sprzedaży sekcji ze snapshotu oferty (bez kosztu i marży) | `project_costing` | `project_delivery` v1 (billing % kamieni) |
+| `executionScheduleRegistry` — **zmiana na potrzeby project_delivery (D100)** | `register(provider)`, `get(ctx)`; `ExecutionScheduleProvider`: `isAvailable(ctx)`, `findForInvestment(investmentId, ctx)`, `ensureExecution({ investmentId, dealId }, ctx)` (idempotentne). Costing sam go nie woła; brak providera → `get()` zwraca `null` | `project_costing/di.ts` (pusty rejestr) | `project_schedule/di.ts` rejestruje providera (schedule §5.2); `project_delivery` czyta |
 
 ### 0.3 Komendy (write path)
 
@@ -1354,6 +1360,10 @@ Payload każdego eventu = `{ id, organizationId, tenantId, dealId?, investmentId
 
 `project_costing` nie subskrybuje eventów `project_schedule` i nie wywołuje jego API. Całą integrację trzyma `project_schedule` (konsument): rejestruje `InternalScheduleSource` w `scheduleSourceRegistry`, subskrybuje `project_costing.calculation.activated` / `.deleted` i po zmianach własnego harmonogramu wywołuje komendę costingu `refresh_schedule_totals` (DI, kolejka z debounce). Szczegóły: schedule §5.
 
+### 10.3a Integracja z `project_delivery` (rev 8h — zmiana na potrzeby project_delivery, D98–D101)
+
+`project_costing` nie subskrybuje eventów `project_delivery`, nie wywołuje jego API i nie zna jego tabel. Integrację trzyma `project_delivery` (konsument): czyta `calculationLookupService` (`getWinningOffer`, `listStructure`, v1 `getSnapshotSectionPriceTotals`) i `executionScheduleRegistry` (§0.2), subskrybuje `project_costing.offer_role.changed` i `project_costing.calculation.deleted` (tylko flagi na projekcie, bez zapisów w `pc_*`). Eventy costingu (§10.1) i ich payload bez zmian. Szczegóły: delivery §0.2, §0.5, §3, §4.
+
 ### 10.4 Inwestycja = jedna encja (`pc_investments`); wygaszenie `klin:project` (D63)
 
 **Decyzja D63:** `pc_investments` jest kanoniczne. Uzasadnienie:
@@ -1484,12 +1494,15 @@ Rev 8b (P11): estymaty w dniach usunięte ze specyfikacji. Fazy opisujemy wyłą
 
 Każda encja i trasa z fazy przechodzi przez konwencje repo: migracja i snapshot, walidatory zod, komendy z undo i `audit_logs`, `makeCrudRoute` + `openApi` + indexer, granty w `setup.ts` (`packages/core/AGENTS.md` l.8–13); każdy ekran na `CrudForm`/`DataTable`; i18n pl/en; testy integracyjne każdej trasy API w tej samej zmianie (root `AGENTS.md` l.166, `.ai/qa/AGENTS.md`; Playwright w `__integration__` modułu) oraz testy unit Jest (`calculate()`, zaokrąglenia, LRM, numeracja, redakcja, import).
 
-### Zakres zbiorczy (oba moduły)
+### Zakres zbiorczy (trzy moduły)
+
+Zmiana na potrzeby project_delivery (D98): tabela obejmuje trzeci moduł.
 
 | Moduł | MVP | v1 | v2 |
 |---|---|---|---|
 | `project_costing` | lista MVP powyżej | lista v1 powyżej | lista v2 powyżej |
 | `project_schedule` | — (moduł nie wchodzi do MVP) | schedule §12 v1 | schedule §12 v2 |
+| `project_delivery` | delivery §11 MVP (bez harmonogramu) | delivery §11 v1 (+ link/uruchomienie harmonogramu) | delivery §11 v2 |
 
 ---
 
@@ -1766,6 +1779,8 @@ Brak punktów ⚠️. Ryzyka rezydualne: §15 (R1, R2, R15, R16, R23, R24).
 
 Źródło: `.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`, merge PR #13) dla D1–D82; D83 — `.ai/decisions.md`@3f00542 (gałąź `develop_OM_CRM`, merge PR #14; Koordynator 2026-10-23). D49 jest aktywna w fazie v1 (D75). D84–D94 — `.ai/decisions.md`@0f0c6aa (gałąź `develop_OM_CRM`, merge PR #16; Koordynator 2026-10-23, audyt om-overlap-audit §3–4). D95–D97 — `.ai/decisions.md` z tego PR (Rozstrzygnięte przez Koordynatora 2026-10-23; obowiązują dopiero po „implementujemy” od Marka). Zakres D1–D97: 88 aktywnych i 9 zastąpionych. D70 i D71 nie są już warunkowe (Q6 zamknięte przez D84–D88; realizacja: D87, D85). Tabela obejmuje wszystkie aktywne decyzje; w kolumnach wskazane są sekcje, które je realizują, w obu specach (schedule ma skrót w schedule §21). Decyzje zastąpione nie są cytowane w tekście spec: D3 superseded by D4; D7 superseded by D63; D8 superseded by D10; D13 superseded by D48, D49; D27 superseded by D60; D28 superseded by D29; D29 superseded by D50; D39 superseded by D64 (z okresem przejściowym do migracji); D43 superseded by D63.
 
+Zmiana na potrzeby project_delivery (D98–D115): decyzje D98–D115 (moduł `project_delivery`) są śledzone w delivery §19. W tej specyfikacji realizują je: D98 (nagłówek, §0.1, §14 „Zakres zbiorczy”), D99 i D101 (§0.2 — `getWinningOffer`, `listStructure`, `getSnapshotSectionPriceTotals`), D100 (§0.2 — `executionScheduleRegistry`), §10.3a. D102–D115 dotyczą tylko `project_delivery` (N/A dla costingu). Bilans poniżej dotyczy zakresu D1–D97 i się nie zmienia.
+
 Bilans: 88 aktywnych, z czego 77 realizowanych w specach i 11 N/A (D4, D31, D32, D34, D35, D36, D37, D38, D41, D44, D46). N/A to kontrakt n8n → `customers` albo Enka: specy go nie zmieniają, moduły tylko czytają dane deala.
 
 | D | Decyzja (skrót) | costing | schedule |
@@ -1867,6 +1882,7 @@ Brak otwartych pytań walutowych: Q6 zamknięte przez D84–D88, Q12 zamknięte 
 
 | Data | Zmiana |
 |------|--------|
+| 2026-10-23 | **rev 8i** — zmiana na potrzeby project_delivery (D98–D101), bez zmian w modelu danych i eventach costingu. Nagłówek „Moduł powiązany” + notka w §0.1 (trzy moduły, D98). §0.2: `calculationLookupService.getWinningOffer` (D99), `listStructure` (D101), v1 `getSnapshotSectionPriceTotals` (D101), generyczny rejestr `executionScheduleRegistry` (D100; provider rejestruje schedule, czyta delivery). Nowa §10.3a „Integracja z `project_delivery`”. §14 „Zakres zbiorczy (trzy moduły)”. §22: akapit o D98–D113 (bilans D1–D94 bez zmian). |
 | 2026-10-23 | **rev 8h** — domknięcie walut, **D95–D97** (`.ai/decisions.md`, ten PR; Rozstrzygnięte przez Koordynatora 2026-10-23; obowiązują dopiero po „implementujemy” od Marka). **D95** (zamyka Q12, §16): waluty zostają, CNY i CNH aktywne; waluta bez źródła kursu (spoza tabeli A, ≠ PLN, ≠ bazowa) nie może być walutą oferty ani pozycji — 422 `CURRENCY_NO_RATE_SOURCE` (kod proponowany) z czytelnym komunikatem przy utworzeniu, attach-deal, zmianie waluty, walucie pozycji (v1) i mark-sent; kurs ręczny nie odblokowuje; `FX_RATE_UNAVAILABLE` tylko dla chwilowego braku kursu (§2.2, §3.8 krok 1b, §3.10, §14, R17, A33). **D96** (R24): wariant (a) — po włączeniu `NBP_A` wyłączenie dostawcy `NBP`; błąd daty do upstream tylko jako issue, bez PR (R24, §18b). **D97**: c46ad643 z pierwszym PR modułu (§18b). Traceability D1–D97 (§22): 88 aktywnych, 77 realizowanych, 11 N/A. |
 | 2026-10-23 | **rev 8g** — poprawki po review PR #16 (bez nowych decyzji). **Data mark-sent** (§3.10, R23): data kalendarzowa w `Europe/Warsaw`, do `fetchRatesForDate` i filtra jako `${D}T00:00:00Z`; odczyt `source = 'NBP_A'`, `date <= ${D}T00:00:00Z`, `date DESC`, limit 1; `NBP_A` formatuje datę zapytania do NBP z tej daty. **R23:** 22:00 UTC (CEST) albo 23:00 UTC (CET, od 2026-10-25); lookup core o 00:00–02:00 (CEST) / 00:00–01:00 (CET) widzi dzień D-1 — akceptowalne dla podsumowania deali, core bez zmian (D45). **`fx` przy walucie bazowej:** `rate_type: null`, `provider_source: null` (§2.2, §3.10, D88). **Trasa walut:** zakres tylko z kontekstu auth, odczyt przez serwis DI albo encję `Currency` tylko do odczytu, `is_active = true`, `deleted_at IS NULL`. **Nowe R24:** po poprawce upstream wiersze `NBP` i `NBP_A` razem w lookupie, `extractRate` bierze `rates[0]` — ujednoznacznienie za zgodą Marka. |
 | 2026-10-23 | **rev 8f** — **D84–D94** (`.ai/decisions.md`, ten PR; Koordynator 2026-10-23, audyt om-overlap-audit §3–4). **Waluty przez moduł OM `currencies`** (D84): bez własnej tabeli kursów i własnego klienta NBP; MVP waluta = waluta deala, v1 waluta per pozycja (`pc_calculation_lines.currency`). **D85:** dostawca `NBP_A` (tabela A, `mid`, nie tabela C), pobranie na żądanie przy mark-sent, odczyt z filtrem źródła; kurs ręczny tylko w drafcie (`fx_manual_rates`, komenda `set_manual_rate` z audytem), do snapshotu z `provider_source: 'manual'`, nigdy do `exchange_rates`. **D86:** waluta bazowa z `BaseCurrencyService`, `default_currency` tylko bez deala, 422 `BASE_CURRENCY_MISSING`. **D87:** `decimal_places` z `currencies` (`rounding.line_decimals` domyślnie `null`), waluta aktywna, 422 `CURRENCY_NOT_ACTIVE` (propozycja). **D88:** `snapshot_data.fx` z `rate_type`, `provider_source`, parą `from`/`to`. **D89/D94:** zadanie `currencies:fetch-rates` w v1 (scheduler opcjonalny). **D90–D93:** nagłówek, §18a (`exceljs`, `pdf-lib`, bez `sales`/`catalog`/`@dainamite/cpq`, `workflows` w v2). Lista walut dla `employee` przez własną trasę `GET /api/project-costing/currencies` zamiast grantu `currencies.view` (§3.10, §8.5, §9). Stan walut wg logu Koordynatora 2026-10-23 (baza PLN, kursy tabeli C na 2026-10-23, CNY/CNH bez kursu) i warunki etapu kodu (§18b). Nowe ryzyka R22 (baza ≠ PLN, undo zmiany bazy wymaga c46ad643) i R23 (błąd daty kursu w core, opcja preferowana: data w `NBP_A` zgodna z lookupem). §16: Q6 zamknięte, nowe Q12. Traceability D1–D94 (§22). |
