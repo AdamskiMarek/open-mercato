@@ -1,6 +1,6 @@
 # Klin #1 — dziennik decyzji
 
-**Stan na:** 2026-10-20
+**Stan na:** 2026-10-23
 **Zasada:** nowa decyzja = nowy wiersz. Gdy decyzja zmienia wcześniejszą, stary wiersz dostaje status `superseded` (z odwołaniem do nowego numeru) i **nie jest usuwany**. Decyzje biznesowe/produktowe podejmuje Marek; procesowe — Koordynator i Cezar.
 
 Data „≤2026-10-20” oznacza decyzję obowiązującą na 2026-10-20, bez potwierdzonej dokładnej daty w źródłach.
@@ -114,3 +114,17 @@ Data „≤2026-10-20” oznacza decyzję obowiązującą na 2026-10-20, bez pot
 | P9 | ≤2026-10-20 | Kod robi niezależny przegląd architektury (lista kontrolna: `om-architecture-checklist.md`). | Marek | active |
 | P10 | 2026-10-20 | Pliki wizji i decyzji są aktualizowane, gdy zmienia się kierunek. | Marek | active |
 | P11 | 2026-10-20 | Nie wyceniamy w dniach: speki zawierają tylko podział zakresu MVP / v1 / v2, bez sekcji i tabel estymat dniowych; raporty i prompty też bez dni. | Marek (przez Koordynatora) | active |
+
+## Rozstrzygnięcia pytań Q7–Q11 (rev 8b)
+
+| # | Data | Decyzja | Uzasadnienie / źródło | Status |
+|---|---|---|---|---|
+| D70 | 2026-10-23 | Q7 — zaokrąglenie per waluta. Wybór (b): liczba miejsc po przecinku według ISO 4217 dla waluty kalkulacji (np. PLN/EUR 2, JPY 0, KWD 3); tryb half-up i zasada „suma z pozycji już zaokrąglonych” bez zmian (D62). Fazy: obowiązuje tylko, gdy Q6 = (b) lub (c); przy Q6 = (a) (tylko PLN) MVP bez zmian — 2 miejsca jak w D62. v1/v2: bez dodatkowego zakresu. | Rozstrzygnięte przez Koordynatora 2026-10-23 (P1: proces) — do potwierdzenia przez Marka, jeśli kwestia biznesowa; costing §16 rev 8b (e9857ab7) | warunkowe (zależy od Q6) |
+| D71 | 2026-10-23 | Q8 — źródło kursów i zamrożenie kursu. Wybór (a): kurs z tabeli A NBP z dnia mark-sent, zamrożony w snapshocie oferty (`pc_offer_snapshots`). Ręczna korekta kursu przed mark-sent (propozycja Koda) nie wchodzi w tę decyzję. Fazy: tylko gdy Q6 = (b) lub (c), w fazie, w której wejdą waluty inne niż PLN; przy Q6 = (a) bez wpływu na MVP/v1/v2. | Rozstrzygnięte przez Koordynatora 2026-10-23 (P1: proces) — do potwierdzenia przez Marka, jeśli kwestia biznesowa; costing §16 rev 8b (e9857ab7) | warunkowe (zależy od Q6) |
+| D72 | 2026-10-23 | Q9 — harmonogram wykonawczy po ponownym otwarciu deala (`closure_outcome` → NULL). Wybór (c): harmonogram oznaczony „deal ponownie otwarty” (`reopened_at`), bez usuwania i bez archiwizacji danych. Fazy: v1 (moduł `project_schedule`); MVP i v2 bez zmian. | Rozstrzygnięte przez Koordynatora 2026-10-23 (P1: proces) — do potwierdzenia przez Marka, jeśli kwestia biznesowa; costing §16 rev 8b (e9857ab7) | active |
+| D73 | 2026-10-23 | Q10 — cena zero (`unit_price = 0`) na pozycji. Wybór (b): dozwolona, ale mark-sent pokazuje ostrzeżenie (lista ostrzeżeń z potwierdzeniem jak w D58), bez blokady. Fazy: MVP (walidacja mark-sent, doprecyzowanie D58); v1/v2 bez zmian. | Rozstrzygnięte przez Koordynatora 2026-10-23 (P1: proces) — do potwierdzenia przez Marka, jeśli kwestia biznesowa; costing §16 rev 8b (e9857ab7) | active |
+| D74 | 2026-10-23 | Q11 — akceptacja nowych zależności (costing §18a), zgodnie z rekomendacją Koda: `exceljs` — tak (costing MVP import, v1 eksport; schedule v1); siatka — najpierw `packages/ui` (`DataTable` + `InlineEditors`), `react-data-grid` tylko po PoC i akceptacji; Gantt — własny (D21, bez SVAR PRO), `@svar-ui/react-gantt` MIT core tylko jako PoC w v1 schedule, potem osobna decyzja; `xml2js` — decyzja dopiero w v2. Fazy: MVP `exceljs` + `packages/ui`; v1 PoC `@svar-ui`; v2 `xml2js`. | Rozstrzygnięte przez Koordynatora 2026-10-23 (P1: proces) — do potwierdzenia przez Marka, jeśli kwestia biznesowa; costing §16 rev 8b (e9857ab7) | active |
+
+## Otwarte
+
+- Otwarte: Q6 waluty — decyzja Marka. Opcje (costing §16 rev 8b): (a) tylko PLN; (b) waluta deala, jedna na kalkulację; (c) waluty per linia. Od Q6 zależą D70 i D71.
