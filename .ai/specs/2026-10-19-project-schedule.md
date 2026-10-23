@@ -6,7 +6,7 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-19 |
-| **Rewizja** | 2026-10-23 (rev 8i — zmiana na potrzeby `project_delivery` (D98, D100): provider harmonogramu wykonawczego w `executionScheduleRegistry` costingu, zakres zbiorczy trzech modułów; poprzednio rev 8h — zakres traceability D1–D97: D95–D97 N/A; poprzednio rev 8f — zakres traceability D1–D94: D91 realizowana, D84–D90 i D92–D94 N/A; poprzednio rev 8e — zakres traceability D1–D83, D83 N/A; poprzednio rev 8d, rev 8c, rev 8b 2026-10-23, rev 8a 2026-10-20) |
+| **Rewizja** | 2026-10-23 (rev 8j — PR D: zakres D98–D130 w §21; poprzednio rev 8i — zmiana na potrzeby `project_delivery` (D98, D100): provider harmonogramu wykonawczego w `executionScheduleRegistry` costingu, zakres zbiorczy trzech modułów; poprzednio rev 8h — zakres traceability D1–D97: D95–D97 N/A; poprzednio rev 8f — zakres traceability D1–D94: D91 realizowana, D84–D90 i D92–D94 N/A; poprzednio rev 8e — zakres traceability D1–D83, D83 N/A; poprzednio rev 8d, rev 8c, rev 8b 2026-10-23, rev 8a 2026-10-20) |
 | **Moduł** | `project_schedule` (`apps/mercato/src/modules/project_schedule`) |
 | **Zależności upstream** | **`project_costing` (moduł bazowy)**, `customers`, `dictionaries`, `dashboards`, `attachments`, `notifications`, `configs`, `feature_toggles`, `audit_logs`, `query_index`, `progress` |
 | **Powiązany spec** | `.ai/specs/2026-10-19-project-costing-offer-calculator.md`; zmiana na potrzeby project_delivery (D98): `.ai/specs/2026-10-23-project-delivery-docs.md` — `project_delivery` nie importuje `project_schedule` i odwrotnie; spotykają się w `executionScheduleRegistry` costingu (§5.2) |
@@ -1036,7 +1036,7 @@ Zakres D1–D97: `.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`) dla D1�
 
 D83 (split inwestycji w v1, wybór oferty głównej) — N/A w tej specyfikacji: to komenda `project_costing.investments.split` (costing §2.2, §3.12). Rekord harmonogramu inwestycji (D77) zostaje przy inwestycji źródłowej; nowa inwestycja zaczyna bez harmonogramu.
 
-Zmiana na potrzeby project_delivery (D98–D115): D98 (trzy moduły) i D100 (brak Gantta w delivery, provider w `executionScheduleRegistry`) realizowane w §0, §5.2 i §13. Pozostałe D99, D101–D115 — N/A w tej specyfikacji (projekt realizacji, dokumenty, storage, retencja: delivery §19).
+Zmiana na potrzeby project_delivery (D98–D130): D98 (trzy moduły) i D100 (brak Gantta w delivery, provider w `executionScheduleRegistry`) realizowane w §0, §5.2 i §13. Pozostałe D99 (zastąpiona przez D116), D101–D130 — N/A w tej specyfikacji (projekt realizacji, dokumenty, storage, retencja: delivery §19).
 
 D84–D90 i D92–D94 — N/A w tej specyfikacji (realizacja w costing §3.10, §14, §18a):
 - D84–D89 (waluty, kursy `NBP_A`, waluta bazowa, `decimal_places`, `snapshot_data.fx`, job kursów): harmonogram nie liczy kwot ani kursów; sumy kosztów pochodzą z costing przez DI.
@@ -1056,7 +1056,8 @@ D95–D97 — N/A w tej specyfikacji (realizacja w costing §3.10, §15, §18b; 
 
 | Data | Zmiana |
 |------|--------|
-| 2026-10-23 | **rev 8i** — zmiana na potrzeby project_delivery (D98, D100), bez zmian w modelu danych, trasach i eventach. Nagłówek „Powiązany spec” + notka w §0 (trzy moduły). §5.2: rejestracja `InternalExecutionScheduleProvider` w `executionScheduleRegistry` costingu (`isAvailable`, `findForInvestment`, `ensureExecution` → `create_execution`, idempotentne). §13 „Zakres zbiorczy (trzy moduły)”. §21: akapit o D98–D113. |
+| 2026-10-23 | **rev 8j** — PR D (tylko dokumentacja): §21 zakres D98–D130 (D116–D130 N/A; D99 — zastąpiona przez D116); changelog rev 8i: zakres D98–D115. |
+| 2026-10-23 | **rev 8i** — zmiana na potrzeby project_delivery (D98, D100), bez zmian w modelu danych, trasach i eventach. Nagłówek „Powiązany spec” + notka w §0 (trzy moduły). §5.2: rejestracja `InternalExecutionScheduleProvider` w `executionScheduleRegistry` costingu (`isAvailable`, `findForInvestment`, `ensureExecution` → `create_execution`, idempotentne). §13 „Zakres zbiorczy (trzy moduły)”. §21: akapit o D98–D115. |
 | 2026-10-23 | **rev 8h** — traceability D1–D97 (§21): D95–D97 (waluta bez źródła kursu, jedno źródło kursu, c46ad643) N/A z powodami — dotyczą costing. Źródło D95–D97: `.ai/decisions.md` z tego PR; D84–D94: @0f0c6aa. |
 | 2026-10-23 | **rev 8f** — traceability D1–D94 (§21): D91 (`exceljs`, `sync_excel` nieużywany) realizowana w §8.1; D84–D90 i D92–D94 N/A z powodami (waluty, PDF, `workflows`, `perspectives`, `@open-mercato/scheduler` — dotyczą costing). Źródło D84–D94: `.ai/decisions.md` z tego PR. |
 | 2026-10-23 | **rev 8e** — traceability D1–D83 (§21): D83 (split inwestycji, costing) N/A w tej specyfikacji; rekord harmonogramu inwestycji (D77) zostaje przy inwestycji źródłowej. |
