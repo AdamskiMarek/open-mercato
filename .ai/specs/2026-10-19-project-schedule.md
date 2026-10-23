@@ -6,7 +6,7 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-19 |
-| **Rewizja** | 2026-10-23 (rev 8f — zakres traceability D1–D94: D91 realizowana, D84–D90 i D92–D94 N/A; poprzednio rev 8e — zakres traceability D1–D83, D83 N/A; poprzednio rev 8d, rev 8c, rev 8b 2026-10-23, rev 8a 2026-10-20) |
+| **Rewizja** | 2026-10-23 (rev 8h — zakres traceability D1–D97: D95–D97 N/A; poprzednio rev 8f — zakres traceability D1–D94: D91 realizowana, D84–D90 i D92–D94 N/A; poprzednio rev 8e — zakres traceability D1–D83, D83 N/A; poprzednio rev 8d, rev 8c, rev 8b 2026-10-23, rev 8a 2026-10-20) |
 | **Moduł** | `project_schedule` (`apps/mercato/src/modules/project_schedule`) |
 | **Zależności upstream** | **`project_costing` (moduł bazowy)**, `customers`, `dictionaries`, `dashboards`, `attachments`, `notifications`, `configs`, `feature_toggles`, `audit_logs`, `query_index`, `progress` |
 | **Powiązany spec** | `.ai/specs/2026-10-19-project-costing-offer-calculator.md` |
@@ -991,9 +991,9 @@ apps/mercato/src/modules/project_schedule/
 
 ---
 
-## 21. Decision traceability (D1–D94)
+## 21. Decision traceability (D1–D97)
 
-Zakres D1–D94: `.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`) dla D1–D82; D83 — `.ai/decisions.md`@3f00542 (gałąź `develop_OM_CRM`); D84–D94 — `.ai/decisions.md` z tego PR (Koordynator 2026-10-23, audyt om-overlap-audit §3–4). Pełna tabela wszystkich aktywnych decyzji (z N/A i powodami) jest w costing §22. Poniżej decyzje realizowane w tej specyfikacji. Decyzje zastąpione nie są cytowane (lista „superseded by” w costing §22).
+Zakres D1–D97: `.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`) dla D1–D82; D83 — `.ai/decisions.md`@3f00542 (gałąź `develop_OM_CRM`); D84–D94 — `.ai/decisions.md`@0f0c6aa (gałąź `develop_OM_CRM`, merge PR #16; Koordynator 2026-10-23, audyt om-overlap-audit §3–4); D95–D97 — `.ai/decisions.md` z tego PR (Koordynator 2026-10-23). Pełna tabela wszystkich aktywnych decyzji (z N/A i powodami) jest w costing §22. Poniżej decyzje realizowane w tej specyfikacji. Decyzje zastąpione nie są cytowane (lista „superseded by” w costing §22).
 
 | D | Decyzja (skrót) | Sekcje tej specyfikacji |
 |---|---|---|
@@ -1036,12 +1036,18 @@ D84–D90 i D92–D94 — N/A w tej specyfikacji (realizacja w costing §3.10, �
 - D93 (`workflows` kandydat v2): dotyczy akceptacji oferty z ujemną marżą w costing.
 - D94 (`perspectives`, `@open-mercato/scheduler` opcjonalne w v1): `@open-mercato/scheduler` dotyczy joba kursów walut (D89), nie auto-planowania Gantta (§3a); `perspectives` dotyczą list kalkulacji costing.
 
+D95–D97 — N/A w tej specyfikacji (realizacja w costing §3.10, §15, §18b; obowiązują dopiero po „implementujemy” od Marka):
+- D95 (waluta bez źródła kursu nie może być walutą oferty ani pozycji): harmonogram nie wybiera walut ani nie liczy kwot.
+- D96 (jedno źródło kursu: wyłączenie dostawcy `NBP` po włączeniu `NBP_A`; błąd daty do upstream jako issue): konfiguracja kursów i podsumowanie deali, poza harmonogramem.
+- D97 (c46ad643 z pierwszym PR modułu costing): zależność etapu kodu costing; harmonogram nie korzysta z waluty bazowej.
+
 ---
 
 ## Changelog
 
 | Data | Zmiana |
 |------|--------|
+| 2026-10-23 | **rev 8h** — traceability D1–D97 (§21): D95–D97 (waluta bez źródła kursu, jedno źródło kursu, c46ad643) N/A z powodami — dotyczą costing. Źródło D95–D97: `.ai/decisions.md` z tego PR; D84–D94: @0f0c6aa. |
 | 2026-10-23 | **rev 8f** — traceability D1–D94 (§21): D91 (`exceljs`, `sync_excel` nieużywany) realizowana w §8.1; D84–D90 i D92–D94 N/A z powodami (waluty, PDF, `workflows`, `perspectives`, `@open-mercato/scheduler` — dotyczą costing). Źródło D84–D94: `.ai/decisions.md` z tego PR. |
 | 2026-10-23 | **rev 8e** — traceability D1–D83 (§21): D83 (split inwestycji, costing) N/A w tej specyfikacji; rekord harmonogramu inwestycji (D77) zostaje przy inwestycji źródłowej. |
 | 2026-10-23 | **rev 8d** — odbiór 8324f29. **Wyścig:** naruszenie partial unique (`23505`) mapowane na 409 `SCHEDULE_ALREADY_EXISTS` z `existingScheduleId`; zmiana fazy inwestycji pod lockiem nagłówka (§2.2, §6.1, R10). **Undo `create_execution`:** deal — soft delete harmonogramu `execution`; inwestycja — powrót do `offer` z poprzednim baseline; obie z kontrolą `updated_at` → 409 (§2.2). **D72 dla rekordu inwestycji:** kolumna `execution_deal_id`, flaga `reopened_at` ustawiana i czyszczona także na rekordzie inwestycji (§1.2, §2.2, R15). Źródło decyzji: `.ai/decisions.md`@b544719 (`develop_OM_CRM`), D1–D82 (§21). |
