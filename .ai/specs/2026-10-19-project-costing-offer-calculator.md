@@ -114,7 +114,7 @@ Zweryfikowano w kodzie (`packages/core/src/modules/customers/data/entities.ts`, 
 | wygrany | `closure_outcome = 'won'` (event `customers.deal.won`) | prognoza z prawdopodobieństwem 100%; marża po zamknięciu (D49); harmonogram wykonawczy (schedule §5, D24) |
 | przegrany | `closure_outcome = 'lost'` (event `customers.deal.lost`) | poza prognozą i sumą inwestycji; marża po zamknięciu (D49) |
 | usunięty/zarchiwizowany | `deleted_at IS NOT NULL` (event `customers.deal.deleted`) | poza prognozą i sumą; kalkulacja zostaje (FK-id bez constraintu) |
-| ponownie otwarty | `closure_outcome` wraca do NULL (event `customers.deal.updated`) | wraca do prognozy; zachowanie harmonogramu wykonawczego — pytanie otwarte Q9 (§16) |
+| ponownie otwarty | `closure_outcome` wraca do NULL (event `customers.deal.updated`) | wraca do prognozy; harmonogram wykonawczy dostaje flagę „deal ponownie otwarty” (`ps_schedules.reopened_at`), bez usuwania danych (Q9 (c), §16; schedule §2.2) |
 
 Subscribery (`persistent: true`) zapisują te pola w `pc_calculations.deal_snapshot`. Etapy lejka (`pipeline_stage`) to 9 etapów z D33: `new`, `result_lead`, `qualify`, `contact`, `offer`, `won`, `lost`, `rejected`, `cancelled`; n8n ustawia etap, ale nie zmienia `closure_outcome` (D42). Costing opiera logikę wyłącznie na `closure_outcome` i `deleted_at`; etap służy tylko do grupowania prognozy (§11).
 
@@ -358,7 +358,7 @@ Reguły per typ:
 
 `UNIQUE (calculation_id)` — jeden snapshot per wersja.
 
-Snapshot tworzony przy `mark-sent`. `snapshot_data` zawiera: lines (line_type, label, qty, unit, unit_cost, unit_price, line_cost, line_price, line_margin_pct per item — wartości z `calculate()`), rounding (`rounding.*` użyte przy wyliczeniu), totals (subtotal_cost, overhead_amount, full_cost, subtotal_price, total_margin, margin_rate), price_provenance (catalog_entry_id, price_source_id, price_source_item_code, price_captured_at, price_captured_unit_cost/price per linia). PDF generowany z snapshota (nie z bieżących linii).
+Snapshot tworzony przy `mark-sent`. `snapshot_data` zawiera: lines (line_type, label, qty, unit, unit_cost, unit_price, line_cost, line_price, line_margin_pct per item — wartości z `calculate()`), rounding (`rounding.*` użyte przy wyliczeniu), totals (subtotal_cost, overhead_amount, full_cost, subtotal_price, total_margin, margin_rate), price_provenance (catalog_entry_id, price_source_id, price_source_item_code, price_captured_at, price_captured_unit_cost/price per linia), fx (kurs zamrożony przy mark-sent — §3.10, Q8; dla PLN kurs = 1). PDF generowany z snapshota (nie z bieżących linii).
 
 #### ~~`pc_calculation_audit_log`~~ — usunięte w rev 8a
 
@@ -529,7 +529,7 @@ Kolumny: id, organization_id, tenant_id, kind (`calculation:{YYYY}` \| `investme
 
 ### 2.3 Waluta i zaokrąglenia
 
-`numeric(14,2)` dla wartości linii i sum, `numeric(14,4)` dla cen jednostkowych i ilości. Jednowalutowe (§3.10; wiele walut — pytanie Q6, §16).
+`numeric(14,2)` dla wartości linii i sum, `numeric(14,4)` dla cen jednostkowych i ilości. Jednowalutowe (§3.10; wiele walut — pytanie Q6, §16, otwarte). Gdy Q6 ≠ (a), liczba miejsc zaokrąglenia kwot w walucie innej niż PLN wynika z kodu waluty ISO 4217 (Q7 (b)); dla PLN pozostaje 2 (D62).
 
 **Zaokrąglenie (D62/D16):** `round(x)` w tej specyfikacji oznacza zaokrąglenie wg ustawień organizacji `rounding.mode` (domyślnie `half_up`, połówki od zera) do `rounding.line_decimals` miejsc (domyślnie 2). Każda wartość linii jest zaokrąglana osobno; **sumy = suma już zaokrąglonych linii** (nigdy zaokrąglona suma surowa). Ceny jednostkowe wyliczane (tryb B/C) zaokrąglamy do 4 miejsc. Arytmetyka na liczbach dziesiętnych (ciągi/liczby całkowite w groszach), nie na `float`; `Math.round` nie jest używany (dla −0,5 daje 0). Zmiana ustawienia działa na wersje `draft`; wersje wysłane zostają w snapshocie z ustawieniem z chwili mark-sent.
 
@@ -564,7 +564,7 @@ section.line_margin = section.line_price − section.line_cost
 section.line_margin_pct = section.line_margin / section.line_price
 ```
 
-`note` nie jest wliczana do sum. MVP: jeden poziom (sekcja → pozycje), więc suma sekcji obejmuje wszystkie jej pozycje; sekcja bez pozycji = „pusta sekcja” (ostrzeżenie przy mark-sent, D58).
+`note` nie jest wliczana do sum. MVP: jeden poziom (sekcja → pozycje), więc suma sekcji obejmuje wszystkie jej pozycje; sekcja bez pozycji = „pusta sekcja” (ostrzeżenie przy mark-sent, D58; tak samo pozycja z ceną zero — Q10).
 
 ### 3.3 Sumy kalkulacji
 
@@ -658,8 +658,8 @@ Przy `mark-sent`:
 1. Serwis weryfikuje `status = 'draft'` i uruchamia `calculate()`.
 1a. **Walidacja (D58):**
    - **Blokuje** (422 `MARK_SENT_BLOCKED` z listą problemów): linie z `import_error = true`; brak pozycji `item`; ujemna cena (`unit_price < 0` lub `line_price < 0`, także z redystrybucji trybu B przy `R < 0`).
-   - **Ostrzega** (422 `MARK_SENT_CONFIRMATION_REQUIRED`; ponowienie z `confirmWarnings: true`): ujemna marża (`total_margin < 0` lub `line_margin < 0` na pozycji); pusta sekcja.
-   - **Nie blokuje:** brak deala (oferta standalone jest dozwolona). Cena zero — dozwolona do decyzji Q10 (§16).
+   - **Ostrzega** (422 `MARK_SENT_CONFIRMATION_REQUIRED`; ponowienie z `confirmWarnings: true`): ujemna marża (`total_margin < 0` lub `line_margin < 0` na pozycji); pusta sekcja; cena zero (`unit_price = 0` na pozycji `item`; Q10 (b)).
+   - **Nie blokuje:** brak deala (oferta standalone jest dozwolona). Cena zero tylko ostrzega (Q10 (b)), nie blokuje.
 2. Tworzy `pc_offer_snapshots.snapshot_data` z bieżącymi liniami, sumami i proweniencją.
 3. Ustawia `status = 'sent'`, `sent_at = now()`.
 4. Linie `pc_calculation_lines` tej wersji są od tej chwili **immutable** (API nie przyjmuje PATCH).
@@ -682,7 +682,10 @@ PDF klienta generowany **zawsze ze snapshota** — żadne zmiany konfiguracji ce
 
 ### 3.10 Waluta kalkulacji
 
-Waluta = `value_currency` z `deal_snapshot` (snapshot przy attach-deal, odświeżany subscriberem) gdy `deal_id != NULL`, else ustawienie `default_currency` (ModuleConfigService). Jednowalutowe; wiele walut, źródło kursów i zamrożenie kursu w wysłanej wersji — pytania Q6–Q8 (§16).
+Waluta = `value_currency` z `deal_snapshot` (snapshot przy attach-deal, odświeżany subscriberem) gdy `deal_id != NULL`, else ustawienie `default_currency` (ModuleConfigService). Jednowalutowe. Wiele walut — pytanie Q6 (§16, **otwarte**). Rozstrzygnięcia Koordynatora 2026-10-23 obowiązujące, gdy Q6 ≠ (a):
+- **Q7 (b):** waluty jako kody ISO 4217 (`char(3)`, walidacja względem słownika walut); liczba miejsc zaokrąglenia kwot wg minor unit ISO 4217 danej waluty (PLN = 2, zgodnie z D62).
+- **Q8 (a):** kurs do waluty bazowej organizacji (`default_currency`, potrzebny do sum w prognozie i sumy inwestycji) = kurs średni NBP z tabeli A z dnia mark-sent, zamrożony w `snapshot_data.fx` (`currency`, `base_currency`, `rate`, `nbp_table_no`, `effective_date`, `source: 'nbp_a' | 'manual'`). Przed mark-sent użytkownik może ręcznie skorygować kurs (wartość zapisana w wersji `draft`, metadana komendy w `audit_logs`); po mark-sent kurs jest niezmienny. Gdy tabela z dnia mark-sent nie jest jeszcze opublikowana (weekend, święto, przed publikacją), używana jest ostatnia opublikowana tabela A, a `effective_date` wskazuje jej datę (R17).
+- Dla PLN (`currency = default_currency`) kurs = 1, bez wywołania NBP.
 
 ### 3.11 Prognoza wartości = wartość × prawdopodobieństwo
 
@@ -885,9 +888,9 @@ GET  /api/project-costing/calculations/:id/pdf-attachments
 
 ## 6. Import / Eksport
 
-### 6.1 Biblioteka XLSX: `exceljs` v4.4.0 (MIT) — do akceptacji
+### 6.1 Biblioteka XLSX: `exceljs` v4.4.0 (MIT) — zaakceptowana (Q11)
 
-Nowa zależność produkcyjna (ostatnie wydanie 2023-10-19) — wymaga akceptacji Marka (root `AGENTS.md` l.26; lista §18a, pytanie Q11). Odczyt strumieniowy (`WorkbookReader`).
+Nowa zależność produkcyjna (ostatnie wydanie 2023-10-19) — zaakceptowana (Q11, rozstrzygnięcie Koordynatora 2026-10-23; root `AGENTS.md` l.26; §18a). Instalacja dopiero przy implementacji, nie na etapie speki. Odczyt strumieniowy (`WorkbookReader`).
 
 ### 6.2 Import XLSX/CSV — kreator mapowania (MVP, rev 8a)
 
@@ -1306,7 +1309,7 @@ Usunięte z modelu: `project_id` na `pc_calculations`/`pc_investments`/`pc_cost_
 2. Dla każdego rekordu: znajdź `pc_investments` po `legacy_klin_project_id` (idempotencja), a jeśli brak — utwórz nową (`name`, `location`, `legacy_klin_project_id`) komendą `investments.create` (audyt). Identyfikatory zewnętrzne (priorytet D6) dopisuje import, gdy tabela `pc_investment_identifiers` już istnieje (v1).
 3. Dla każdego powiązanego deala utwórz `pc_deal_offer_roles` (rola z `cf_offer_role`, jeśli była — §3.12; brak = reguła „pierwsza oferta = primary”, D65).
 4. Raport (`--dry-run` domyślnie pokazuje plan): utworzone, dopasowane, konflikty dwóch `primary`.
-5. Import właściwy uruchamiamy dopiero po `--dry-run` i akceptacji raportu przez Marka (D63). Potem definicję `klin:project` wyłącza użytkownik w Data Designerze; moduł jej nie usuwa i po imporcie nie czyta. (D7/D43 zastąpione przez D63.)
+5. Import właściwy uruchamiamy dopiero po `--dry-run` i akceptacji raportu przez Marka (D63). Potem definicję `klin:project` wyłącza użytkownik w Data Designerze; moduł jej nie usuwa i po imporcie nie czyta. (Podstawa: D63.)
 
 ---
 
@@ -1410,7 +1413,7 @@ Rev 8b (P11): estymaty w dniach usunięte ze specyfikacji. Fazy opisujemy wyłą
 2. Adapter Sekocenbud/Intercenbud XLSX + KNR `mapExternalCode`.
 3. Import kosztów rzeczywistych z faktur + integracje (ERP, plik).
 4. Biblioteka szablonów KNR (seed).
-5. Wiele walut i konwersja (`currencies`) — po decyzjach Q6–Q8.
+5. Wiele walut i konwersja (`currencies`) — po decyzji Q6 (otwarte); zasady Q7 (ISO 4217) i Q8 (NBP tabela A, kurs zamrożony przy mark-sent) już rozstrzygnięte (§3.10).
 6. AI-tool: generowanie linii kalkulacji z opisu.
 
 ### Narzut OM (wymagania w każdej fazie, bez estymaty)
@@ -1422,7 +1425,7 @@ Każda encja i trasa z fazy przechodzi przez konwencje repo: migracja i snapshot
 | Moduł | MVP | v1 | v2 |
 |---|---|---|---|
 | `project_costing` | lista MVP powyżej | lista v1 powyżej | lista v2 powyżej |
-| `project_schedule` | — (moduł nie wchodzi do MVP) | schedule §12 | schedule §13 |
+| `project_schedule` | — (moduł nie wchodzi do MVP) | schedule §12 v1 | schedule §12 v2 |
 
 ---
 
@@ -1443,8 +1446,10 @@ Każda encja i trasa z fazy przechodzi przez konwencje repo: migracja i snapshot
 | R12 | `ModuleConfigService` nie rozróżnia organizacji (zweryfikowane w kodzie) | Konfiguracja | Średnia | Świadome obejście D69: klucz `org:{id}:settings` + merge w `projectCostingSettings`; testy izolacji organizacji | Niskie — gdyby core dodał natywny scope organizacji, trzeba przenieść klucze |
 | R13 | Okres przejściowy (D64): n8n wysyła `cf_offer_role` do wdrożenia modułu i migracji, więc przez ten czas są dwa źródła | Dane / integracja | Średnia | Import `import-offer-roles` idempotentny i powtarzalny (tworzy tylko brakujące wiersze) tuż przed wyłączeniem wysyłki w n8n; moduł nie czyta `cf_offer_role` w runtime | Niskie po wyłączeniu wysyłki w n8n |
 | R14 | Import `klin:project` tworzy duplikaty inwestycji | Migracja | Średnia | `--dry-run` + akceptacja raportu (D63), idempotencja po `legacy_klin_project_id`, raport konfliktów | Niskie |
-| R15 | Zakres niedoszacowany (konwencje OM, bety zależności) | Plan | Średnia | Narzut OM opisany jako wymagania w każdej fazie (§14); zależności do akceptacji przed implementacją (§18a); przegląd zakresu po MVP | Średnie |
-| R16 | Zależność od wersji beta (`react-data-grid` v7) lub dużej rodziny pakietów (`@svar-ui`) | Zależności | Średnia | Najpierw `packages/ui`; nowe pakiety tylko po akceptacji (Q11) | Niskie |
+| R15 | Zakres niedoszacowany (konwencje OM, bety zależności) | Plan | Średnia | Narzut OM opisany jako wymagania w każdej fazie (§14); zależności rozstrzygnięte (Q11, §18a), instalowane dopiero przy implementacji fazy; przegląd zakresu po MVP | Średnie |
+| R16 | Zależność od wersji beta (`react-data-grid` v7) lub dużej rodziny pakietów (`@svar-ui`) | Zależności | Średnia | Najpierw `packages/ui`; `@svar-ui` tylko PoC w v1 schedule, Gantt własny (D21); zgodnie z Q11 | Niskie |
+| R17 | Brak tabeli A NBP z dnia mark-sent (weekend, święto, przed publikacją) albo niedostępne API NBP (gdy Q6 ≠ (a)) | Waluty | Średnia | Ostatnia opublikowana tabela A z `effective_date` w snapshocie; ręczna korekta kursu przed mark-sent (Q8); przy braku kursu mark-sent zwraca 422 `FX_RATE_UNAVAILABLE` z prośbą o ręczny kurs | Niskie |
+| R18 | Deal ponownie otwarty po wygranej, a harmonogram wykonawczy wygląda na obowiązujący | Dane / harmonogram | Niska | Flaga „deal ponownie otwarty” (`reopened_at`) i badge w UI, bez usuwania danych (Q9 (c)); ponowne `won` czyści flagę | Niskie |
 
 (R10 z rev 7 — sekwencja dwóch komend `cf_offer_role` — usunięte: rola oferty zmieniana jedną komendą w jednej transakcji, §3.12.)
 
@@ -1464,17 +1469,17 @@ Każda encja i trasa z fazy przechodzi przez konwencje repo: migracja i snapshot
 | — | Ustawienia per organizacja | D69: klucz `org:{id}:settings` jako świadome obejście (R12) |
 | — | Formuły | MVP bez formuł; v1 `quantity_expr` z bezpiecznym parserem (D30) |
 | — | Gantt | własny, bez SVAR PRO (D21; schedule §3.2) |
+| Q7 | Zaokrąglenie per waluta | Rozstrzygnięcie Koordynatora 2026-10-23: **(b)** — kody walut ISO 4217, gdy Q6 ≠ (a) (§2.3, §3.10) |
+| Q8 | Źródło kursów i zamrożenie kursu | Rozstrzygnięcie Koordynatora 2026-10-23: **(a)** — NBP tabela A z dnia mark-sent, zamrożony w snapshocie; ręczna korekta możliwa przed mark-sent (§3.8, §3.10, R17) |
+| Q9 | Harmonogram wykonawczy po ponownym otwarciu deala | Rozstrzygnięcie Koordynatora 2026-10-23: **(c)** — flaga „deal ponownie otwarty”, bez usuwania danych (§0.6; schedule §2.2, R15) |
+| Q10 | Cena zero na pozycji | Rozstrzygnięcie Koordynatora 2026-10-23: **(b)** — ostrzeżenie przy mark-sent, nie blokuje (lista ostrzeżeń D58, §3.8) |
+| Q11 | Nowe zależności | Rozstrzygnięcie Koordynatora 2026-10-23: rekomendacja przyjęta — `exceljs` tak; siatka najpierw `packages/ui`; `@svar-ui` tylko PoC w v1 schedule (Gantt własny, bez SVAR PRO — D21); `xml2js` w v2; na etapie speki nic nie instalujemy (§18a) |
 
 **Otwarte (biznesowe, rev 8b):**
 
 | # | Pytanie | Opcje | Propozycja |
 |---|---|---|---|
-| Q6 | Czy kalkulacja może być w walucie innej niż PLN (wiele walut)? | (a) tylko PLN; (b) waluta deala, jedna na kalkulację; (c) waluty per linia | (b) — waluta deala, bez mieszania walut w kalkulacji |
-| Q7 | Zaokrąglenie per waluta | (a) zawsze 2 miejsca; (b) wg ISO 4217 (np. JPY 0, KWD 3) | (b), gdy Q6 = (b)/(c) |
-| Q8 | Źródło kursów i zamrożenie kursu | (a) NBP tabela A z dnia mark-sent, zamrożony w snapshocie; (b) kurs ręczny w kalkulacji | (a) z możliwością ręcznej korekty przed mark-sent |
-| Q9 | Harmonogram wykonawczy po ponownym otwarciu deala (`closure_outcome` → NULL) | (a) zostaje bez zmian; (b) archiwizowany; (c) oznaczony „deal ponownie otwarty” | (c) — bez usuwania danych |
-| Q10 | Cena zero (`unit_price = 0`) na pozycji | (a) dozwolona bez ostrzeżenia; (b) ostrzeżenie przy mark-sent; (c) blokada | (b) |
-| Q11 | Akceptacja nowych zależności (§18a) | per pakiet: tak / nie / najpierw PoC | `exceljs` — tak; siatka — najpierw `packages/ui`; `@svar-ui` — PoC w v1 schedule; `xml2js` — dopiero v2 |
+| Q6 | Czy kalkulacja może być w walucie innej niż PLN (wiele walut)? | (a) tylko PLN; (b) waluta deala, jedna na kalkulację; (c) waluty per linia | (b) — waluta deala, bez mieszania walut w kalkulacji. Pytanie biznesowe do Marka; od odpowiedzi zależy, czy wchodzą w życie Q7/Q8 |
 
 ---
 
@@ -1482,14 +1487,14 @@ Każda encja i trasa z fazy przechodzi przez konwencje repo: migracja i snapshot
 
 | # | Założenie | Uzasadnienie |
 |---|-----------|--------------|
-| A1 | Siatka: najpierw `packages/ui` (`DataTable` + `InlineEditors`); `react-data-grid` v7 (beta) tylko po PoC i akceptacji (Q11) | Kod p10; root `AGENTS.md` l.26 |
+| A1 | Siatka: najpierw `packages/ui` (`DataTable` + `InlineEditors`); `react-data-grid` v7 (beta) tylko gdy PoC na `packages/ui` nie wystarczy (Q11) | Kod p10; root `AGENTS.md` l.26 |
 | A2 | Tryby A/B/C + dziedziczenie markup_pct: jednolita redystrybucja §3.6; margin_rate z rzeczywistych sum | Spójność; markup per item/sekcja nie zastępuje trybów B/C, ale współdziała |
 | A3 | **Rev 8a (poprawione):** `project_costing` = moduł bazowy; `project_schedule` (opcjonalny) zależy od costing i rejestruje provider `ScheduleSource` w DI; costing nigdy nie importuje schedule | Kod P0-1 |
 | A4 | deal_id nullable ✅ (Marek potwierdził); ownership standalone = created_by (rev 8a: project_id usunięte) | Odpowiedź Marka na pytanie C |
 | A5 | Waluta = waluta deala (jednowalutowe; wiele walut — Q6) | Eliminuje konwersje |
 | A6 | Import XLSX/CSV: 10 MB, 100 MB po rozpakowaniu, 10 000 wierszy, 200 kolumn (§6.4; to samo w schedule) | Jeden limit dla obu modułów |
 | A7 | Auto-save: debounce 800 ms | Minimalizuje requesty |
-| A8 | exceljs v4.4.0 (MIT) — do akceptacji (Q11) | xlsx npm nieaktualizowane |
+| A8 | exceljs v4.4.0 (MIT) — zaakceptowany (Q11) | xlsx npm nieaktualizowane |
 | A9 | PDF: `pdf-lib` (już w `packages/core`) | Bez nowej zależności, bez Chromium (Kod p10) |
 | A10 | „Nowa rewizja” (D57): jedna akcja, feature `new_revision` (admin), powód w `audit_logs` | Immutability |
 | A11 | apply-to-deal: komenda `customers.deals.update` (zweryfikowano w kodzie), tylko z wersji aktywnej | D59, D66; historia deala |
@@ -1521,14 +1526,16 @@ Każda encja i trasa z fazy przechodzi przez konwencje repo: migracja i snapshot
 
 Nowe tabele `pc_*` only. Zero zmian w `packages/core`. Wszystkie encje domenowe z `deleted_at`. Ustawienia w `module_configs` (bez własnej tabeli). Kolejność MVP: pc_document_sequences → pc_cost_categories → pc_element_types → pc_price_sources (seed) → pc_price_catalog → pc_investments → pc_calculations → pc_calculation_lines → pc_offer_snapshots → pc_calculation_pdf_attachments → pc_import_column_mappings → pc_production_batches → pc_deal_offer_roles. v1: pc_segments → pc_price_list_rules → pc_calculation_templates + pc_calculation_template_lines → pc_investment_identifiers → pc_unit_conversions → pc_cost_entries; `pc_investments` + `investment_key`, `merged_into_id`, `CREATE EXTENSION pg_trgm` i indeks trgm. (Rev 8a: usunięte `pc_settings` i `pc_calculation_audit_log`.) Importy wdrożeniowe `klin:project` i `cf_offer_role` to komendy CLI (`--dry-run`, idempotentne), nie migracje; kolejność: najpierw `import-klin-projects`, potem `import-offer-roles`.
 
-## 18a. Nowe zależności — lista do akceptacji Marka (rev 8b, Kod p10, Q11)
+## 18a. Nowe zależności — rozstrzygnięte (rev 8b, Kod p10, Q11)
 
-| Pakiet | Wersja / stan | Moduł, faza | Alternatywa w repo | Propozycja |
+Rozstrzygnięcie Koordynatora 2026-10-23 (Q11): rekomendacja przyjęta. Na etapie speki nic nie instalujemy; pakiety dodaje dopiero implementacja danej fazy.
+
+| Pakiet | Wersja / stan | Moduł, faza | Alternatywa w repo | Rozstrzygnięcie (Q11) |
 |---|---|---|---|---|
-| `exceljs` | 4.4.0, MIT, ostatnie wydanie 2023-10-19 | costing MVP (import), v1 (eksport); schedule v1 | brak czytnika XLSX w repo | akceptacja |
-| `react-data-grid` | v7 tylko beta, MIT | costing MVP (siatka), tylko gdy PoC na `packages/ui` nie wystarczy | `packages/ui` `DataTable` + `InlineEditors` | najpierw `packages/ui` |
-| `@svar-ui/*` (`react-gantt` 2.8.1 i ok. 17 pakietów w drzewie zależności) | MIT | schedule v1 | brak Gantta w repo | PoC w v1 schedule, potem decyzja |
-| `xml2js` | MIT | schedule v2 (MS Project XML) | — | decyzja dopiero w v2 |
+| `exceljs` | 4.4.0, MIT, ostatnie wydanie 2023-10-19 | costing MVP (import), v1 (eksport); schedule v1 | brak czytnika XLSX w repo | **tak** |
+| `react-data-grid` | v7 tylko beta, MIT | costing MVP (siatka), tylko gdy PoC na `packages/ui` nie wystarczy | `packages/ui` `DataTable` + `InlineEditors` | **najpierw `packages/ui`**; `react-data-grid` tylko, gdy PoC na `packages/ui` nie wystarczy (wtedy osobna akceptacja) |
+| `@svar-ui/*` (`react-gantt` 2.8.1 i ok. 17 pakietów w drzewie zależności) | MIT | schedule v1 | brak Gantta w repo | **tylko PoC w v1 schedule**; Gantt to nasza własna implementacja na SVAR MIT core, bez SVAR PRO (D21) |
+| `xml2js` | MIT | schedule v2 (MS Project XML) | — | **v2** |
 | `pdf-lib` | już w `packages/core` | costing MVP (PDF) | — | bez nowej zależności |
 
 ---
@@ -1610,7 +1617,7 @@ apps/mercato/src/modules/project_costing/
 | Ustawienia przez ModuleConfigService | `packages/core/AGENTS.md` § Module Config | ✅ §2.2 (klucz per organizacja; ograniczenie serwisu opisane) |
 | ProgressJob + worker dla importu i PDF | `packages/core/AGENTS.md` § Operation Progress | ✅ §5.2, §6.2 |
 | Testy integracyjne każdej trasy w tej samej zmianie | root `AGENTS.md` l.166 | ✅ wymaganie w każdej fazie (§14 „Narzut OM”); plan testów w PR #11 |
-| Nowe zależności produkcyjne = ask first | root `AGENTS.md` l.26 | ✅ §18a — lista do akceptacji Marka (Q11); żadna nowa zależność przed akceptacją |
+| Nowe zależności produkcyjne = ask first | root `AGENTS.md` l.26 | ✅ §18a — rozstrzygnięte (Q11); na etapie speki nic nie instalujemy |
 | Domyślne custom fieldy w `ce.ts`; brak hardkodowanych UUID | `packages/core/src/modules/customers/AGENTS.md` l.103 | ✅ `cf_offer_role` usunięte |
 
 ## 21. Checklist compliance (`om-architecture-checklist.md`, stan 2026-10-23)
@@ -1653,11 +1660,92 @@ Brak punktów ⚠️. Ryzyka rezydualne: §15 (R1, R2, R15, R16).
 
 ---
 
+## 22. Decision traceability (rev 8b, `.ai/decisions.md` d818aa2)
+
+Źródło: `.ai/decisions.md` na gałęzi `docs/om-coordination` (commit d818aa2). Tabela obejmuje wszystkie 60 aktywnych decyzji; w kolumnach wskazane są sekcje, które je realizują, w obu specach (schedule ma skrót w schedule §21). Decyzje zastąpione nie są cytowane w tekście spec: D3 superseded by D4; D7 superseded by D63; D8 superseded by D10; D13 superseded by D48, D49; D27 superseded by D60; D28 superseded by D29; D29 superseded by D50; D39 superseded by D64 (z okresem przejściowym do migracji); D43 superseded by D63.
+
+Bilans: 60 aktywnych, z czego 48 realizowanych w specach i 12 N/A (D4, D31, D32, D34, D35, D36, D37, D38, D40, D41, D44, D46). N/A to kontrakt n8n → `customers` albo Enka: specy go nie zmieniają, moduły tylko czytają dane deala.
+
+| D | Decyzja (skrót) | costing | schedule |
+|---|---|---|---|
+| D1 | Klin = agregator przetargów + CRM budowlany na OM | §1.1, §1.2 (kontekst; moduły jako część CRM na OM) | §1 (kontekst) |
+| D2 | Nisza prefabrykacja, wszystko wielosegmentowe | §2.2 (`pc_segments`, `segment_code`), §8.2 | — |
+| D4 | n8n wysyła deale od score ≥ 50 | N/A — kontrakt push n8n → `customers` (`.ai/n8n-push-contract.md`); moduły kalkulacji i harmonogramu go nie zmieniają | N/A (j.w.) |
+| D5 | Duplikaty ofert: `offer_role` primary/alternative + komunikat | §3.12, §8.5a, §12.1 | — |
+| D6 | Priorytet kodu inwestycji | §2.2 (`pc_investment_identifiers`), §3.12, §10.4 | — |
+| D9 | Kalkulator jak Excel + import XLSX | §6.2, §12.2 | §8.1 |
+| D10 | Kalkulacja bez deala | §2.2 (`deal_id` NULL), §3.8 (oferta standalone), §3.11 | — |
+| D11 | PDF oferty w pierwszej wersji | §5, §14 MVP | — |
+| D12 | Własny cennik, potem Sekocenbud | §2.2 (cennik), §7, §14 v2 | — |
+| D14 | Marża od ceny sprzedaży | §3.5 | — |
+| D15 | Firma = organizacja | §0.5 | §1.0 |
+| D16 | Half-up, 2 miejsca, per linia | §2.3 | — |
+| D17 | Słownik jednostek z przelicznikami | §2.4 | — |
+| D18 | Własny moduł zamiast `sales` | §0.1 | — |
+| D19 | Harmonogram = osobny moduł, opcjonalny per firma | §7a | §1.0, §5.4 |
+| D20 | Kalkulacja i prognoza bez harmonogramu (`ScheduleSource`/Excel) | §6.5, §7a | §5.2 |
+| D21 | Gantt własny, bez SVAR PRO | §16, §18a | §3.2, §12 |
+| D22 | Auto-przesuwanie z przypięciem | — | §3a.1, §3a.2 |
+| D23 | Jeden Gantt na inwestycję | — | §6.1, §7.3 (doprecyzowane przez D53) |
+| D24 | Oferta → realizacja przy wygranej | §0.6 | §1.2, §6.1 (`create-execution`) |
+| D25 | MS Project w v2 | — | §8.2, §12 v2 |
+| D26 | Harmonogram wewnętrzny, gotowy na integrację | — | §11, §12 v2 |
+| D30 | MVP bez formuł; v1 `quantity_expr` z bezpiecznym parserem | §14 v1, §16 | — |
+| D31 | 1 przetarg = 1 deal | N/A — kontrakt push n8n → `customers` (`.ai/n8n-push-contract.md`); moduły kalkulacji i harmonogramu go nie zmieniają | N/A (j.w.) |
+| D32 | Idempotencja `om_sync` | N/A — kontrakt push n8n → `customers` (`.ai/n8n-push-contract.md`); moduły kalkulacji i harmonogramu go nie zmieniają | N/A (j.w.) |
+| D33 | 9 etapów pipeline | §0.6, §3.11, §11 | — |
+| D34 | Automatyczna zmiana etapu przez n8n | N/A — kontrakt push n8n → `customers` (`.ai/n8n-push-contract.md`); moduły kalkulacji i harmonogramu go nie zmieniają; moduły nie zmieniają etapu deala | N/A (j.w.) |
+| D35 | Usunięte deale nie są odtwarzane | N/A — kontrakt push n8n → `customers` (`.ai/n8n-push-contract.md`); moduły kalkulacji i harmonogramu go nie zmieniają | N/A (j.w.) |
+| D36 | API interakcji | N/A — kontrakt push n8n → `customers` (`.ai/n8n-push-contract.md`); moduły kalkulacji i harmonogramu go nie zmieniają | N/A (j.w.) |
+| D37 | Scoring i `probability` | N/A — scoring liczy n8n; moduł tylko czyta `probability` z deala (§3.11) | N/A (j.w.; §4.3 przyjmuje `probability` od konsumenta) |
+| D38 | Kanał pozyskania | N/A — kontrakt push n8n → `customers` (`.ai/n8n-push-contract.md`); moduły kalkulacji i harmonogramu go nie zmieniają | N/A (j.w.) |
+| D40 | n8n nie nadpisuje pól ręcznych | N/A — kontrakt push n8n → `customers` (`.ai/n8n-push-contract.md`); moduły kalkulacji i harmonogramu go nie zmieniają; zapis wartości do deala robi wyłącznie jawna komenda użytkownika (D66) | N/A (j.w.) |
+| D41 | Słownik powodów przegranej | N/A — słownik w `customers`/n8n; moduł czyta tylko `closure_outcome` (§0.6) | N/A (j.w.) |
+| D42 | Zwycięzca/konkurent; n8n nie zmienia `closure_outcome` | §0.6 | — |
+| D44 | Limity backfillu | N/A — kontrakt push n8n → `customers` (`.ai/n8n-push-contract.md`); moduły kalkulacji i harmonogramu go nie zmieniają | N/A (j.w.) |
+| D45 | Moduły aplikacji w forku, bez zmian w `packages/core` | nagłówek (Moduł), §0.1, §19 | nagłówek (Moduł), §18 |
+| D46 | Enka faza 1 wstrzymana | N/A — Enka poza zakresem obu spec | N/A (j.w.) |
+| D47 | Przełącznik harmonogramu per organizacja (`module_configs`) + kill-switch tenanta | §0.5 | §1.0 |
+| D48 | RBAC marży i kosztu | §4.1, §4.3, §9 | §9 |
+| D49 | Marża po `closure_outcome` | §0.6, §4.2, §4.3a, §9 | — |
+| D50 | Zakres MVP | §14 MVP, §6.5, §7a.2 | §1.1, §12 MVP (moduł poza MVP) |
+| D51 | Komunikat o duplikacie oferty | §3.12, §8.5a, §12.1 | — |
+| D52 | Inwestycja = jedna encja | §2.2 (`pc_investments`), §3.12, §10.4 | §2.2 (`investment_id`) |
+| D53 | Gantt inwestycji = osobny rekord | — | §1.2, §2.2 (`schedule_scope`, `investment_id`), §6.1, §7.3 |
+| D54 | Przypięte zadania, propagacja tylko w przód | — | §3a.1, §3a.2, §6.3 |
+| D55 | Konwencja dat (koniec włącznie, FS, kamień milowy, dni kalendarzowe) | §2.2 (partie) | §2.2, §3.2 (adapter), §3a.1, §8.1 |
+| D56 | Import zastępuje dane po potwierdzeniu; błędne wiersze odrzucane | §6.2, §6.5, §8.5b | §8.1 |
+| D57 | Przeliczenie i nowa rewizja | §3.9, §8.5 | — |
+| D58 | Mark-sent: blokady i ostrzeżenia | §3.2, §3.6, §3.8 | — |
+| D59 | Apply-to-deal tylko z wersji aktywnej | §3.9, §8.7 | — |
+| D60 | PDF: pdf-lib + dane firmy z `module_configs` | §2.2 (ustawienia), §5.2, §5.3 | — |
+| D61 | Kalkulacja bez deala poza prognozą ważoną | §3.11, §7a.4, §11 | §4.3 |
+| D62 | Zaokrąglenia, jednostki, identyfikatory | §2.2, §2.3, §2.4, §3.12 | — |
+| D63 | `pc_investments` kanoniczne + import `klin:project` | §2.2, §10.4, §18 | — |
+| D64 | `cf_offer_role` z n8n do migracji | §3.12, §15 (R13) | — |
+| D65 | Pierwsza oferta = `primary` | §3.12, §8.5a | — |
+| D66 | Apply-to-deal = jawna komenda | §8.7, §10.2 | — |
+| D67 | Wyłączenie modułu: dane ukryte | §2.2 (partie), §16 (Q4) | §1.0, §2.2 |
+| D68 | `employee` bez kosztów i marży | §4.2, §9 | §9 |
+| D69 | Ustawienia: klucz `org:{id}:settings` | §0.5, §8.1, §15 (R12) | — |
+
+**Rozstrzygnięcia bez numeru D** (w `.ai/decisions.md` d818aa2 nie ma dla nich numerów): rozstrzygnięcie Koordynatora 2026-10-23 (Q7–Q11). Q6 pozostaje otwarte (§16).
+
+| Pytanie | Rozstrzygnięcie Koordynatora 2026-10-23 (Q7–Q11) | costing | schedule |
+|---|---|---|---|
+| Q7 | Kody walut ISO 4217, gdy Q6 ≠ (a) | §2.3, §3.10 | — |
+| Q8 | Kurs NBP tabela A z dnia mark-sent, zamrożony w snapshocie; ręczna korekta przed mark-sent | §2.2 (`snapshot_data.fx`), §3.8, §3.10, §15 (R17) | — |
+| Q9 | Flaga „deal ponownie otwarty”, bez usuwania danych | §0.6, §15 (R18) | §1.2, §2.2 (`reopened_at`), §14 (R15) |
+| Q10 | Cena zero = ostrzeżenie przy mark-sent (lista D58), bez blokady | §3.2, §3.8 | — |
+| Q11 | Zależności: `exceljs` tak; siatka najpierw `packages/ui`; `@svar-ui` tylko PoC w v1 schedule (Gantt własny, bez SVAR PRO); `xml2js` w v2; nic nie instalujemy na etapie speki | §6.1, §12.2, §18a | §3.2, §8.2, §12, §14 (R13) |
+
+---
+
 ## Changelog
 
 | Data | Zmiana |
 |------|--------|
-| 2026-10-23 | **rev 8b** — spójność, review P1/P2, decyzje D47–D69 (`.ai/decisions.md` d818aa2), wnioski z planu testów. **P11:** usunięte wszystkie estymaty w dniach (tabele, sumy, narzut OM, rezerwy procentowe, porównania; też w starszych wierszach changelogu); §14 = listy funkcji i encji per faza; R15 bez rezerwy w dniach. **D50:** do MVP weszły minimalne `pc_investments`, `pc_deal_offer_roles` (D51 komunikat, D65 pierwsza = primary), linie `note`, partie ręczne + import harmonogramu XLSX `xlsx_import` (D56: zastąpienie po potwierdzeniu, raport odrzuconych wierszy); importy CLI `klin:project`/`cf_offer_role` jako wdrożeniowe. **D62/D16:** half-up 2 miejsca per linia, suma = suma zaokrąglonych linii, `rounding.*` per organizacja; wzory §3 przepisane; reszta trybu B na największej linii; zaokrąglanie bankierskie usunięte. **Jednostki:** słownik + własne `pc_unit_conversions` (v1), §2.4. **D6:** priorytet e-Zamówienia > TED > BIP > INV. **D57:** „Przelicz z cennika” (MVP) tylko bez override; „Nowa rewizja” = jedna akcja (zastępuje unlock + duplicate). **D58:** walidacja mark-sent (blokady/ostrzeżenia). **D59/D66:** apply-to-deal przycisk z wersji aktywnej, komenda `customers.deals.update`; `activate` w MVP. **D49:** `view_margin_after_close` przy won albo lost. **D61:** kalkulacja bez deala poza prognozą ważoną. **D68:** `employee` bez kosztów/marży. **D63/D64/D69:** §10.4, §3.12, R12, R13. **§16:** Q1–Q5 zamknięte; nowe Q6–Q11. **Kod p5:** §0.6 statusy deala (`closure_outcome`, etapy D33). **p6/p8:** write path (`calculate()`, `save_lines`, lock na nagłówku, pola pochodne nieprzechowywane, audyt). **p9:** przypadki brzegowe i bezpieczeństwo importu, limity 10 MB / 100 MB / 10 000 wierszy / 200 kolumn (wspólne ze schedule). **p10:** PDF na `pdf-lib`; siatka na `packages/ui`; §18a lista zależności. **p13:** `subtotal` usunięty. **p18:** numeracja sekwencjami PG (`pc_document_sequences`). **p19:** CHECK (marża < 1, narzut > −1), qty 0, ujemne ceny blokują mark-sent; bez SERIALIZABLE. **Plan testów:** pola audytu, jeden limit importu, definicja błędnego wiersza, narzut jako ułamek, prognoza nieważona + ważona, bezpieczeństwo XLSX, filtrowanie po stronie serwera. **A2–A5:** nagłówek „Kluczowe cechy”, cache `total_quantity` przez kolejkę, jedno źródło partii, `investment_key` na `pc_investments`. **Założenia przenumerowane** (stary → nowy): A1–A11 → A1–A11 (A1, A6, A8–A11 zaktualizowane); A12 usunięte; A13→A12, A14→A13, A15→A14, A16→A15, A17→A16, A18→A17, A19→A18, A20→A19, A21→A20, A22→A21, A23→A22, A24→A23, A25→A24, A26→A25, A27→A26, A28→A27; A29 usunięte; nowe A28–A32. |
+| 2026-10-23 | **rev 8b** — spójność, review P1/P2, decyzje D47–D69 (`.ai/decisions.md` d818aa2), wnioski z planu testów. **P11:** usunięte wszystkie estymaty w dniach (tabele, sumy, narzut OM, rezerwy procentowe, porównania; też w starszych wierszach changelogu); §14 = listy funkcji i encji per faza; R15 bez rezerwy w dniach. **D50:** do MVP weszły minimalne `pc_investments`, `pc_deal_offer_roles` (D51 komunikat, D65 pierwsza = primary), linie `note`, partie ręczne + import harmonogramu XLSX `xlsx_import` (D56: zastąpienie po potwierdzeniu, raport odrzuconych wierszy); importy CLI `klin:project`/`cf_offer_role` jako wdrożeniowe. **D62/D16:** half-up 2 miejsca per linia, suma = suma zaokrąglonych linii, `rounding.*` per organizacja; wzory §3 przepisane; reszta trybu B na największej linii; zaokrąglanie bankierskie usunięte. **Jednostki:** słownik + własne `pc_unit_conversions` (v1), §2.4. **D6:** priorytet e-Zamówienia > TED > BIP > INV. **D57:** „Przelicz z cennika” (MVP) tylko bez override; „Nowa rewizja” = jedna akcja (zastępuje unlock + duplicate). **D58:** walidacja mark-sent (blokady/ostrzeżenia). **D59/D66:** apply-to-deal przycisk z wersji aktywnej, komenda `customers.deals.update`; `activate` w MVP. **D49:** `view_margin_after_close` przy won albo lost. **D61:** kalkulacja bez deala poza prognozą ważoną. **D68:** `employee` bez kosztów/marży. **D63/D64/D69:** §10.4, §3.12, R12, R13. **§16:** Q1–Q5 zamknięte; nowe Q6–Q11. **Kod p5:** §0.6 statusy deala (`closure_outcome`, etapy D33). **p6/p8:** write path (`calculate()`, `save_lines`, lock na nagłówku, pola pochodne nieprzechowywane, audyt). **p9:** przypadki brzegowe i bezpieczeństwo importu, limity 10 MB / 100 MB / 10 000 wierszy / 200 kolumn (wspólne ze schedule). **p10:** PDF na `pdf-lib`; siatka na `packages/ui`; §18a lista zależności. **p13:** `subtotal` usunięty. **p18:** numeracja sekwencjami PG (`pc_document_sequences`). **p19:** CHECK (marża < 1, narzut > −1), qty 0, ujemne ceny blokują mark-sent; bez SERIALIZABLE. **Plan testów:** pola audytu, jeden limit importu, definicja błędnego wiersza, narzut jako ułamek, prognoza nieważona + ważona, bezpieczeństwo XLSX, filtrowanie po stronie serwera. **A2–A5:** nagłówek „Kluczowe cechy”, cache `total_quantity` przez kolejkę, jedno źródło partii, `investment_key` na `pc_investments`. **Założenia przenumerowane** (stary → nowy): A1–A11 → A1–A11 (A1, A6, A8–A11 zaktualizowane); A12 usunięte; A13→A12, A14→A13, A15→A14, A16→A15, A17→A16, A18→A17, A19→A18, A20→A19, A21→A20, A22→A21, A23→A22, A24→A23, A25→A24, A26→A25, A27→A26, A28→A27; A29 usunięte; nowe A28–A32. **Follow-up (spec-check):** §22 Decision traceability — wszystkie aktywne decyzje z d818aa2 z sekcjami albo N/A z powodem, decyzje zastąpione tylko jako „superseded by”; rozstrzygnięcia Koordynatora 2026-10-23 Q7–Q11 zamknięte w §16 i wpisane w §0.6, §2.3, §3.8, §3.10, §6.1, §14 v2, §15 (R16–R18), §18a; Q6 otwarte; poprawka odsyłacza w §14 „Zakres zbiorczy” (schedule §12). |
 | 2026-10-20 | **rev 8a** — Review Kod (PR #10 rev 7) + decyzje Koordynatora/Marka. **P0-1:** costing = moduł bazowy z `ScheduleSource` + `scheduleSourceRegistry` w DI; `project_schedule` rejestruje provider; usunięte HTTP (`InternalScheduleSource` przez HTTP, `GET element-types` dla schedule → `elementTypeService` w DI, odczyty `customers` → query engine/DI) i subscriber costingu na eventy schedule; A3 poprawione; nowa §0 Architecture. **P0-2:** `cf_offer_role` + UUID `73f8260a…` + dwie komendy usunięte → encja `pc_deal_offer_roles` (`data/extensions.ts`, partial unique na `primary`, `set_primary` w jednej transakcji); komunikat „Istnieje już oferta dla innego wykonawcy — wskaż, która jest główna”; R10 usunięte; import 546 wartości jako opcjonalna komenda CLI; apply-to-deal = jawna komenda `customers` (Q1). **P0-3:** ukryta marża = ukryty koszt; tabela kanałów (API, query_index `buildUpsertPayload`, search, audit_logs, eventy tylko z ID, eksport, PDF, compare, analityka, snapshot, notyfikacje). **Firma = organizacja:** `pc_settings` → ModuleConfigService (zweryfikowano: brak natywnego scope organizacji → klucz `org:{id}:settings`); harmonogram per organizacja przez ModuleConfigService + ACL + blokady menu/API, `feature_toggles` tylko jako kill-switch per tenant (schedule §1.0). **Decyzja (e):** widoczność tylko przez `acl.ts`; role admin/employee; `view_margin_after_close`. **Decyzja (c):** inwestycja = `pc_investments`; `project_id`, `attach-project` i widget `klin:project` usunięte; migracja `klin:project` jako CLI. **P1-15 + (a):** nowe MVP (siatka, import XLSX, A/C, prosty cennik, mark-sent + PDF, apply-to-deal, RBAC, partie + prognoza); eksport XLSX → v1. **P1-16:** wycena od zera z narzutem OM (estymaty usunięte w rev 8b — P11). Pkt 14 i 20 zamknięte (D30, D21). Dodane: TLDR, Risks z ryzykiem rezydualnym, Final Compliance Report, Checklist compliance, `deleted_at`. `pc_calculation_audit_log` → `audit_logs`. Weryfikacja review w kodzie — zgodne: feature_toggles per tenant (`feature-flag-check.ts`: klucz cache i override po `tenantId`), role admin/employee (`customers/setup.ts`), `useDealInjectedTabs.tsx` l.28, snapshoty w `audit_logs/data/entities.ts`, `pdf-lib` w `packages/core/package.json` l.256, `salesDocumentNumberGenerator.ts`. **Niezgodne/uzupełnione:** ModuleConfigService przyjmuje `organizationId`, ale nie używa go przy odczycie (opisane w §2.2); `data/extensions.ts` jest dziś deklaracją bez runtime joinu (dlatego enricher). Numery linii w AGENTS.md podane wg gałęzi spec. Poza zakresem rev 8a (zrobione w rev 8b): Kod p4–6 (szczegóły), 8–13, 16 (szczegóły), 18–19, A7/A13, partie pc_/ps_, investment_key, numeracja założeń, half-up. |
 | 2026-10-19 | v1–v4: patrz poprzednie rewizje |
 | 2026-10-19 | v5 — Oferta = frozen snapshot (pc_offer_snapshots); typy linii (section/item/note/subtotal) + hierarchia (parent_line_id) + markup_pct z dziedziczeniem; cykl życia wersji: draft/sent/superseded/accepted/rejected + numeracja base_code-R{revision}; layered price list (pc_price_list_rules); koszty rzeczywiste CostEntry (pc_cost_entries); marża ukryta domyślnie; deal_id nullable |
