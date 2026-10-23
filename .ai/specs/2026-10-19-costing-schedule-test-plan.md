@@ -644,11 +644,11 @@ Inwestycję zakłada handlowiec w module kalkulacji; n8n inwestycji nie tworzy. 
   4. Po każdym kroku: przez `pg` policz oferty główne na inwestycję
 - **Oczekiwane wyniki**:
   - Rozdzielenie niedostępne w MVP (brak akcji w UI, API odrzuca)
-  - Krok podziału pokazuje wybór oferty głównej; domyślnie zaznaczony oryginał (Deal 1)
+  - Krok podziału pokazuje wybór oferty głównej osobno dla każdej inwestycji po podziale („Hala A” i „Hala B”); domyślnie zaznaczona dotychczasowa oferta główna (oryginał, Deal 1) w „Hala A”, a w „Hala B” jej jedyna oferta (Deal 3)
   - Krok 1: „Hala A” — Deal 1 główna, Deal 2 alternatywna; „Hala B” — Deal 3 główna (pierwsza oferta na inwestycji)
   - Krok 2: „Hala A” — Deal 2 główna, Deal 1 alternatywna
   - Krok 3: odrzucone z komunikatem dokładnie „Istnieje już oferta dla innego wykonawcy — wskaż, która jest główna”; rozdzielenie nie wykonane, dane bez zmian
-  - Krok 4: zawsze dokładnie jedna oferta główna na inwestycję
+  - Krok 4: przez `pg` w każdej inwestycji po podziale („Hala A” i „Hala B”) dokładnie jedna oferta główna
   - Audit trail rozdzielenia
 
 #### TC-DEAL-011: Pierwsza oferta na inwestycji — automatycznie główna
