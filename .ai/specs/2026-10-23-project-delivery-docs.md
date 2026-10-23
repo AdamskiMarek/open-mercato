@@ -6,7 +6,7 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-23 |
-| **Rewizja** | 2026-10-23 (rev 3 — uwagi z niezależnego planu testów (PR C), rozstrzygnięcia techniczne §5.12; rev 2 — D114 akceptacje, D115 worker na istniejącej kolejce, domyślny dostawca S3 wg tabeli §5.11; rev 1 — decyzje D98–D113, stan VPS na 23.10, warianty storage A/B, retencja, kryteria akceptacji) |
+| **Rewizja** | 2026-10-23 (rev 4 — odbiór #18: bufor tylko w RAM, współbieżność 1 tylko dla kolejek `project_delivery`, parametry presji RAM (O13), PoC OVHcloud (R22, KA-7), kopia zapasowa przy jednej strefie (O14); rev 3 — uwagi z niezależnego planu testów (PR C), rozstrzygnięcia techniczne §5.12; rev 2 — D114 akceptacje, D115 worker na istniejącej kolejce, domyślny dostawca S3 wg tabeli §5.11; rev 1 — decyzje D98–D113, stan VPS na 23.10, warianty storage A/B, retencja, kryteria akceptacji) |
 | **Moduł** | `project_delivery` (`apps/mercato/src/modules/project_delivery`; nazwa i prefiks tabel `pd_`, D98) |
 | **Zależności upstream** | **`project_costing` (moduł bazowy)**, `customers`, `directory`, `auth`, `configs` (ModuleConfigService), `audit_logs`, `query_index`, `progress` (ProgressJob), `notifications`, `feature_toggles`, **`@open-mercato/storage-s3`** (klient S3, preset env, `endpoint-safety`; moduł `storage_s3` za `OM_ENABLE_STORAGE_S3`), `@open-mercato/queue` |
 | **Moduły powiązane** | `project_costing` (spec `.ai/specs/2026-10-19-project-costing-offer-calculator.md`) — baza, właściciel kontraktów DI; `project_schedule` (spec `.ai/specs/2026-10-19-project-schedule.md`) — opcjonalny dostawca harmonogramu wykonawczego, rejestruje się w rejestrze costingu; `project_delivery` nie importuje `project_schedule` i odwrotnie (D98, D100) |
@@ -174,7 +174,7 @@ Prowadzenie realizacji wygranego kontraktu w tym samym systemie co przetarg, kal
 Wniosek (D110): jeden import dokumentacji budowlanej (setki MB) buforowany w RAM wywołałby swap albo OOM całej instancji OM. Dysk VPS nie może być magazynem plików projektów. Stąd wymagania:
 1. Pliki nie trafiają na dysk VPS: brak drivera `local` dla `projectDocs` i brak plików tymczasowych w workerze (ZIP czytany zakresami z S3, §5.6).
 2. Pliki nie przechodzą przez RAM aplikacji: upload i pobranie przez presigned URL bezpośrednio przeglądarka ↔ S3. Serwer podpisuje i zapisuje metadane.
-3. Jedyny proces, który dotyka bajtów pliku, to worker importu (§5.6) — istniejący proces workerów OM w kontenerze aplikacji (D115). Działa strumieniowo, z ograniczoną pamięcią niezależną od rozmiaru pliku, concurrency 1.
+3. Jedyny proces, który dotyka bajtów pliku, to worker importu (§5.6) — istniejący proces workerów OM w kontenerze aplikacji (D115). Działa strumieniowo, z buforem wyłącznie w RAM ograniczonym do `partSize × queueSize` (parametry bez wartości) i z zerem plików tymczasowych na dysku VPS. Współbieżność 1 dotyczy tylko kolejek importu i multipartu `project_delivery` (D115).
 4. Plan testów (PR C) mierzy pamięć na dużym pliku i dużym ZIP (§14).
 
 ### 1.3 Granice modułu
@@ -467,7 +467,7 @@ Serwer nie widzi bajtów pliku. Moduł ma **własne trasy i własne feature'y** 
 - `zip_upload`: ZIP wgrany przez użytkownika (presigned multipart do `staging/`, §5.3, `purpose = import_staging`).
 - `ted`: tylko metadane ogłoszenia i link BT-15 (`procurement-documents`) jako dokument-link (D106). Bez pobierania plików.
 
-**Twarde reguły (D115):** tylko strumieniowo (pobranie → rozpakowanie per wpis → części prosto do S3); bez buforowania całego pliku i bez zapisu na dysk VPS poza małym buforem tymczasowym w pamięci; współbieżność 1 na instancję; limity `import.max_file_bytes` (per plik) i `import.max_zip_bytes` (per ZIP) jako parametry bez wartości; `import.timeout_ms` (parametr) — po przekroczeniu job `failed`, abort otwartych multipartów; wznowienie: stan importu (`pd_imports`: przetworzone wpisy, `uploadId` i numery części) pozwala wznowić od ostatniego pełnego wpisu po restarcie procesu, a `ListParts` odtwarza listę wysłanych części; abort multipartu przy anulowaniu, błędzie i timeout, sweeper dla porzuconych. Osobny kontener z limitem pamięci tylko po pomiarze (KA-6).
+**Twarde reguły (D115):** tylko strumieniowo (pobranie → rozpakowanie per wpis → części prosto do S3); bez buforowania całego pliku; bufor **wyłącznie w RAM**, ograniczony do `partSize × queueSize` (`import.part_size_bytes`, `import.queue_size` — parametry bez wartości); na dysku VPS **zero plików tymczasowych** (D110); współbieżność 1 na instancję **tylko dla kolejek `project_delivery`** (import i multipart serwerowy) — pozostałe kolejki obsługiwane przez `queue worker --all` zachowują swoją konfigurację; limity `import.max_file_bytes` (per plik) i `import.max_zip_bytes` (per ZIP) jako parametry bez wartości; `import.timeout_ms` (parametr) — po przekroczeniu job `failed`, abort otwartych multipartów; wznowienie: stan importu (`pd_imports`: przetworzone wpisy, `uploadId` i numery części) pozwala wznowić od ostatniego pełnego wpisu po restarcie procesu, a `ListParts` odtwarza listę wysłanych części; abort multipartu przy anulowaniu, błędzie i timeout, sweeper dla porzuconych. Osobny kontener z limitem pamięci tylko po pomiarze (KA-6).
 
 **Strumień (pamięć ograniczona, bez dysku):**
 1. Pobranie pliku z e-Zamówień: `fetch` → `ReadableStream` → `Upload` z `@aws-sdk/lib-storage` (multipart, `partSize` i `queueSize` ograniczone parametrami; pamięć ≈ `partSize × queueSize`) do `staging/{importId}/…`. Bez `Buffer.concat`, bez pliku tymczasowego. Fallback bez nowej zależności: ręczny multipart komendami `client-s3` z tym samym ograniczeniem.
@@ -587,7 +587,7 @@ Dokumentacja kompatybilności: Cloudflare R2 https://developers.cloudflare.com/r
 1. Opublikowane opłaty za operacje API i za egress równe zero.
 2. Najniższa opublikowana stawka za przechowywanie w porównywalnej klasie.
 
-Krok 1 spełnia tylko OVHcloud: Cloudflare R2 ma płatne operacje Class A/B, Scaleway ma płatny egress ponad 75 GB, a Hetzner i Scaleway nie przechodzą progu kompatybilności. **Domyślny: OVHcloud Object Storage w regionie UE.** Region i klasa (One Zone vs Multi-Zone, czyli trwałość kontra stawka) to parametr wdrożenia, nie decyzja speki. **Fallback: Backblaze B2 z adapterem.** Gdyby PoC u OVHcloud nie potwierdził `If-None-Match` przy presigned PUT, dostawcą zostaje B2 z adapterem, zgodnie z regułą D111.
+Krok 1 spełnia tylko OVHcloud: Cloudflare R2 ma płatne operacje Class A/B, Scaleway ma płatny egress ponad 75 GB, a Hetzner i Scaleway nie przechodzą progu kompatybilności. **Domyślny: OVHcloud Object Storage w regionie UE.** Region i klasa (One Zone vs Multi-Zone, czyli trwałość kontra stawka) to parametr wdrożenia, nie decyzja speki; kopia zapasowa przy One Zone — Otwarte O14. Zgodność potwierdza PoC na etapie kodu (KA-7, R22). **Fallback: Backblaze B2 z adapterem.** Gdyby PoC u OVHcloud nie potwierdził `If-None-Match` przy presigned PUT, dostawcą zostaje B2 z adapterem, zgodnie z regułą D111.
 
 ---
 
@@ -752,13 +752,19 @@ Kryteria są wymaganiem speki. Przypadki testowe pisze plan testów (PR C), bez 
 
 ### KA-5 — pamięć i VPS (D110, D115)
 1. Upload i pobranie pliku dowolnego rozmiaru nie przesyłają bajtów pliku przez proces aplikacji. Serwer obsługuje tylko JSON i przekierowania.
-2. Import dużego pliku i dużego ZIP nie powoduje wzrostu pamięci procesu workera proporcjonalnego do rozmiaru pliku. Szczyt pamięci jest ograniczony parametrami (`partSize × queueSize` + bufor dekompresji) i nie tworzy plików na dysku VPS.
-3. Import ma współbieżność 1 na instancję, przerywa się po `import.timeout_ms` z abortem otwartych multipartów i daje się wznowić po restarcie procesu bez ponownego wysyłania pełnych wpisów (D115).
+2. Import dużego pliku i dużego ZIP nie powoduje wzrostu pamięci procesu workera proporcjonalnego do rozmiaru pliku. Bufor danych pliku jest wyłącznie w RAM i ograniczony do `partSize × queueSize` (okno dekompresji ma stały rozmiar, niezależny od pliku). Na dysku VPS nie powstaje żaden plik tymczasowy (sprawdzenie katalogów tymczasowych kontenera przed importem i po nim).
+3. Kolejki importu i multipartu `project_delivery` mają współbieżność 1 na instancję (inne kolejki bez zmian). Import przerywa się po `import.timeout_ms` z abortem otwartych multipartów i daje się wznowić po restarcie procesu bez ponownego wysyłania pełnych wpisów (D115).
 
 ### KA-6 — pomiar RAM workera na wersji testowej (D115, etap kodu)
 1. Na wersji testowej (ta sama konfiguracja kontenera `app` co na produkcji) wykonuje się import dużego pliku i dużego ZIP. Mierzy się szczytowe RSS procesu `queue worker` i całego kontenera `app` oraz użycie swapu hosta przed importem i w trakcie.
-2. Wynik pomiaru jest zapisany w PR etapu kodu. Osobny kontener workera z limitem pamięci jest dodawany **tylko wtedy**, gdy pomiar pokaże presję RAM (wzrost swapu albo zbliżenie do limitu kontenera). Progi pomiaru są parametrami etapu kodu, bez wartości w specu.
-3. Bez takiego pomiaru nie zmienia się topologii kontenerów (D115).
+2. Presję RAM określają dwa parametry pomiaru (bez wartości w specu): `measure.worker_rss_peak_delta_bytes` (szczytowy przyrost RSS procesu workera podczas importu względem stanu przed importem) i `measure.host_min_free_bytes` (minimalna wolna pamięć hosta w trakcie pomiaru). Presja RAM = przekroczenie progu przyrostu RSS **albo** spadek wolnej pamięci hosta poniżej minimum.
+3. Wynik pomiaru (oba parametry, ich progi i werdykt) jest zapisany w PR etapu kodu. Osobny kontener workera z limitem pamięci jest dodawany **tylko wtedy**, gdy werdykt to presja RAM. Bez ustalonych wartości obu progów (Otwarte O13) pomiar nie może zakończyć się werdyktem, a kryterium etapu kodu nie jest spełnione.
+4. Bez takiego pomiaru nie zmienia się topologii kontenerów (D115).
+
+### KA-7 — PoC zgodności dostawcy S3 (D111, etap kodu, R22)
+1. Przed kodem modułu PoC u OVHcloud (bucket testowy w regionie UE) potwierdza: warunkowy `PutObject` z `If-None-Match: *` (drugi zapis → 412), presigned PUT i presigned GET (w tym `response-content-disposition`), multipart (`Create`/`UploadPart`/`Complete`/`Abort`) i jego wznowienie (`ListParts` po przerwaniu, dokończenie bez ponownego wysyłania części).
+2. Wynik (operacja → wynik) jest zapisany w PR etapu kodu i jest kryterium akceptacji etapu kodu.
+3. Jeśli którakolwiek operacja nie przejdzie, domyślnym dostawcą zostaje B2 z adapterem (D111, §5.10), a PoC powtarza się dla B2.
 
 ---
 
@@ -831,6 +837,7 @@ Tabela identyczna jak w costing §14 i schedule §13.
 | R19 | Worker importu dzieli RAM z kontenerem aplikacji (D115; brak osobnego kontenera workera w compose, `docker-compose.fullapp.yml` l.156/l.184/l.207) | strumieniowo, współbieżność 1, limity per plik i per ZIP, timeout; pomiar na wersji testowej (KA-6) decyduje o osobnym kontenerze z limitem pamięci | średnie do pomiaru KA-6; potem niskie |
 | R20 | Usuwanie poza dokumentami (staging ZIP, obiekty osierocone) mogłoby trafić w klucz rewizji (błąd prefiksu, wyścig `complete` ↔ sweeper) | jedna funkcja `DeleteObject` ze strażnikiem: tylko `staging/{importId}/` danej organizacji albo `storage_key` sesji `expired` bez rewizji; przejście `reserved → expired` pod advisory lockiem, `complete` wymaga `reserved`; log każdego usunięcia; lifecycle tylko dla `staging/` i niedokończonych multipartów; test listy wywołań (KA-4 pkt 8) | niskie |
 | R21 | Purge na B2 (wersjonowanie zawsze włączone) albo u dostawcy z włączonym wersjonowaniem: `DeleteObject` po samej nazwie zostawia wersje, które dalej są płatne, a quota by spadła | purge = `ListObjectVersions` + `DeleteObject` z `VersionId` dla każdej wersji i markera, potwierdzenie pustą listą; quota zmniejszana dopiero po potwierdzeniu; `purge_failed` przy Object Lock lub błędzie; obsługa tych operacji do potwierdzenia w PoC | niskie po PoC; średnie bez PoC na B2 |
+| R22 | Zgodność OVHcloud z wymaganymi operacjami potwierdzona tylko dokumentacją, nie testem: warunkowy PUT (`If-None-Match`), presigned PUT/GET, multipart i jego wznawianie | PoC na etapie kodu jako kryterium akceptacji (KA-7); jeśli nie przejdzie, wchodzi B2 z adapterem (D111). Kopia zapasowa przy regionie z jedną strefą dostępności — Otwarte O14 | średnie do PoC; potem niskie |
 
 ---
 
@@ -846,16 +853,19 @@ Pytania biznesowe (a), (b), (c) są zamknięte przez D111, D112, D113. O5 zamkni
 - **O10 — Warunki etapu kodu (zgoda Marka):** włączenie `OM_ENABLE_STORAGE_S3`, konto i bucket u domyślnego dostawcy (D111, §5.11; fallback B2), DPA, miejsce przechowywania kluczy bucketu klienta (v2): tylko w bazie, zaszyfrowane mechanizmem OM, nigdy w repo (§5.12 pkt 11); wybór mechanizmu na etapie v2.
 - **O11 — Polityka dopłaty:** czy nadwyżka ponad limit jest naliczana automatycznie (`overage_allowed`), czy wymaga zgody administratora organizacji przy pierwszym przekroczeniu. Spec obsługuje oba przez parametr; wybór należy do cennika.
 - **O12 — Kamienie milowe projektu vs kamienie Gantta w schedule:** brak synchronizacji (propozycja); ewentualne powiązanie — v2.
+- **O13 — Wartości progów presji RAM (KA-6):** `measure.worker_rss_peak_delta_bytes` i `measure.host_min_free_bytes`. Wartości ustala Koordynator z Dawidem przed pomiarem na wersji testowej. Bez nich pomiar nie może zakończyć się werdyktem.
+- **O14 — Kopia zapasowa przy regionie z jedną strefą dostępności (One Zone):** czy przy wyborze klasy One Zone potrzebna jest kopia w drugiej lokalizacji (koszt drugiej kopii kontra ryzyko utraty strefy). Do decyzji; spec tego nie rozstrzyga (R22, §5.11).
 
 ---
 
 ## 14. Uwagi dla planu testów (PR C)
 
 - Plan testów musi zawierać scenariusz **dużego pliku** (upload multipart z przeglądarki i pobranie) oraz **dużego ZIP** (import w workerze), w którym pamięć procesu aplikacji i workera **nie rośnie proporcjonalnie do rozmiaru pliku**. Pomiar szczytowego RSS przy dwóch różnych rozmiarach plików, ten sam limit ze stałego bufora; brak plików tymczasowych na dysku.
-- Scenariusze dla KA-1 do KA-6 (§10): przekroczenie quota (blokada, dopłata, wyścig, zwolnienie rezerwacji, import `partial`), wybór wariantu A/B, retencja i data na projekcie, brak usunięcia bez administratora (w tym brak `DeleteObject` z workerów).
+- Scenariusze dla KA-1 do KA-7 (§10): przekroczenie quota (blokada, dopłata, wyścig, zwolnienie rezerwacji, import `partial`), wybór wariantu A/B, retencja i data na projekcie, brak usunięcia bez administratora (w tym brak `DeleteObject` z workerów).
 - Kontrakty DI między trzema modułami: costing bez delivery i schedule; delivery bez schedule (zakładka ukryta, brak błędów); delivery + schedule (link, `ensureExecution` idempotentne).
 - PoC u wybranego dostawcy (R2, R7, R8; §5.11) jako warunek przed kodem: presigned PUT z `If-None-Match: *`, multipart z przeglądarki (presigned `UploadPart`), `ListParts` i abort, CORS z `ETag`, presigned GET z `response-content-disposition`. Ten sam zestaw na fallbacku B2 z adapterem (bez `If-None-Match`).
-- Pomiar RAM workera na wersji testowej (KA-6, D115) jako kryterium etapu kodu.
+- Pomiar RAM workera na wersji testowej (KA-6, D115) jako kryterium etapu kodu: dwa parametry (przyrost RSS workera, minimalna wolna pamięć hosta), progi z O13; brak plików tymczasowych na dysku; współbieżność 1 tylko dla kolejek `project_delivery`.
+- PoC zgodności OVHcloud (KA-7, R22): warunkowy PUT, presigned PUT/GET, multipart i wznowienie; przy porażce ścieżka B2 z adapterem.
 - Rozstrzygnięcia z §5.12 (uwagi PR C, pkt 1–12) do pokrycia scenariuszami: strażnik `DeleteObject` (tylko `staging/` i osierocone sesje `expired` bez rewizji, R20), wyścig `complete` ↔ sweeper, purge przez wszystkie wersje z potwierdzeniem pustym `ListObjectVersions` (R21, także na B2 w PoC), lifecycle tylko dla `staging/` i niedokończonych multipartów, import `partial` bez usuwania rewizji, daty gwarancji i rękojmi z ręcznego wpisu, własne trasy presign bez `storage_providers.manage`.
 - Pokrycie decyzji D98–D115 w planie testów — do dopisania w PR C (dziś brak, zgodnie z planem).
 
@@ -991,7 +1001,7 @@ Brak punktów ⚠️. Ryzyka rezydualne: §12 (R1 do czasu pomiaru, R3, R11–R1
 | **D112** | §5.2, §5.5, §8, KA-1, KA-2 | wariant A (MVP) / B (v1/v2), quota z dopłatą |
 | **D113** | §5.8, §5.11, §5.12, §8, KA-3, KA-4, R10, R12, R20, R21 | retencja; archiwum = eksport albo zimna klasa u wybranego dostawcy; brak usuwania bez administratora |
 | **D114** | §9, §11 v1, R14 | akceptacje v1: `pd_approval_tiers`, `pd_approval_reviews` za `ApprovalEngine`; `workflows` w v2 |
-| **D115** | §1.2, §5.6, KA-5, KA-6, R1, R19, §14 | worker na istniejącej kolejce OM w kontenerze aplikacji; bez nowego kontenera do pomiaru |
+| **D115** | §1.2, §5.6, KA-5, KA-6, R1, R19, O13, §14 | worker na istniejącej kolejce OM w kontenerze aplikacji; bez nowego kontenera do pomiaru |
 
 ---
 
@@ -1002,3 +1012,4 @@ Brak punktów ⚠️. Ryzyka rezydualne: §12 (R1 do czasu pomiaru, R3, R11–R1
 | 2026-10-23 | **rev 1** — pierwsza wersja speki `project_delivery` (PR B, tylko specyfikacja): trzy moduły i kontrakty DI/eventów (D98), komenda „wygrany przetarg → realizacja” (D99), brak własnego Gantta + rejestr `executionScheduleRegistry` (D100), kamienie ↔ oferta (D101), dokumenty na S3 z presigned i multipart, quota per organizacja (D102, D110), rewizje i ACL (D103, D104), dyski w trybie linku (D105), zakres MVP/v1/v2 (D106–D108), regulacje jako ryzyka (D109), stan VPS na 23.10 i weryfikacja `storage-s3` z plikiem i linią (D110), storage w UE z domyślnym B2 Amsterdam i sprawdzeniem B2 (D111), wariant A/B (D112), retencja i purge tylko przez administratora (D113), kryteria akceptacji KA-1 do KA-5, wybór silnika akceptacji v1 (§9), uwagi dla PR C (§14). |
 | 2026-10-23 | **rev 2** — odbiór Cezara i uwagi Koordynatora: D114 (akceptacje v1: własna walidacja progów za `ApprovalEngine`, `workflows` w v2; zamyka O5), D115 (import ZIP i multipart w istniejącym workerze kolejki OM w kontenerze `app`, bez nowego kontenera, twarde reguły strumieniowe, pomiar KA-6; zamyka O6), prefiks `pd_` i nazwa modułu zatwierdzone, O3 z alternatywami bez nowych zależności i wynikiem sprawdzenia bibliotek ZIP w `yarn.lock`, tabela dostawców S3 w UE z dokumentacją i cennikami (§5.11, odczyt 2026-10-23), domyślny dostawca wg reguły D111 (OVHcloud; fallback B2 z adapterem), archiwum = eksport albo zimna klasa (D113, R10), R2 z zakresem użycia drivera `storage_s3`, nowe R19. |
 | 2026-10-23 | **rev 3** — uwagi z niezależnego planu testów (PR C), rozstrzygnięte w §5.12 bez nowych D: zakres `DeleteObject` (tylko `staging/` i obiekty osierocone, strażnik, R20); B2 bez klas i bez Transition (§5.10, §5.11, R10); purge przez wszystkie wersje z `VersionId` i quota do potwierdzenia (§5.8, R21); `AbortMultipartUpload` i lifecycle niedokończonych multipartów dozwolone; quota per organizacja vs tenant (§5.5); unikalność bez NULL-i (§2.2); sha256 przez worker (O7 zamknięte); własne trasy presign (§5.3); daty gwarancji i rękojmi w MVP ręcznie (§5.8, KA-3); semantyka częściowego importu (§5.6 pkt 8); poświadczenia bucketu klienta tylko zaszyfrowane w bazie (O10); linki udostępniania v1 (O9 zamknięte, D104). |
+| 2026-10-23 | **rev 4** — odbiór #18 (Cezar): D115 i spec — bufor wyłącznie w RAM ograniczony do `partSize × queueSize` (parametry bez wartości), zero plików tymczasowych na dysku VPS (spójnie z D110, dopisane też w D110); współbieżność 1 na instancję tylko dla kolejek importu i multipartu `project_delivery`, inne kolejki `queue worker --all` bez zmian; KA-6: dwa parametry presji RAM (szczytowy przyrost RSS workera, minimalna wolna pamięć hosta) bez wartości, progi w O13 (Koordynator z Dawidem przed pomiarem; bez nich brak werdyktu); R22 + KA-7: PoC zgodności OVHcloud na etapie kodu, przy porażce B2 z adapterem; O14: kopia zapasowa przy regionie One Zone — do decyzji. |
