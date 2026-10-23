@@ -6,7 +6,7 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-19 |
-| **Rewizja** | 2026-10-23 (rev 8k — odbiór #20: kontrakt `ExecutionScheduleProvider` per projekt i faza (D131); rev 8j — PR D: `getWinningOffer` → `null` dla deala bez kalkulacji (D116), poprawki zakresów D w §10.3a, §22 i changelogu; poprzednio rev 8i — zmiana na potrzeby `project_delivery` (D98–D101): rejestr `executionScheduleRegistry`, metody `getWinningOffer`/`listStructure`/`getSnapshotSectionPriceTotals` w `calculationLookupService`, zakres zbiorczy trzech modułów; poprzednio rev 8h — domknięcie walut: D95 (waluta bez źródła kursu nie może być walutą oferty ani pozycji, 422 `CURRENCY_NO_RATE_SOURCE` — propozycja; Q12 zamknięte), D96 (wariant (a) dla R24, błąd daty do upstream tylko jako issue), D97 (c46ad643 z pierwszym PR modułu); traceability D1–D97; poprzednio rev 8g — poprawki po review PR #16: konwencja daty mark-sent (data kalendarzowa Europe/Warsaw jako `${D}T00:00:00Z`, odczyt `source = 'NBP_A'`, `date ≤ D`, `date DESC`, limit 1), lookup core o 00:00–02:00 (CEST) / 00:00–01:00 (CET) widzi dzień D-1, `fx` przy walucie bazowej z `provider_source: null`, zakres i sposób odczytu trasy walut, R24 (wiele źródeł kursu w podsumowaniu deali); poprzednio rev 8f — D84–D94: waluty przez moduł OM `currencies` (dostawca `NBP_A`, kurs ręczny tylko w drafcie, waluta bazowa z `BaseCurrencyService`), stan walut wg logu Koordynatora, błąd daty kursu w core (R23), Q12; poprzednio rev 8e — D83: split inwestycji w v1, nity n8n przy D81 (`bulk-update-owner`, lookup + POST/PUT, `auth: null`, R21); poprzednio rev 8d, rev 8c, rev 8b 2026-10-23, rev 8a 2026-10-20) |
+| **Rewizja** | 2026-10-23 (rev 8l — odbiór #20 runda 2: część przetargu = osobna inwestycja, wspólny numer ogłoszenia `tender_notice_number`, identyfikator `bzp_notice_part` (D132); kontrakt `ExecutionScheduleProvider` per inwestycja (D131); rev 8k — odbiór #20: kontrakt `ExecutionScheduleProvider` per projekt i faza (D131); rev 8j — PR D: `getWinningOffer` → `null` dla deala bez kalkulacji (D116), poprawki zakresów D w §10.3a, §22 i changelogu; poprzednio rev 8i — zmiana na potrzeby `project_delivery` (D98–D101): rejestr `executionScheduleRegistry`, metody `getWinningOffer`/`listStructure`/`getSnapshotSectionPriceTotals` w `calculationLookupService`, zakres zbiorczy trzech modułów; poprzednio rev 8h — domknięcie walut: D95 (waluta bez źródła kursu nie może być walutą oferty ani pozycji, 422 `CURRENCY_NO_RATE_SOURCE` — propozycja; Q12 zamknięte), D96 (wariant (a) dla R24, błąd daty do upstream tylko jako issue), D97 (c46ad643 z pierwszym PR modułu); traceability D1–D97; poprzednio rev 8g — poprawki po review PR #16: konwencja daty mark-sent (data kalendarzowa Europe/Warsaw jako `${D}T00:00:00Z`, odczyt `source = 'NBP_A'`, `date ≤ D`, `date DESC`, limit 1), lookup core o 00:00–02:00 (CEST) / 00:00–01:00 (CET) widzi dzień D-1, `fx` przy walucie bazowej z `provider_source: null`, zakres i sposób odczytu trasy walut, R24 (wiele źródeł kursu w podsumowaniu deali); poprzednio rev 8f — D84–D94: waluty przez moduł OM `currencies` (dostawca `NBP_A`, kurs ręczny tylko w drafcie, waluta bazowa z `BaseCurrencyService`), stan walut wg logu Koordynatora, błąd daty kursu w core (R23), Q12; poprzednio rev 8e — D83: split inwestycji w v1, nity n8n przy D81 (`bulk-update-owner`, lookup + POST/PUT, `auth: null`, R21); poprzednio rev 8d, rev 8c, rev 8b 2026-10-23, rev 8a 2026-10-20) |
 | **Moduł** | `project_costing` (`apps/mercato/src/modules/project_costing`) |
 | **Nisza v1** | Prefabrykacja żelbetowa |
 | **Docelowo** | Cała branża budowlana (multi-segment) |
@@ -81,7 +81,7 @@ Reguły (źródło: `packages/core/AGENTS.md` § Cross-Module Coupling, l.240–
 | `calculationLookupService.getWinningOffer(dealId, ctx)` — **zmiana na potrzeby project_delivery (D99 — zastąpiona przez D116; realizuje D116)** | `{ calculationId, snapshotId, investmentId, offerRole, calculationStatus, closureOutcome, segmentCode, currency } \| null`; `null` = deal bez kalkulacji w OM — delivery zakłada wtedy projekt bez oferty i pozwala podpiąć kalkulację później (D116); wersja deala w statusie `sent`/`accepted` z istniejącym `pc_offer_snapshots`, rola z `pc_deal_offer_roles`; bez kosztu i marży (§4.3) | `project_costing` | `project_delivery` (komenda „wygrany przetarg → realizacja”) |
 | `calculationLookupService.listStructure(calculationId, ctx)` — **zmiana na potrzeby project_delivery (D101)** | sekcje i pozycje (`lineId`, `parentLineId`, `lineType`, `label`, `sortOrder`, `unit`, `quantity`); bez cen, kosztów i marży | `project_costing` | `project_delivery` (linki kamieni milowych) |
 | `calculationLookupService.getSnapshotSectionPriceTotals(snapshotId, ctx)` — **v1, zmiana na potrzeby project_delivery (D101)** | sumy cen sprzedaży sekcji ze snapshotu oferty (bez kosztu i marży) | `project_costing` | `project_delivery` v1 (billing % kamieni) |
-| `executionScheduleRegistry` — **zmiana na potrzeby project_delivery (D100)** | `register(provider)`, `get(ctx)`; `ExecutionScheduleProvider`: `isAvailable(ctx)`, `findForInvestment(investmentId, ctx)`, `findProjectPhase({ investmentId, projectId }, ctx)`, `ensureExecution({ investmentId, dealId, projectId, projectLabel }, ctx)` (idempotentne per projekt i faza, D131). Costing sam go nie woła; brak providera → `get()` zwraca `null` | `project_costing/di.ts` (pusty rejestr) | `project_schedule/di.ts` rejestruje providera (schedule §5.2); `project_delivery` czyta |
+| `executionScheduleRegistry` — **zmiana na potrzeby project_delivery (D100)** | `register(provider)`, `get(ctx)`; `ExecutionScheduleProvider`: `isAvailable(ctx)`, `findForInvestment(investmentId, ctx)` (z `phaseTaskId`, `executionProjectId` fazy projektu), `ensureExecution({ investmentId, dealId, projectId, projectLabel }, ctx)` (idempotentne per inwestycja; inwestycja ma najwyżej jeden projekt, D131, D116). Costing sam go nie woła; brak providera → `get()` zwraca `null` | `project_costing/di.ts` (pusty rejestr) | `project_schedule/di.ts` rejestruje providera (schedule §5.2); `project_delivery` czyta |
 
 ### 0.3 Komendy (write path)
 
@@ -431,11 +431,14 @@ Indeksy: `(calculation_id, organization_id, tenant_id)` (primary lookup), `(deal
 | `status` | `text` NOT NULL DEFAULT `'active'` | `active` \| `archived` (MVP); `merged` (v1) |
 | `merged_into_id` | `uuid` NULL | (v1) FK → `pc_investments.id`; wypełniony gdy `status = 'merged'` |
 | `notes` | `text` NULL | |
+| `tender_notice_number` | `text` NULL | D132: numer ogłoszenia postępowania (e-Zamówienia), wspólny dla inwestycji z części jednego postępowania; wpisywany przy zakładaniu z danych importu, potem tylko do odczytu; do grupowania i filtrowania, bez unikalności i bez udziału w dopasowaniu |
 | `created_by` | `uuid` NULL | |
 | `created_at` | `timestamptz` | |
 | `updated_at` | `timestamptz` | |
 
-`UNIQUE (organization_id, tenant_id, investment_code)`.
+`UNIQUE (organization_id, tenant_id, investment_code)`. Indeks `(organization_id, tenant_id, tender_notice_number) WHERE tender_notice_number IS NOT NULL` (grupowanie części, D132).
+
+**Postępowanie z częściami (D132):** każda część to osobna inwestycja i osobny deal (wygrana część = jedna inwestycja i jeden projekt delivery, D116). Zasady primary (D5, D51, D65, D83) obowiązują per inwestycja, czyli per część — bez zmian.
 
 Indeksy: `(organization_id, tenant_id, status)`; MVP: `(organization_id, tenant_id, investment_code)` + `lower(name)` do podpowiedzi po kodzie/nazwie; v1: `CREATE INDEX pc_investments_investment_key_trgm ON pc_investments USING gin(investment_key gin_trgm_ops)` (`pg_trgm`).
 
@@ -451,7 +454,7 @@ Indeksy: `(organization_id, tenant_id, status)`; MVP: `(organization_id, tenant_
 | `investment_id` | `uuid` NOT NULL | FK → `pc_investments.id` |
 | `organization_id` | `uuid` NOT NULL | |
 | `tenant_id` | `uuid` NOT NULL | |
-| `source` | `text` NOT NULL | `bzp_notice_number` \| `bzp_procedure_id` \| `bzp_procedure_number` \| `bzp_plan_item` \| `ted_procedure_id` \| `ted_notice_id` \| `bip_number` \| `other` |
+| `source` | `text` NOT NULL | `bzp_notice_number` \| `bzp_notice_part` \| `bzp_procedure_id` \| `bzp_procedure_number` \| `bzp_plan_item` \| `ted_procedure_id` \| `ted_notice_id` \| `bip_number` \| `other` |
 | `value` | `text` NOT NULL | wartość identyfikatora |
 | `created_at` | `timestamptz` | |
 
@@ -463,7 +466,8 @@ Indeksy: `(organization_id, tenant_id, status)`; MVP: `(organization_id, tenant_
 
 | Source | Opis | Format [do weryfikacji] |
 |--------|------|-------------------------|
-| `bzp_notice_number` | e-Zamówienia BZP — numer ogłoszenia | np. `2026/BZP 00123456/01` |
+| `bzp_notice_number` | e-Zamówienia BZP — numer ogłoszenia (postępowanie bez części) | np. `2026/BZP 00123456/01` |
+| `bzp_notice_part` | e-Zamówienia BZP — część postępowania (D132): numer ogłoszenia i numer części; dla postępowania z częściami zamiast `bzp_notice_number` | `{numer ogłoszenia}#{numer części}`, np. `2026/BZP 00123456/01#2` |
 | `bzp_procedure_id` | e-Zamówienia — ID postępowania (UUID systemu) | UUID |
 | `bzp_procedure_number` | e-Zamówienia — numer postępowania (zamawiającego) | wolny tekst [do weryfikacji] |
 | `bzp_plan_item` | Pozycja planu postępowań BZP | wolny tekst [do weryfikacji] |
@@ -788,7 +792,7 @@ Inwestycja (`pc_investments`) żyje w module `project_costing` i jest **jedynym,
 
 **Dopasowanie (v1) — kolejność priorytetu** (D6/D62: e-Zamówienia > TED > BIP > INV; nazwa/NIP tylko podpowiedź):
 
-1. **Priorytet 1 — zewnętrzne identyfikatory** (`pc_investment_identifiers`): serwis szuka inwestycji z dokładnie pasującym identyfikatorem `(source, value)`. Gdy znaleziono jednoznaczny wynik → automatyczne skojarzenie (bez pytania użytkownika); przy trafieniach w kilku źródłach wygrywa źródło o wyższym priorytecie. Obsługiwane źródła: `bzp_notice_number`, `bzp_procedure_id`, `bzp_procedure_number`, `bzp_plan_item`, `ted_procedure_id`, `ted_notice_id`, `bip_number`, `other`. Formaty zewnętrznych identyfikatorów oznaczone `[do weryfikacji]` w §2.2.
+1. **Priorytet 1 — zewnętrzne identyfikatory** (`pc_investment_identifiers`): serwis szuka inwestycji z dokładnie pasującym identyfikatorem `(source, value)`. Gdy znaleziono jednoznaczny wynik → automatyczne skojarzenie (bez pytania użytkownika); przy trafieniach w kilku źródłach wygrywa źródło o wyższym priorytecie. Obsługiwane źródła: `bzp_notice_number`, `bzp_notice_part` (D132), `bzp_procedure_id`, `bzp_procedure_number`, `bzp_plan_item`, `ted_procedure_id`, `ted_notice_id`, `bip_number`, `other`. Formaty zewnętrznych identyfikatorów oznaczone `[do weryfikacji]` w §2.2.
 
 2. **Priorytet 2 — fuzzy-match (fallback)**: gdy brak dopasowania przez identyfikatory, serwis generuje kandydatów przez:
    - **Źródło A — pg_trgm**: `similarity(investment_key, :target_key) > investments.trgm_threshold` na `pc_investments.investment_key`
@@ -1779,7 +1783,7 @@ Brak punktów ⚠️. Ryzyka rezydualne: §15 (R1, R2, R15, R16, R23, R24).
 
 Źródło: `.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`, merge PR #13) dla D1–D82; D83 — `.ai/decisions.md`@3f00542 (gałąź `develop_OM_CRM`, merge PR #14; Koordynator 2026-10-23). D49 jest aktywna w fazie v1 (D75). D84–D94 — `.ai/decisions.md`@0f0c6aa (gałąź `develop_OM_CRM`, merge PR #16; Koordynator 2026-10-23, audyt om-overlap-audit §3–4). D95–D97 — `.ai/decisions.md` z tego PR (Rozstrzygnięte przez Koordynatora 2026-10-23; obowiązują dopiero po „implementujemy” od Marka). Zakres D1–D97: 88 aktywnych i 9 zastąpionych. D70 i D71 nie są już warunkowe (Q6 zamknięte przez D84–D88; realizacja: D87, D85). Tabela obejmuje wszystkie aktywne decyzje; w kolumnach wskazane są sekcje, które je realizują, w obu specach (schedule ma skrót w schedule §21). Decyzje zastąpione nie są cytowane w tekście spec: D3 superseded by D4; D7 superseded by D63; D8 superseded by D10; D13 superseded by D48, D49; D27 superseded by D60; D28 superseded by D29; D29 superseded by D50; D39 superseded by D64 (z okresem przejściowym do migracji); D43 superseded by D63.
 
-Zmiana na potrzeby project_delivery (D98–D131): decyzje D98–D131 (moduł `project_delivery`) są śledzone w delivery §19. W tej specyfikacji realizują je: D98 (nagłówek, §0.1, §14 „Zakres zbiorczy”), D116 i D101 (§0.2 — `getWinningOffer` z wynikiem `null` dla deala bez kalkulacji, `listStructure`, `getSnapshotSectionPriceTotals`; D99 — zastąpiona przez D116), D100 i D131 (§0.2 — `executionScheduleRegistry`, kontrakt per projekt i faza), §10.3a. D102–D115 i D117–D130 dotyczą tylko `project_delivery` (N/A dla costingu). Bilans poniżej dotyczy zakresu D1–D97 i się nie zmienia.
+Zmiana na potrzeby project_delivery (D98–D132): decyzje D98–D132 (moduł `project_delivery`) są śledzone w delivery §19. W tej specyfikacji realizują je: D98 (nagłówek, §0.1, §14 „Zakres zbiorczy”), D116 i D101 (§0.2 — `getWinningOffer` z wynikiem `null` dla deala bez kalkulacji, `listStructure`, `getSnapshotSectionPriceTotals`; D99 — zastąpiona przez D116), D100 i D131 (§0.2 — `executionScheduleRegistry`, kontrakt per inwestycja), §10.3a; D132 (§2.2 — `pc_investments.tender_notice_number`, identyfikator `bzp_notice_part`, część przetargu = osobna inwestycja). D102–D115 i D117–D130 dotyczą tylko `project_delivery` (N/A dla costingu). Bilans poniżej dotyczy zakresu D1–D97 i się nie zmienia.
 
 Bilans: 88 aktywnych, z czego 77 realizowanych w specach i 11 N/A (D4, D31, D32, D34, D35, D36, D37, D38, D41, D44, D46). N/A to kontrakt n8n → `customers` albo Enka: specy go nie zmieniają, moduły tylko czytają dane deala.
 
@@ -1882,6 +1886,7 @@ Brak otwartych pytań walutowych: Q6 zamknięte przez D84–D88, Q12 zamknięte 
 
 | Data | Zmiana |
 |------|--------|
+| 2026-10-23 | **rev 8l** — odbiór #20 runda 2 (P20-B2, wariant B; Koordynator 2026-10-23 (bez potwierdzenia Marka)): D132 — część przetargu = osobna inwestycja i osobny deal; `pc_investments.tender_notice_number` (wspólny numer ogłoszenia, tylko odczyt, indeks do grupowania) i źródło identyfikatora `bzp_notice_part` (v1) w §2.2; zasady primary (D5, D51, D65, D83) i indeks jednej `primary` bez zmian. §0.2: kontrakt `ExecutionScheduleProvider` per inwestycja (D131 uproszczona, `findProjectPhase` usunięte). §22: zakres D98–D132. |
 | 2026-10-23 | **rev 8k** — odbiór #20 (tylko dokumentacja, bez zmian w modelu danych i eventach costingu): §0.2 kontrakt `ExecutionScheduleProvider` — `findProjectPhase` i `ensureExecution({ investmentId, dealId, projectId, projectLabel })` idempotentne per projekt i faza (D131; inwestycja może mieć wiele projektów, D116). §22: zakres D98–D131. |
 | 2026-10-23 | **rev 8j** — PR D (tylko dokumentacja, bez zmian w modelu danych i eventach costingu): §0.2 `getWinningOffer` — wynik `null` oznacza deal bez kalkulacji, realizacja bez oferty (D116; D99 — zastąpiona przez D116). Nagłówek §10.3a: rev 8h → rev 8i. §22: zakres D98–D130. Changelog rev 8i: zakresy D98–D115 i D1–D97. |
 | 2026-10-23 | **rev 8i** — zmiana na potrzeby project_delivery (D98–D101), bez zmian w modelu danych i eventach costingu. Nagłówek „Moduł powiązany” + notka w §0.1 (trzy moduły, D98). §0.2: `calculationLookupService.getWinningOffer` (D99 — zastąpiona przez D116), `listStructure` (D101), v1 `getSnapshotSectionPriceTotals` (D101), generyczny rejestr `executionScheduleRegistry` (D100; provider rejestruje schedule, czyta delivery). Nowa §10.3a „Integracja z `project_delivery`”. §14 „Zakres zbiorczy (trzy moduły)”. §22: akapit o D98–D115 (bilans D1–D97 bez zmian). |
