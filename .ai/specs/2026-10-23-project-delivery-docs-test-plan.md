@@ -3,9 +3,9 @@
 **Dokument**: SPEC ONLY (plan testów niezależny od specyfikacji modułu, brak kodu)
 **Docelowa ścieżka w repo**: `.ai/specs/2026-10-23-project-delivery-docs-test-plan.md`
 **Data**: 2026-10-23
-**Autor**: Grok Bot (runner planu testów; specyfikacji modułu nie czytał); rev 4–7 — niezależna sesja testerska, wyłącznie na podstawie `.ai/decisions.md` (rev 4: commit 865714e, rev 5: b0e097f, rev 5a: a75dc9f, rev 6: 932fac6, rev 6a: 35b305a, rev 7: f81c58c) i plików recenzji, bez dostępu do spek
-**Rewizja**: rev 7 (2026-10-23) — dopasowanie do D166–D169 (rejestr z commita f81c58c, po merge #27): dolna granica retencji z polityki, rola `manager` bez `view`, `read` dla `projects.view_all` bez roli, dziedziczenie ACL pod folderem `restricted`; poprzednio rev 6a (2026-10-23) — poprawki odbioru PR #26 i dopasowanie do rejestru z commita 35b305a (po merge #25): dostęp U-A w TC-PD-PRJ-008, `Content-Length` w TC-PD-WRK-009, flaga tagu stagingu i status `degraded` w TC-PD-STOR-010; poprzednio rev 6 (2026-10-23) — dopasowanie do D159–D165 i zmienionych D121, D129, D144, D158 (rejestr z commita 932fac6): role projektu i prawa folderu, rola `manager`, automatyczne zdjęcie flagi deala, usuwanie folderu i projektu, niemutowalność rewizji, limit pliku, granty pracownika, klucze i staging z segmentem tenanta, lifecycle wariant (c); poprzednio rev 5a (2026-10-23) — limit paczki ZIP wg D158 (rejestr z commita a75dc9f, po merge #22): wartość domyślna, zmiana przez administratora, komunikat z dwiema drogami; poprzednio rev 5 (2026-10-23) — dopasowanie do D133–D157 (rejestr z commita b0e097f, po merge #19 i #21): kody błędów zamiast „albo”, macierz feature'ów, flaga ponownego otwarcia deala na projekcie, MIME z zawartości, rekoncyliacja wersji spoza aplikacji, limity ZIP, kody linków i akceptacji, wariant D154 (warunkowy); poprzednio rev 4a (2026-10-23) — poprawki odbioru rundy 3 (`STORAGE_NOT_CONFIGURED`, jednoznaczne kody, warunkowy TC-PD-QUOTA-009); poprzednio rev 4 (2026-10-23) — dopasowanie do D116–D132 (rejestr z commita 865714e, po merge #20): projekt bez oferty i podpięcie oferty, jeden projekt na deal i na inwestycję, limit miękki quota z alertami 80/100% i blokadą od 110%, oryginał ZIP jako dowód, strzeżona funkcja usuwania i purge po potwierdzeniu, wpis atomowy importu, worker checksum, progi pomiaru RAM, faza projektu w harmonogramie; postępowania z częściami — warunkowo; poprzednio rev 3 — rejestr z commita 4f83bd4: bufor tylko w RAM (partSize × queueSize), zero plików tymczasowych także w workerze, współbieżność 1 tylko dla kolejki modułu, dwa parametry presji RAM; PoC dostawcy domyślnego jako kryterium akceptacji etapu kodu z fallbackiem na B2; poprzednio rev 2 — rejestr finalny (akceptacje, worker, linki, dostawca storage, warianty, retencja)
-**Podstawa**: rejestr decyzji (`.ai/decisions.md` z commita f81c58c, sekcja modułu `project_delivery` D98–D169 oraz decyzje kontekstowe), research `om-project-docs-research.md`, `odoo-project-docs.md`, `om-overlap-audit.md`, dokumentacja Backblaze B2 S3-Compatible API (stan na X 2026; dotyczy dostawcy zapasowego). Numery decyzji występują w załączniku pokrycia, w changelogu oraz w adnotacjach scenariuszy warunkowych (TC-PD-PRJ-011, TC-PD-PRJ-012, TC-PD-PRJ-013).
+**Autor**: Grok Bot (runner planu testów; specyfikacji modułu nie czytał); rev 4–7 — niezależna sesja testerska, wyłącznie na podstawie `.ai/decisions.md` (rev 4: commit 865714e, rev 5: b0e097f, rev 5a: a75dc9f, rev 6: 932fac6, rev 6a: 35b305a, rev 7: f81c58c, rev 7a: ea6a101) i plików recenzji, bez dostępu do spek
+**Rewizja**: rev 7a (2026-10-23) — wpisy `project_role` przodka `restricted` w podfolderach `inherit` wg D169 (rejestr z commita ea6a101, PR #29); poprzednio rev 7 (2026-10-23) — dopasowanie do D166–D169 (rejestr z commita f81c58c, po merge #27): dolna granica retencji z polityki, rola `manager` bez `view`, `read` dla `projects.view_all` bez roli, dziedziczenie ACL pod folderem `restricted`; poprzednio rev 6a (2026-10-23) — poprawki odbioru PR #26 i dopasowanie do rejestru z commita 35b305a (po merge #25): dostęp U-A w TC-PD-PRJ-008, `Content-Length` w TC-PD-WRK-009, flaga tagu stagingu i status `degraded` w TC-PD-STOR-010; poprzednio rev 6 (2026-10-23) — dopasowanie do D159–D165 i zmienionych D121, D129, D144, D158 (rejestr z commita 932fac6): role projektu i prawa folderu, rola `manager`, automatyczne zdjęcie flagi deala, usuwanie folderu i projektu, niemutowalność rewizji, limit pliku, granty pracownika, klucze i staging z segmentem tenanta, lifecycle wariant (c); poprzednio rev 5a (2026-10-23) — limit paczki ZIP wg D158 (rejestr z commita a75dc9f, po merge #22): wartość domyślna, zmiana przez administratora, komunikat z dwiema drogami; poprzednio rev 5 (2026-10-23) — dopasowanie do D133–D157 (rejestr z commita b0e097f, po merge #19 i #21): kody błędów zamiast „albo”, macierz feature'ów, flaga ponownego otwarcia deala na projekcie, MIME z zawartości, rekoncyliacja wersji spoza aplikacji, limity ZIP, kody linków i akceptacji, wariant D154 (warunkowy); poprzednio rev 4a (2026-10-23) — poprawki odbioru rundy 3 (`STORAGE_NOT_CONFIGURED`, jednoznaczne kody, warunkowy TC-PD-QUOTA-009); poprzednio rev 4 (2026-10-23) — dopasowanie do D116–D132 (rejestr z commita 865714e, po merge #20): projekt bez oferty i podpięcie oferty, jeden projekt na deal i na inwestycję, limit miękki quota z alertami 80/100% i blokadą od 110%, oryginał ZIP jako dowód, strzeżona funkcja usuwania i purge po potwierdzeniu, wpis atomowy importu, worker checksum, progi pomiaru RAM, faza projektu w harmonogramie; postępowania z częściami — warunkowo; poprzednio rev 3 — rejestr z commita 4f83bd4: bufor tylko w RAM (partSize × queueSize), zero plików tymczasowych także w workerze, współbieżność 1 tylko dla kolejki modułu, dwa parametry presji RAM; PoC dostawcy domyślnego jako kryterium akceptacji etapu kodu z fallbackiem na B2; poprzednio rev 2 — rejestr finalny (akceptacje, worker, linki, dostawca storage, warianty, retencja)
+**Podstawa**: rejestr decyzji (`.ai/decisions.md` z commita ea6a101, sekcja modułu `project_delivery` D98–D169 oraz decyzje kontekstowe), research `om-project-docs-research.md`, `odoo-project-docs.md`, `om-overlap-audit.md`, dokumentacja Backblaze B2 S3-Compatible API (stan na X 2026; dotyczy dostawcy zapasowego). Numery decyzji występują w załączniku pokrycia, w changelogu oraz w adnotacjach scenariuszy warunkowych (TC-PD-PRJ-011, TC-PD-PRJ-012, TC-PD-PRJ-013).
 **Dostawca storage**: „dostawca domyślny” = najtańszy w UE dostawca w pełni kompatybilny z `storage_s3` i multipartem (wg rejestru: OVHcloud Object Storage, region i klasa jako parametry wdrożenia); „dostawca zapasowy” = Backblaze B2 EU Central z adapterem bez `If-None-Match` (wyłącznie unikalne klucze). Scenariusze storage przechodzą dla obu; różnice opisane w scenariuszu.
 
 ---
@@ -1142,13 +1142,13 @@ Import ZIP i multipart po stronie serwera idą przez istniejącą kolejkę OM (P
   2. „Aneksy” i „2026”: każdy listuje, pobiera, wgrywa, tworzy podfolder (U1, U3, U4, U-M, U-M2, U-ALL)
   3. „Sub” pod „Poufne”: U1 i U3 listują i wgrywają
   4. „Ogólne” (najwyższy poziom): U4 i U-ALL; przenieś dokument z „Umowa” do „Ogólne”
-  5. U5 w „Aneksy”
+  5. „Aneksy”: U5 (`viewer`, objęty wpisem `project_role` `viewer` = `read` w „Umowa”) listuje, pobiera, wgrywa, tworzy podfolder; kontrola negatywna: U4 (`member`) i U-M (`manager`) — role bez wpisu w „Umowa” — listują i pobierają
 - **Oczekiwane wyniki**:
   - Krok 1: U1 — `read`, upload → 403 (folder widoczny bez `write`); U3 → 201; U-M2 — `read`, upload → 403; U5 — `read` (wpis `project_role` w samym folderze `restricted`); U4, U-M, U-ALL → 404 (bez ujawniania istnienia)
   - Krok 2: oba foldery biorą wpisy najbliższego przodka `restricted` („Umowa”): U1 — `read`; U3 — `write`; U-M2 — tylko `read` (upload → 403, podfolder → 403 — rola `manager` nie poszerza); U4, U-M i U-ALL → 404 (role i `projects.view_all` nie poszerzają; ograniczenie nie wycieka do podfolderów)
   - Krok 3: „Sub” bierze wpisy „Poufne” (najbliższy przodek `restricted`), nie „Umowa”: U3 — `read`, upload → 403; U1 → 404
   - Krok 4: w „Ogólne” obowiązuje mapowanie ról: U4 (`member`) — `write`; U-ALL — `read`; przeniesiony dokument ma uprawnienia folderu docelowego
-  - Krok 5: czy wpis `principal_type = project_role` przodka `restricted` działa w podfolderze `inherit`, rejestr nie mówi wprost — wynik w raporcie bez asercji (§27 wniosek 46)
+  - Krok 5: U5 — `read` (wpis `project_role` najbliższego przodka `restricted` działa w podfolderze `inherit`): lista i pobranie działają, upload i podfolder → 403 (brak `write`); U4 i U-M → 404 (rola bez wpisu nie poszerza praw)
 
 #### TC-PD-ACL-003: Presigned URL wydawany dopiero po sprawdzeniu uprawnień i krótko ważny
 
@@ -1740,7 +1740,7 @@ Akceptacje v1 (rewizje dokumentów, transmittale, protokoły): własna walidacja
 
 ## 27. Wnioski do specyfikacji (luki i pytania techniczne)
 
-Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza wnioskiem 34 (decyzja biznesowa Marka). Rozstrzygnięcia rev 4 wyłącznie na podstawie rejestru z commita 865714e, rev 5 — z commita b0e097f, rev 5a — z commita a75dc9f, rev 6 — z commita 932fac6, rev 6a — z commita 35b305a, rev 7 — z commita f81c58c.
+Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza wnioskiem 34 (decyzja biznesowa Marka). Rozstrzygnięcia rev 4 wyłącznie na podstawie rejestru z commita 865714e, rev 5 — z commita b0e097f, rev 5a — z commita a75dc9f, rev 6 — z commita 932fac6, rev 6a — z commita 35b305a, rev 7 — z commita f81c58c, rev 7a — z commita ea6a101.
 
 ### Priorytet 1 (przed kodem)
 
@@ -1808,9 +1808,9 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza 
 44. ~~**Prawa folderu `inherit` przy `projects.view_all` bez roli projektu**~~ — ✅ **ROZSTRZYGNIĘTE (D168)**: `read` w folderach `inherit` bez przodka `restricted`; powyżej `read` — rola albo grant ACL. Scenariusz: TC-PD-ACL-001.
 45. ~~**Podfolder `inherit` pod folderem `restricted`**~~ — ✅ **ROZSTRZYGNIĘTE (D169)**: wpisy `pd_folder_acl` najbliższego przodka `restricted`; role i `projects.view_all` nie poszerzają; folder najwyższego poziomu — mapowanie ról z D159. Scenariusz: TC-PD-ACL-002.
 
-### Luki rev 7 (reguł brak w rejestrze @f81c58c — nie zgadywano)
+### Luki rev 7 (rozstrzygnięcie rev 7a z rejestru @ea6a101)
 
-46. **Wpisy `principal_type = project_role` przodka `restricted` w podfolderze `inherit`** (TC-PD-ACL-002 krok 5): D169 mówi, że podfolder bierze wpisy najbliższego przodka `restricted` i że role nie poszerzają praw, ale nie mówi wprost, czy wpis dla roli projektu (np. `viewer` = `read`) w przodku działa w podfolderze. TC nie zakłada odpowiedzi.
+46. ~~**Wpisy `principal_type = project_role` przodka `restricted` w podfolderze `inherit`**~~ — ✅ **ROZSTRZYGNIĘTE (D169 @ea6a101)**: wpisy `project_role` najbliższego przodka `restricted` działają dla podfolderów `inherit` (np. `viewer` = `read` → viewer ma `read`); nie poszerzają tylko role bez wpisu i `view_all`. Scenariusz: TC-PD-ACL-002 krok 5.
 
 ---
 
@@ -1818,19 +1818,19 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza 
 
 **Dokument**: Niezależny plan testów — spec only
 **Liczba scenariuszy**: 124 (MVP 102, v1 15, v2 7; etap liczony z pierwszej fazy scenariusza — TC-PD-STOR-007 obejmuje MVP, v1 i v2); w tym 2 warunkowe poza werdyktem (TC-PD-PRJ-012, TC-PD-PRJ-013)
-**Liczba wniosków do speki**: 46 (rozstrzygnięte: 1–11, 13–33, 35–45; otwarte: 12, 17; luka rev 7: 46; decyzja Marka: 34)
+**Liczba wniosków do speki**: 46 (rozstrzygnięte: 1–11, 13–33, 35–46; otwarte: 12, 17; decyzja Marka: 34)
 **Status**: SPEC ONLY — bez kodu, bez testów wykonywalnych
 
 **Kolejne kroki**:
 1. Na etapie kodu: PoC dostawcy domyślnego na buckecie wersjonowanym (kryterium akceptacji, fallback B2) i pomiar RAM z progami z TC-PD-PERF-003
 2. Decyzja Marka w sprawie D31 ↔ D132 (zostaje TC-PD-PRJ-012 albo TC-PD-PRJ-013)
-3. Odpowiedź na lukę 46 z §27
+3. Odpowiedzi na wnioski 12 i 17 z §27
 
 ---
 
 ## Załącznik: Traceability D → TC (macierz decyzji)
 
-Źródło: `.ai/decisions.md` z commita f81c58c (po merge #19, #21, #22, #23, #25, #26 i #27), sekcja modułu D98–D169: 72 decyzje, 71 aktywnych (D99 zastąpiona przez D116; D132 i D154 aktywne warunkowo — alternatywy zależne od decyzji Marka w sprawie D31). Każda aktywna decyzja ma co najmniej jeden TC. Fazy w kolumnie TC wynikają z pola „Etap” scenariuszy.
+Źródło: `.ai/decisions.md` z commita ea6a101 (gałąź PR #29, na bazie f81c58c — po merge #19, #21, #22, #23, #25, #26 i #27), sekcja modułu D98–D169: 72 decyzje, 71 aktywnych (D99 zastąpiona przez D116; D132 i D154 aktywne warunkowo — alternatywy zależne od decyzji Marka w sprawie D31). Każda aktywna decyzja ma co najmniej jeden TC. Fazy w kolumnie TC wynikają z pola „Etap” scenariuszy.
 
 | D | Treść skrócona | TC | Uwagi |
 |---|---|---|---|
@@ -1905,7 +1905,7 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza 
 | **D166** | Dolna granica retencji dla `manager`: `later_of_both` → późniejsza data, tylko gdy obie ustawione; `warranty_end` / `rekojmia_end` → wskazana data; brak wskazanej daty albo `manual` → granicy nie ma, wtedy D160 (bez skracania ustawionej); poniżej granicy → 422 `RETENTION_BELOW_COMPANY_MINIMUM` | TC-PD-RET-009 | MVP; wniosek 43 rozstrzygnięty |
 | **D167** | Rola `manager` nie zastępuje `view` (bez niego brak dostępu → 403); daje tylko zakres `projects.manage` w swoim projekcie i `manage` w folderach `inherit` (z zastrzeżeniem D169); żadnych innych feature'ów ani grantów `pd_folder_acl` | TC-PD-ACL-007, TC-PD-ACL-002 | MVP; wniosek 42 rozstrzygnięty |
 | **D168** | `projects.view_all` bez roli: `read` w folderach `inherit` bez przodka `restricted`; z przodkiem `restricted` — D169; `write`/`manage` tylko z roli albo grantu ACL; brak feature'a → 403 | TC-PD-ACL-001, TC-PD-ACL-002 | MVP; wniosek 44 rozstrzygnięty |
-| **D169** | Folder `inherit` dziedziczy po rodzicu: najwyższy poziom — projekt (mapowanie ról D159); z przodkiem `restricted` — wpisy `pd_folder_acl` najbliższego przodka `restricted`, role i `view_all` nie poszerzają | TC-PD-ACL-002, TC-PD-ACL-007, TC-PD-ACL-001 | MVP; wniosek 45 rozstrzygnięty; wpisy `project_role` przodka w podfolderze — wniosek 46 |
+| **D169** | Folder `inherit` dziedziczy po rodzicu: najwyższy poziom — projekt (mapowanie ról D159); z przodkiem `restricted` — wpisy `pd_folder_acl` najbliższego przodka `restricted`, w tym wpisy `principal_type = project_role` (np. `viewer` = `read` → viewer ma `read`); role bez wpisu i `view_all` nie poszerzają (@ea6a101) | TC-PD-ACL-002, TC-PD-ACL-007, TC-PD-ACL-001 | MVP; wnioski 45, 46 rozstrzygnięte |
 
 **Decyzje kontekstowe (wcześniejsze, aktywne) użyte w scenariuszach:**
 
@@ -1921,11 +1921,19 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza 
 | **D5** | Jedna oferta `primary` na inwestycję | TC-PD-PRJ-002, TC-PD-PRJ-012 | per część tylko przy D132 |
 | **D63** | Inwestycje zakłada handlowiec (`pc_investments`) | TC-PD-PRJ-012 | |
 
-**Reguły spoza rejestru @f81c58c:** brak. `REVISION_IMMUTABLE` → D163, `FILE_TOO_LARGE` → D164 (rev 6); wcześniej przeniesione: `STORAGE_NOT_CONFIGURED` → D143; tylko `https:` → D138; `SHARE_LINK_EXPIRY_REQUIRED` → D142, D152; ścieżki `..`/absolutne/symlinki → D148; wersje spoza aplikacji w quota → D153
+**Reguły spoza rejestru @ea6a101:** brak. `REVISION_IMMUTABLE` → D163, `FILE_TOO_LARGE` → D164 (rev 6); wcześniej przeniesione: `STORAGE_NOT_CONFIGURED` → D143; tylko `https:` → D138; `SHARE_LINK_EXPIRY_REQUIRED` → D142, D152; ścieżki `..`/absolutne/symlinki → D148; wersje spoza aplikacji w quota → D153
 
 ---
 
 ## Changelog
+
+### Rev 7a — 2026-10-23 (rejestr z commita ea6a101, PR #29)
+
+- Ta sama niezależna sesja, nadal bez dostępu do spek; jedyne źródło: `.ai/decisions.md` z commita ea6a101 (zmiany względem f81c58c: D169 — wpisy `project_role` przodka `restricted` działają w podfolderach `inherit`; D160 — odsyłacz do D166)
+- Decyzje, na których oparto zmiany: D169
+- TC-PD-ACL-002 krok 5: asercja zamiast luki — U5 (`viewer` z wpisem `project_role` `viewer` = `read` w „Umowa”) ma w „Aneksy” `read`, upload i podfolder → 403; kontrola negatywna: U4 (`member`) i U-M (`manager`) bez wpisu → 404
+- §27: wniosek 46 rozstrzygnięty; §28; załącznik — wiersz D169 @ea6a101
+- Liczba scenariuszy bez zmian: 124
 
 ### Rev 7 — 2026-10-23 (rejestr z commita f81c58c, po merge #27)
 
@@ -1934,7 +1942,7 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza 
 - D166: TC-PD-RET-009 przepisany — polityki `later_of_both` (obie daty / jedna data), `warranty_end` i `rekojmia_end` (z datą / bez wskazanej daty), `manual`; bez granicy z polityki obowiązuje zakaz skracania ustawionej daty (D160)
 - D167: TC-PD-ACL-007 kroki 6–7 — `manager` bez wpisu w folderze `restricted` → 404, `manager` bez `view` → 403
 - D168: TC-PD-ACL-001 — U-ALL (`projects.view_all` bez roli) ma `read` w folderze `inherit` najwyższego poziomu, upload/dokument-link/podfolder → 403 (asercja zamiast luki 44)
-- D169: TC-PD-ACL-002 przepisany — foldery najwyższego poziomu jawnie, podfoldery `inherit` pod `restricted` biorą wpisy najbliższego przodka `restricted` (także przy głębszym zagnieżdżeniu i przy dwóch poziomach `restricted`), `manager` i `view_all` nie poszerzają (asercja zamiast luki 45); wpis `project_role` przodka w podfolderze — bez asercji (luka 46)
+- D169: TC-PD-ACL-002 przepisany — foldery najwyższego poziomu jawnie, podfoldery `inherit` pod `restricted` biorą wpisy najbliższego przodka `restricted` (także przy głębszym zagnieżdżeniu i przy dwóch poziomach `restricted`), `manager` i `view_all` nie poszerzają (asercja zamiast luki 45); wpis `project_role` przodka w podfolderze — w rev 7a asercja (D169 @ea6a101)
 - Foldery najwyższego poziomu (rodzicem jest projekt) jawnie w TC-PD-ACL-001, TC-PD-ACL-002, TC-PD-ACL-007 i w §2
 - Nity: TC-PD-RET-009 — U-M członkiem wszystkich organizacji; TC-PD-WRK-009 krok 7 — wariant A1 (z `Content-Length`)
 - §27: wnioski 42–45 rozstrzygnięte (D166–D169); nowa luka 46; §28; załącznik @f81c58c — wiersze D166–D169, uzupełnione D159, D160
