@@ -3,9 +3,9 @@
 **Dokument**: SPEC ONLY (plan testów niezależny od specyfikacji modułu, brak kodu)
 **Docelowa ścieżka w repo**: `.ai/specs/2026-10-23-project-delivery-docs-test-plan.md`
 **Data**: 2026-10-23
-**Autor**: Grok Bot (runner planu testów; specyfikacji modułu nie czytał); rev 4–5 — niezależna sesja testerska, wyłącznie na podstawie `.ai/decisions.md` (rev 4: commit 865714e, rev 5: commit b0e097f), bez dostępu do spek
-**Rewizja**: rev 5 (2026-10-23) — dopasowanie do D133–D157 (rejestr z commita b0e097f, po merge #19 i #21): kody błędów zamiast „albo”, macierz feature'ów, flaga ponownego otwarcia deala na projekcie, MIME z zawartości, rekoncyliacja wersji spoza aplikacji, limity ZIP, kody linków i akceptacji, wariant D154 (warunkowy); poprzednio rev 4a (2026-10-23) — poprawki odbioru rundy 3 (`STORAGE_NOT_CONFIGURED`, jednoznaczne kody, warunkowy TC-PD-QUOTA-009); poprzednio rev 4 (2026-10-23) — dopasowanie do D116–D132 (rejestr z commita 865714e, po merge #20): projekt bez oferty i podpięcie oferty, jeden projekt na deal i na inwestycję, limit miękki quota z alertami 80/100% i blokadą od 110%, oryginał ZIP jako dowód, strzeżona funkcja usuwania i purge po potwierdzeniu, wpis atomowy importu, worker checksum, progi pomiaru RAM, faza projektu w harmonogramie; postępowania z częściami — warunkowo; poprzednio rev 3 — rejestr z commita 4f83bd4: bufor tylko w RAM (partSize × queueSize), zero plików tymczasowych także w workerze, współbieżność 1 tylko dla kolejki modułu, dwa parametry presji RAM; PoC dostawcy domyślnego jako kryterium akceptacji etapu kodu z fallbackiem na B2; poprzednio rev 2 — rejestr finalny (akceptacje, worker, linki, dostawca storage, warianty, retencja)
-**Podstawa**: rejestr decyzji (`.ai/decisions.md` z commita b0e097f, sekcja modułu `project_delivery` D98–D157 oraz decyzje kontekstowe), research `om-project-docs-research.md`, `odoo-project-docs.md`, `om-overlap-audit.md`, dokumentacja Backblaze B2 S3-Compatible API (stan na X 2026; dotyczy dostawcy zapasowego). Numery decyzji występują w załączniku pokrycia, w changelogu oraz w adnotacjach scenariuszy warunkowych (TC-PD-PRJ-011, TC-PD-PRJ-012, TC-PD-PRJ-013).
+**Autor**: Grok Bot (runner planu testów; specyfikacji modułu nie czytał); rev 4–5a — niezależna sesja testerska, wyłącznie na podstawie `.ai/decisions.md` (rev 4: commit 865714e, rev 5: commit b0e097f, rev 5a: commit a75dc9f), bez dostępu do spek
+**Rewizja**: rev 5a (2026-10-23) — limit paczki ZIP wg D158 (rejestr z commita a75dc9f, po merge #22): wartość domyślna, zmiana przez administratora, komunikat z dwiema drogami; poprzednio rev 5 (2026-10-23) — dopasowanie do D133–D157 (rejestr z commita b0e097f, po merge #19 i #21): kody błędów zamiast „albo”, macierz feature'ów, flaga ponownego otwarcia deala na projekcie, MIME z zawartości, rekoncyliacja wersji spoza aplikacji, limity ZIP, kody linków i akceptacji, wariant D154 (warunkowy); poprzednio rev 4a (2026-10-23) — poprawki odbioru rundy 3 (`STORAGE_NOT_CONFIGURED`, jednoznaczne kody, warunkowy TC-PD-QUOTA-009); poprzednio rev 4 (2026-10-23) — dopasowanie do D116–D132 (rejestr z commita 865714e, po merge #20): projekt bez oferty i podpięcie oferty, jeden projekt na deal i na inwestycję, limit miękki quota z alertami 80/100% i blokadą od 110%, oryginał ZIP jako dowód, strzeżona funkcja usuwania i purge po potwierdzeniu, wpis atomowy importu, worker checksum, progi pomiaru RAM, faza projektu w harmonogramie; postępowania z częściami — warunkowo; poprzednio rev 3 — rejestr z commita 4f83bd4: bufor tylko w RAM (partSize × queueSize), zero plików tymczasowych także w workerze, współbieżność 1 tylko dla kolejki modułu, dwa parametry presji RAM; PoC dostawcy domyślnego jako kryterium akceptacji etapu kodu z fallbackiem na B2; poprzednio rev 2 — rejestr finalny (akceptacje, worker, linki, dostawca storage, warianty, retencja)
+**Podstawa**: rejestr decyzji (`.ai/decisions.md` z commita a75dc9f, sekcja modułu `project_delivery` D98–D158 oraz decyzje kontekstowe), research `om-project-docs-research.md`, `odoo-project-docs.md`, `om-overlap-audit.md`, dokumentacja Backblaze B2 S3-Compatible API (stan na X 2026; dotyczy dostawcy zapasowego). Numery decyzji występują w załączniku pokrycia, w changelogu oraz w adnotacjach scenariuszy warunkowych (TC-PD-PRJ-011, TC-PD-PRJ-012, TC-PD-PRJ-013).
 **Dostawca storage**: „dostawca domyślny” = najtańszy w UE dostawca w pełni kompatybilny z `storage_s3` i multipartem (wg rejestru: OVHcloud Object Storage, region i klasa jako parametry wdrożenia); „dostawca zapasowy” = Backblaze B2 EU Central z adapterem bez `If-None-Match` (wyłącznie unikalne klucze). Scenariusze storage przechodzą dla obu; różnice opisane w scenariuszu.
 
 ---
@@ -22,7 +22,7 @@
 | Quota (TC-PD-QUOTA) | 9 |
 | Retencja i usuwanie (TC-PD-RET) | 8 |
 | Import e-Zamówienia / TED (TC-PD-IMP) | 6 |
-| Worker importu (TC-PD-WRK) | 8 |
+| Worker importu (TC-PD-WRK) | 9 |
 | Pamięć i wydajność (TC-PD-PERF) | 3 |
 | Uprawnienia i ACL (TC-PD-ACL) | 6 |
 | Linki udostępniania (TC-PD-SHARE) | 3 |
@@ -36,7 +36,7 @@
 | Ryzyka prawne — brak funkcji (TC-PD-LEGAL) | 1 |
 | Izolacja multi-tenant (TC-PD-TEN) | 3 |
 | Bezpieczeństwo plików (TC-PD-SEC) | 4 |
-| **Razem** | **120** (w tym 2 warunkowe poza werdyktem: TC-PD-PRJ-012, TC-PD-PRJ-013) |
+| **Razem** | **121** (w tym 2 warunkowe poza werdyktem: TC-PD-PRJ-012, TC-PD-PRJ-013) |
 
 ---
 
@@ -92,7 +92,7 @@ Zasady:
 - Role: `superadmin`, `admin`, `employee` i role własne z `createRoleFixture`. Feature'y z macierzy rejestru używane dosłownie (prefiks `project_delivery.`: `view`, `projects.view_all`, `projects.create`, `projects.manage`, `documents.upload`, `documents.approve`, `documents.delete`, `imports.run`, `templates.manage`, `settings.manage`, `storage.purge`, v1: `share_links.manage`, `approvals.review`). Prawa w ACL folderu: `read`, `write`. Nazw ról projektowych rejestr nie podaje (§27 wniosek 36) — w scenariuszach opisane przez prawa ACL.
 - Ruch do S3 w testach Integration idzie do emulatora; przeglądarka Playwright wysyła pliki bezpośrednio na adres emulatora. Asercja „bez proxy aplikacji” = brak żądań z treścią pliku do hosta aplikacji (nasłuch `page.on('request')` + liczniki bajtów procesu aplikacji).
 - Proxy logujące S3 (cienki proxy HTTP przed emulatorem, tylko w testach) zapisuje metodę i operację każdego żądania; służy do asercji „zero DeleteObject na kluczach rewizji poza workerem purge po potwierdzeniu admina; każde usunięcie stagingu i obiektu osieroconej sesji zalogowane”, „`If-None-Match: *` przy zapisie u dostawcy domyślnego / brak nagłówka w adapterze B2”, „brak GetObject z procesu serwera HTTP (w workerze wyłącznie checksum i import)”. Proxy rozróżnia proces źródłowy (serwer HTTP, worker checksum, worker importu, worker purge, sweeper). Emulator uruchamiany w dwóch profilach: zgodny (warunkowy zapis obsługiwany, bucket z włączonym wersjonowaniem jak u dostawcy domyślnego) i „B2” (nagłówek odrzucany z 501, bucket wersjonowany).
-- Limity (rozmiar pliku, `storage.quota_bytes`, rozmiar ZIP, `import.timeout_ms`, współczynnik kompresji) są parametrami ustawianymi w fixture na małe wartości testowe; plan nie przyjmuje wartości produkcyjnych. Stałe z rejestru: progi alertów 80% i 100% oraz próg blokady 110% `storage.quota_bytes`; progi pomiaru RAM z TC-PD-PERF-003. Limit ZIP `import.zip_max_bytes` ma domyślnie 250 MB **(do potwierdzenia)** — scenariusze ustawiają go w fixture i nie zakładają tej wartości jako ostatecznej. Parametry `storage.overage_allowed`, `storage.hard_cap_bytes` i `storage.alert_thresholds_pct` nie istnieją i nie występują w danych testowych.
+- Limity (rozmiar pliku, `storage.quota_bytes`, rozmiar ZIP, `import.timeout_ms`, współczynnik kompresji) są parametrami ustawianymi w fixture na małe wartości testowe; plan nie przyjmuje wartości produkcyjnych. Stałe z rejestru: progi alertów 80% i 100% oraz próg blokady 110% `storage.quota_bytes`; progi pomiaru RAM z TC-PD-PERF-003. Limit ZIP `import.zip_max_bytes` ma domyślnie 250 MB (D158); administrator instancji może ustawić inną wartość, a domyślną podnosi się dopiero po pomiarze RAM dla większej paczki (TC-PD-WRK-009, TC-PD-PERF-003). Pozostałe scenariusze ustawiają limit w fixture. Parametry `storage.overage_allowed`, `storage.hard_cap_bytes` i `storage.alert_thresholds_pct` nie istnieją i nie występują w danych testowych.
 - Asercje komunikatów UI na locale `pl`, klucze i18n z tłumaczeniem `en`.
 
 ---
@@ -900,7 +900,7 @@ Zasady:
 
 ---
 
-## 11. Scenariusze testowe: Worker importu (TC-PD-WRK) — 8 TC
+## 11. Scenariusze testowe: Worker importu (TC-PD-WRK) — 9 TC
 
 Import ZIP i multipart po stronie serwera idą przez istniejącą kolejkę OM (ProgressJob + worker kolejki). Worker działa jako proces potomny `queue worker --all` w kontenerze `app` i dzieli jego RAM.
 
@@ -929,7 +929,7 @@ Import ZIP i multipart po stronie serwera idą przez istniejącą kolejkę OM (P
 #### TC-PD-WRK-003: Limity ZIP i pliku jako parametry
 
 - **Priorytet**: P0 | **Etap**: MVP | **Poziom**: Integration + Unit + Static
-- **Warunki wstępne**: Parametry w fixture (małe wartości testowe): `import.zip_max_bytes` (domyślnie 250 MB — **do potwierdzenia**; TC ustawia własną wartość i nie zakłada 250 MB jako ostatecznej), `import.max_file_bytes`, `import.zip_max_uncompressed_bytes`, `import.zip_max_entries`, `import.zip_max_ratio`
+- **Warunki wstępne**: Parametry w fixture (małe wartości testowe): `import.zip_max_bytes` (domyślnie 250 MB — D158; TC ustawia własną wartość, wartość domyślną i komunikat sprawdza TC-PD-WRK-009), `import.max_file_bytes`, `import.zip_max_uncompressed_bytes`, `import.zip_max_entries`, `import.zip_max_ratio`
 - **Kroki**:
   1. Uruchom import przekraczający kolejno każdy limit ZIP (rozmiar ZIP, suma po rozpakowaniu, liczba wpisów, współczynnik kompresji); część wpisów mieści się przed przekroczeniem
   2. Import z jednym wpisem większym niż `import.max_file_bytes` i pozostałymi poprawnymi
@@ -938,7 +938,7 @@ Import ZIP i multipart po stronie serwera idą przez istniejącą kolejkę OM (P
   - Kontrola po liczniku bajtów w strumieniu, nie po deklaracji z nagłówka ZIP
   - Krok 1: każde przekroczenie przerywa import: status `failed`, powód `zip_limit_exceeded` z nazwą przekroczonego limitu w raporcie; dalsze wpisy nie są zapisywane; rewizje utworzone przed przekroczeniem zostają; zero DeleteObject na kluczach rewizji. TC nie sprawdza treści komunikatu ponad to
   - Krok 2: wpis pominięty z powodem `too_large`, jego multipart przerwany (AbortMultipartUpload); import idzie dalej i kończy się `partial`
-  - Krok 3: wartość pochodzi z konfiguracji (domyślnie 250 MB, do potwierdzenia); Static: brak liczb limitów zakodowanych w module
+  - Krok 3: wartość efektywna = 250 MB (domyślna, D158), nadpisywalna konfiguracją; Static: poza tą wartością domyślną brak liczb limitów zakodowanych w module
 
 #### TC-PD-WRK-004: Timeout zadania
 
@@ -993,6 +993,29 @@ Import ZIP i multipart po stronie serwera idą przez istniejącą kolejkę OM (P
   - Rewizje utworzone przed pominięciem, błędem i anulowaniem zostają w każdym statusie (usunąć je może tylko purge)
   - Po `failed` i `cancelled` (a także po zakończeniu) staging usunięty strzeżoną funkcją; zero DeleteObject na kluczach rewizji
 
+
+#### TC-PD-WRK-009: Limit paczki ZIP — wartość domyślna, zmiana przez administratora, komunikat z dwiema drogami
+
+- **Priorytet**: P0 | **Etap**: MVP | **Poziom**: Integration + API + E2E/UI + Static
+- **Warunki wstępne**: Instancja bez nadpisania `import.zip_max_bytes`; ZIP-y: Z1 nieco ponad 250 MB, Z2 nieco poniżej 250 MB; dla przypadków B–D małe wartości `import.zip_max_uncompressed_bytes`, `import.zip_max_entries`, `import.zip_max_ratio` w fixture; konto administratora instancji
+- **Kroki**:
+  1. Odczytaj efektywne `import.zip_max_bytes`; zaimportuj Z2, potem Z1
+  2. Przypadek A (rozmiar paczki): odczytaj status importu Z1, raport i komunikat w UI
+  3. Przypadek B (suma po rozpakowaniu): import ZIP-a mieszczącego się w `import.zip_max_bytes`, ale przekraczającego `import.zip_max_uncompressed_bytes`; odczytaj status, raport i komunikat
+  4. Przypadek C (liczba wpisów): import ZIP-a z liczbą wpisów ponad `import.zip_max_entries`; odczytaj status, raport i komunikat
+  5. Przypadek D (współczynnik kompresji): import ZIP-a ze współczynnikiem ponad `import.zip_max_ratio`; odczytaj status, raport i komunikat
+  6. Droga 2 z komunikatu: dodaj dokument-link do dokumentacji postępowania z `https://…`; osobno z `http://…`
+  7. Administrator instancji ustawia `import.zip_max_bytes` powyżej rozmiaru Z1; ponów import Z1; potem ustawia wartość niższą niż Z2 i ponawia import Z2
+  8. Static/proces: sprawdź, gdzie zapisana jest wartość domyślna; sprawdź, czy zmiana domyślnej ma dowód pomiaru
+- **Oczekiwane wyniki**:
+  - Krok 1: wartość efektywna = 250 MB; Z2 importowany; Z1 przerwany
+  - Przypadki A–D (kroki 2–5), każdy osobno: status `failed`, powód `zip_limit_exceeded`, dalsze wpisy nie są zapisywane, rewizje sprzed przekroczenia zostają. Komunikat `pl` dla użytkownika (nie samo `failed`) wskazuje, który limit przekroczono — A: rozmiar paczki, B: suma po rozpakowaniu, C: liczba wpisów, D: współczynnik kompresji — z wartością limitu (A: także rozmiar paczki), a raport importu podaje nazwę limitu
+  - Każdy komunikat A–D podaje dwie drogi: (1) wgrać pliki ręcznie — pojedynczo albo w kilku mniejszych ZIP-ach; (2) dodać link do dokumentacji jako dokument-link (`kind = link`)
+  - Krok 6: `https:` → dokument `kind = link`, serwer nie pobiera treści (brak żądania wychodzącego), brak obiektu w S3; `http:` → 422 (jak TC-PD-DOC-002)
+  - Krok 7: nowa wartość obowiązuje od następnego importu bez restartu kodu: Z1 importowany; Z2 przerwany z komunikatem A z nową wartością limitu
+  - Krok 8: wartość domyślna 250 MB w jednym miejscu konfiguracji; podniesienie wartości domyślnej tylko z raportem pomiaru RAM dla większej paczki (TC-PD-PERF-003 z progami pomiaru, kryterium KA-6) — bez raportu zmiana jest FAIL w review
+  - Dla B–D rejestr nie mówi, czy komunikat podaje też wartość zmierzoną (sumę po rozpakowaniu, liczbę wpisów, współczynnik) — TC odnotowuje to w raporcie bez asercji (§27 wniosek 41)
+
 ---
 
 ## 12. Testy pamięci i wydajności (TC-PD-PERF) — 3 TC
@@ -1028,7 +1051,7 @@ Import ZIP i multipart po stronie serwera idą przez istniejącą kolejkę OM (P
 - **Priorytet**: P0 | **Etap**: MVP | **Poziom**: Performance (instancja testowa open-mercato.pl)
 - **Warunki wstępne**:
   - Wersja testowa z włączonym `storage_s3`, bucketem testowym u dostawcy domyślnego (albo B2 z adapterem, jeśli PoC dostawcy domyślnego nie przeszedł), limitem pamięci kontenera `app` jak na produkcji
-  - ZIP testowy 250 MB (rozmiar testowy z progów pomiaru, nie limit); `import.zip_max_bytes` ustawione w fixture na wartość ≥ rozmiaru ZIP testowego
+  - ZIP testowy 250 MB = domyślne `import.zip_max_bytes` (D158); przy pomiarze pod podniesienie wartości domyślnej — ZIP o docelowym rozmiarze i `import.zip_max_bytes` ustawione na wartość ≥ jego rozmiaru
   - Progi: `measure.worker_rss_peak_delta_bytes` = 256 MB, `measure.host_min_free_bytes` = 300 MB, `measure.host_swap_growth_bytes` = 512 MB
 - **Kroki**:
   1. Zapisz bazowy RSS procesu workera, `MemAvailable` i użycie swapu hosta, liczniki restartów kontenera `app` i procesu workera
@@ -1038,7 +1061,7 @@ Import ZIP i multipart po stronie serwera idą przez istniejącą kolejkę OM (P
   - PASS tylko gdy jednocześnie: szczytowy przyrost RSS workera ≤ 256 MB; `MemAvailable` ≥ 300 MB przez cały pomiar; zero zabić OOM; zero restartów kontenera `app` i procesu workera; przyrost swapu hosta ≤ 512 MB
   - Przekroczenie dowolnego progu = FAIL → wniosek o osobny kontener workera z limitem pamięci
   - Kryteria z TC-PD-PERF-001/002 spełnione; brak wzrostu użycia dysku hosta
-  - Raport z progami, pomiarami i werdyktem dołączony do PR jako dowód „gotowe”
+  - Raport z progami, pomiarami i werdyktem dołączony do PR jako dowód „gotowe”; PASS dla większej paczki jest warunkiem podniesienia domyślnego `import.zip_max_bytes` (D158, TC-PD-WRK-009 krok 8)
 
 ---
 
@@ -1567,7 +1590,7 @@ Akceptacje v1 (rewizje dokumentów, transmittale, protokoły): własna walidacja
 - **Kroki**:
   1. Import ZIP: wysoki współczynnik kompresji (powyżej `import.zip_max_ratio`); wpisy `../../x`, ścieżki absolutne; symlinki — obok poprawnych wpisów; ZIP w ZIP; zaszyfrowany wpis; uszkodzony katalog centralny
 - **Oczekiwane wyniki**:
-  - Bomb: `failed` z powodem `zip_limit_exceeded` i nazwą limitu (TC-PD-WRK-003), bez dalszych wpisów, RAM ograniczony
+  - Bomb: `failed` z powodem `zip_limit_exceeded` i nazwą limitu (TC-PD-WRK-003), bez dalszych wpisów, RAM ograniczony; komunikat wskazuje przekroczony limit (współczynnik kompresji albo suma po rozpakowaniu) i dwie drogi (TC-PD-WRK-009, przypadki B i D)
   - Wpisy ze ścieżką zawierającą `..`, ścieżki absolutne i symlinki → pominięte z powodem `unsafe_path` (nie importowane, odnotowane w raporcie); import trwa dalej i poprawne wpisy dostają rewizje
   - ZIP w ZIP zapisany jako zwykły plik, bez rozpakowania; zaszyfrowany wpis → pominięty z powodem `encrypted`; uszkodzony katalog centralny → `failed` przed pierwszym wpisem; bez awarii workera
 
@@ -1635,7 +1658,7 @@ Akceptacje v1 (rewizje dokumentów, transmittale, protokoły): własna walidacja
 
 ## 27. Wnioski do specyfikacji (luki i pytania techniczne)
 
-Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza wnioskiem 34 (decyzja biznesowa Marka). Rozstrzygnięcia rev 4 wyłącznie na podstawie rejestru z commita 865714e, rev 5 — z commita b0e097f.
+Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza wnioskiem 34 (decyzja biznesowa Marka). Rozstrzygnięcia rev 4 wyłącznie na podstawie rejestru z commita 865714e, rev 5 — z commita b0e097f, rev 5a — z commita a75dc9f.
 
 ### Priorytet 1 (przed kodem)
 
@@ -1680,40 +1703,41 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza 
 27. ~~**Feature komendy podpięcia oferty**~~ — ✅ **ROZSTRZYGNIĘTE (D135)**: `project_delivery.projects.manage`, inaczej 403. Scenariusz: TC-PD-PRJ-010.
 28. ~~**Kod błędu `complete` po `expired`**~~ — ✅ **ROZSTRZYGNIĘTE (D149)**: 409 `UPLOAD_SESSION_EXPIRED`, bez rewizji, rezerwacja już zwolniona. Scenariusz: TC-PD-STOR-008.
 29. ~~**Kto może wykonać soft delete**~~ — ✅ **ROZSTRZYGNIĘTE (D136)** dla dokumentów: `project_delivery.documents.delete`, domyślnie admin, employee → 403. Folder i projekt — wniosek 38. Scenariusz: TC-PD-RET-004.
-30. ~~**Limity ZIP spoza rejestru**~~ — ✅ **ROZSTRZYGNIĘTE (D139, D150)**: parametry `import.zip_max_bytes` (domyślnie 250 MB — do potwierdzenia, wniosek 40), `import.zip_max_entries`, `import.zip_max_uncompressed_bytes`, `import.zip_max_ratio`; przekroczenie → `failed`, `zip_limit_exceeded` z nazwą limitu; wpis ponad `import.max_file_bytes` → `too_large`. Scenariusze: TC-PD-WRK-003, TC-PD-SEC-002.
+30. ~~**Limity ZIP spoza rejestru**~~ — ✅ **ROZSTRZYGNIĘTE (D139, D150)**: parametry `import.zip_max_bytes` (domyślnie 250 MB, D158 — wniosek 40), `import.zip_max_entries`, `import.zip_max_uncompressed_bytes`, `import.zip_max_ratio`; przekroczenie → `failed`, `zip_limit_exceeded` z nazwą limitu; wpis ponad `import.max_file_bytes` → `too_large`. Scenariusze: TC-PD-WRK-003, TC-PD-SEC-002.
 31. ~~**Status przy samych pominięciach `duplicate`**~~ — ✅ **ROZSTRZYGNIĘTE (D150)**: `completed` z licznikiem `skipped_duplicates` (także nowe pliki + duplikaty). Scenariusze: TC-PD-WRK-008, TC-PD-IMP-005.
 32. ~~**Czyszczenie `reopened_at` po ponownym `won`**~~ — ✅ **ROZSTRZYGNIĘTE (D140)**: czyszczone przy ponownym `customers.deal.won` (v1). Scenariusz: TC-PD-NOSCHED-005.
 33. ~~**Liczba inwestycji dla postępowania z częściami**~~ — ✅ **ROZSTRZYGNIĘTE warunkowo (D154)**: przy utrzymaniu D31 — jedna inwestycja, jeden deal, najwyżej jeden projekt. Scenariusz: TC-PD-PRJ-013 (warunkowy).
 34. **Konflikt D31 ↔ D132 — decyzja Marka** (TC-PD-PRJ-011, TC-PD-PRJ-012, TC-PD-PRJ-013): do decyzji obowiązuje D31; przy jej utrzymaniu obowiązuje D154 (TC-PD-PRJ-013), przy przyjęciu D132 — TC-PD-PRJ-012. Oba warunkowe TC poza werdyktem. **Otwarte (decyzja Marka).**
 35. ~~**Pozostałe „wg speki” bez reguły w rejestrze**~~ — ✅ **ROZSTRZYGNIĘTE**: TC-PD-DOC-002 (tylko `https:`, D138), TC-PD-SEC-001 (MIME z zawartości, D151), TC-PD-SHARE-003 (head dokumentu, podfoldery według uprawnień twórcy, D142, D152).
 
-### Luki rev 5 (reguł brak w rejestrze @b0e097f — nie zgadywano)
+### Luki rev 5–5a (reguł brak w rejestrze @b0e097f / @a75dc9f — nie zgadywano)
 
 36. **Role projektowe w ACL folderu** (TC-PD-ACL-002, TC-PD-ACL-006): lista poprawek (N-R3-1) wskazuje role „viewer / member / manager”, ale rejestr ich nie definiuje (D147 mówi o prawach `read` i `write`), a w plikach recenzenta wpisu N-R3-1 nie ma. Plan opisuje ACL prawami `read` / `read` + `write`; nazwy ról i ich mapowanie na prawa — do rejestru.
 37. **Flaga projektu po ponownym `won`** (TC-PD-PRJ-008): czy `deal_reopened_at` znika sama po ponownym wygraniu deala (D140 dotyczy tylko harmonogramu) i jaki feature chroni komendę `projects.reopen_flag_clear`.
 38. **Feature soft delete folderu i projektu** (TC-PD-RET-004): D136 reguluje tylko dokumenty.
 39. **Kody bez numeru D**: `REVISION_IMMUTABLE` (TC-PD-REV-001) i `FILE_TOO_LARGE` (TC-PD-STOR-009) pochodzą z listy nitów recenzenta; rejestr @b0e097f ich nie zawiera.
-40. **Limit `import.zip_max_bytes`** (TC-PD-WRK-003, TC-PD-PERF-003): rejestr podaje domyślnie 250 MB; równolegle trwa osobny doc-PR z decyzją o limicie ZIP. Do jego merge plan traktuje wartość jako parametr „do potwierdzenia”, nie wymyśla komunikatów `zip_limit_exceeded` ponad rejestr; scenariusze tej decyzji dojdą kolejnym commitem.
+40. ~~**Limit `import.zip_max_bytes`**~~ — ✅ **ROZSTRZYGNIĘTE (D158)**: domyślnie 250 MB, administrator instancji może ustawić inną wartość, podniesienie domyślnej dopiero po pomiarze RAM (KA-6, progi D120); `zip_limit_exceeded` z komunikatem (rozmiar paczki, limit) i dwiema drogami: ręczny upload albo dokument-link (`kind = link`, D138). Scenariusze: TC-PD-WRK-009, TC-PD-WRK-003, TC-PD-PERF-003.
+41. **Treść komunikatu dla limitów innych niż rozmiar paczki** (TC-PD-WRK-009 przypadki B–D, TC-PD-SEC-002): D150 wymaga nazwy limitu w raporcie, D158 — rozmiaru paczki i limitu w komunikacie; rejestr nie mówi, czy przy sumie po rozpakowaniu, liczbie wpisów i współczynniku kompresji komunikat podaje wartość zmierzoną. Plan wymaga nazwy i wartości limitu; reszta — do rejestru.
 
 ---
 
 ## 28. Podsumowanie
 
 **Dokument**: Niezależny plan testów — spec only
-**Liczba scenariuszy**: 120 (MVP 98, v1 15, v2 7; etap liczony z pierwszej fazy scenariusza — TC-PD-STOR-007 obejmuje MVP, v1 i v2); w tym 2 warunkowe poza werdyktem (TC-PD-PRJ-012, TC-PD-PRJ-013)
-**Liczba wniosków do speki**: 40 (rozstrzygnięte: 1–11, 13–16, 18, 19, 21–33, 35; częściowo: 20; otwarte: 12, 17; luki rev 5: 36–40; decyzja Marka: 34)
+**Liczba scenariuszy**: 121 (MVP 99, v1 15, v2 7; etap liczony z pierwszej fazy scenariusza — TC-PD-STOR-007 obejmuje MVP, v1 i v2); w tym 2 warunkowe poza werdyktem (TC-PD-PRJ-012, TC-PD-PRJ-013)
+**Liczba wniosków do speki**: 41 (rozstrzygnięte: 1–11, 13–16, 18, 19, 21–33, 35, 40; częściowo: 20; otwarte: 12, 17; luki rev 5–5a: 36–39, 41; decyzja Marka: 34)
 **Status**: SPEC ONLY — bez kodu, bez testów wykonywalnych
 
 **Kolejne kroki**:
 1. Na etapie kodu: PoC dostawcy domyślnego na buckecie wersjonowanym (kryterium akceptacji, fallback B2) i pomiar RAM z progami z TC-PD-PERF-003
 2. Decyzja Marka w sprawie D31 ↔ D132 (zostaje TC-PD-PRJ-012 albo TC-PD-PRJ-013)
-3. Odpowiedzi na luki 36–40 z §27; po merge doc-PR o limicie ZIP — scenariusze tej decyzji kolejnym commitem
+3. Odpowiedzi na luki 36–39 i 41 z §27
 
 ---
 
 ## Załącznik: Traceability D → TC (macierz decyzji)
 
-Źródło: `.ai/decisions.md` z commita b0e097f (po merge #19 i #21), sekcja modułu D98–D157: 60 decyzji, 59 aktywnych (D99 zastąpiona przez D116; D132 i D154 aktywne warunkowo — alternatywy zależne od decyzji Marka w sprawie D31). Każda aktywna decyzja ma co najmniej jeden TC. Fazy w kolumnie TC wynikają z pola „Etap” scenariuszy.
+Źródło: `.ai/decisions.md` z commita a75dc9f (po merge #19, #21 i #22), sekcja modułu D98–D158: 61 decyzji, 60 aktywnych (D99 zastąpiona przez D116; D132 i D154 aktywne warunkowo — alternatywy zależne od decyzji Marka w sprawie D31). Każda aktywna decyzja ma co najmniej jeden TC. Fazy w kolumnie TC wynikają z pola „Etap” scenariuszy.
 
 | D | Treść skrócona | TC | Uwagi |
 |---|---|---|---|
@@ -1734,18 +1758,18 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza 
 | **D112** | Wariant A (nasz bucket u dostawcy domyślnego, fallback B2; limit i dopłata — doprecyzowane przez D118) / B (storage klienta); limity i ceny jako parametry; MVP tylko A; v1 + Drive; v2 + bucket klienta, SharePoint/OneDrive/Nextcloud | TC-PD-STOR-007, TC-PD-QUOTA-001, TC-PD-QUOTA-002, TC-PD-QUOTA-003, TC-PD-QUOTA-004, TC-PD-QUOTA-007, TC-PD-EXT-001, TC-PD-EXT-003, TC-PD-TEN-002 | MVP A; v1, v2 B; wnioski 10, 11 rozstrzygnięte (D118, D130) |
 | **D113** | Retencja per organizacja (podpowiedź: koniec gwarancji i rękojmi), potem archiwum = eksport albo zimna klasa u dostawcy (B2: tylko eksport); nigdy usunięcie bez admina; MVP pole + data na projekcie; v2 auto-archiwizacja | TC-PD-RET-001, TC-PD-RET-002, TC-PD-RET-003, TC-PD-RET-004, TC-PD-RET-005, TC-PD-RET-006, TC-PD-RET-007, TC-PD-RET-008, TC-PD-STOR-008, TC-PD-STOR-010, TC-PD-ADV-001, TC-PD-POC-003, TC-PD-POC-006 | MVP; v2; strażnik usuwania (TC-PD-RET-007, D121) i purge po potwierdzeniu (TC-PD-RET-008, D122); wnioski 2, 3, 4, 9 rozstrzygnięte |
 | **D114** | Akceptacje v1 (rewizje, transmittale, protokoły): własna walidacja progów (`pd_approval_tiers`, `pd_approval_reviews`) za `ApprovalEngine` w DI; `workflows` w v2 | TC-PD-APR-001, TC-PD-APR-002, TC-PD-APR-003, TC-PD-APR-004 | v1; v2 |
-| **D115** | Import ZIP i multipart serwerowy przez istniejącą kolejkę OM (ProgressJob, `queue worker --all` w kontenerze `app`), bez nowego kontenera; strumieniowo; bufor tylko w RAM ≤ partSize × queueSize, zero plików tymczasowych; współbieżność 1 tylko dla kolejki modułu, inne kolejki bez zmian; limity per plik i per ZIP jako parametry; timeout, wznowienie, abort multipartu; progi presji RAM — D120 | TC-PD-WRK-001, TC-PD-WRK-002, TC-PD-WRK-003, TC-PD-WRK-004, TC-PD-WRK-005, TC-PD-WRK-006, TC-PD-WRK-007, TC-PD-WRK-008, TC-PD-IMP-002, TC-PD-SEC-002, TC-PD-STOR-005, TC-PD-PERF-002, TC-PD-PERF-003 | MVP; wnioski 14, 15, 16, 21, 23 rozstrzygnięte; rev 5: limity `import.max_file_bytes`, `import.zip_max_bytes` (domyślnie 250 MB — do potwierdzenia, §27 wniosek 40) → `failed`/`zip_limit_exceeded` wg D150 — TC-PD-WRK-003 |
+| **D115** | Import ZIP i multipart serwerowy przez istniejącą kolejkę OM (ProgressJob, `queue worker --all` w kontenerze `app`), bez nowego kontenera; strumieniowo; bufor tylko w RAM ≤ partSize × queueSize, zero plików tymczasowych; współbieżność 1 tylko dla kolejki modułu, inne kolejki bez zmian; limity per plik i per ZIP jako parametry; timeout, wznowienie, abort multipartu; progi presji RAM — D120 | TC-PD-WRK-001, TC-PD-WRK-002, TC-PD-WRK-003, TC-PD-WRK-004, TC-PD-WRK-005, TC-PD-WRK-006, TC-PD-WRK-007, TC-PD-WRK-008, TC-PD-IMP-002, TC-PD-SEC-002, TC-PD-STOR-005, TC-PD-PERF-002, TC-PD-PERF-003 | MVP; wnioski 14, 15, 16, 21, 23 rozstrzygnięte; rev 5: limity `import.max_file_bytes`, `import.zip_max_bytes` (domyślnie 250 MB, D158) → `failed`/`zip_limit_exceeded` wg D150 — TC-PD-WRK-003; rev 5a: zmiana wartości przez administratora i warunek podniesienia domyślnej — D158 (TC-PD-WRK-009) |
 | **D116** | Wygrany deal bez kalkulacji → projekt bez oferty (kolumny oferty razem NULL, CHECK; wartość i waluta z deala; `segmentCode` albo 422 `SEGMENT_REQUIRED`); podpięcie oferty później (`POST …/winning-offer`, 422 `OFFER_NOT_PRIMARY`, 409 `OFFER_ALREADY_LINKED`); jeden projekt na deal i na inwestycję, drugi → 409 `PROJECT_EXISTS` (także wyścig); tylko jawna komenda (D99 zastąpiona przez D116) | TC-PD-PRJ-001, TC-PD-PRJ-002, TC-PD-PRJ-003, TC-PD-PRJ-004, TC-PD-PRJ-005, TC-PD-PRJ-006, TC-PD-PRJ-008, TC-PD-PRJ-009, TC-PD-PRJ-010, TC-PD-PRJ-011 | MVP; wniosek 6 rozstrzygnięty; luki 25, 26, 27 |
 | **D117** | Wersjonowanie OVHcloud włączone + kopia bazy OM (MVP); nocna kopia B2 (v1) poza quota klienta; usunięcie = wszystkie wersje i markery (także w kopii B2); quota liczy wszystkie wersje; PoC na buckecie wersjonowanym | TC-PD-POC-001, TC-PD-POC-003, TC-PD-POC-006, TC-PD-QUOTA-009, TC-PD-RET-008, TC-PD-STOR-008 | MVP; v1; kopia bazy OM — procedura wdrożenia, bez TC w tym planie; wnioski 3, 24 rozstrzygnięte |
 | **D118** | Quota jako limit miękki: alerty 80%/100% od `used` (event `project_delivery.storage.quota_threshold_reached`, ponowne uzbrojenie po spadku); szczyt `used` per okres, nadwyżka = max(0, szczyt − quota); od 110% 413 `STORAGE_QUOTA_EXCEEDED` bez eventu; odczyt działa; brak auto-usuwania; usunięte parametry trybów; brak quota → 422 `STORAGE_QUOTA_NOT_CONFIGURED` | TC-PD-QUOTA-002, TC-PD-QUOTA-003, TC-PD-QUOTA-004, TC-PD-QUOTA-005, TC-PD-QUOTA-007, TC-PD-IMP-006 | MVP; wniosek 10 rozstrzygnięty; rev 5: `used` obejmuje bajty wersji spoza aplikacji z rekoncyliacji (D153), rekoncyliacja sprawdza 80/100/110 — TC-PD-QUOTA-009 |
 | **D119** | Oryginał ZIP = dowód: kopia po stronie S3 jako niemutowalna rewizja w „00 Przetarg” przed rozpakowaniem; w quota („archiwum dowodowe”); sha256 w locie; duplikat → kopia pominięta; brak quota (110%) → `failed`/`quota` bez kopii i rozpakowania; staging usuwany strzeżoną funkcją | TC-PD-IMP-002, TC-PD-IMP-005, TC-PD-IMP-006, TC-PD-QUOTA-008, TC-PD-RET-005 | MVP; wniosek 1 rozstrzygnięty |
-| **D120** | Progi pomiaru RAM dla ZIP 250 MB: RSS workera ≤ 256 MB, `MemAvailable` ≥ 300 MB, zero OOM i restartów, swap ≤ 512 MB; przekroczenie = FAIL → osobny kontener | TC-PD-PERF-003 | etap kodu; wniosek 23 rozstrzygnięty |
+| **D120** | Progi pomiaru RAM dla ZIP 250 MB: RSS workera ≤ 256 MB, `MemAvailable` ≥ 300 MB, zero OOM i restartów, swap ≤ 512 MB; przekroczenie = FAIL → osobny kontener | TC-PD-PERF-003 | etap kodu; wniosek 23 rozstrzygnięty; rev 5a: warunek podniesienia domyślnego `import.zip_max_bytes` (D158) — TC-PD-PERF-003, TC-PD-WRK-009 |
 | **D121** | Usuwanie poza purge wyłącznie strzeżoną funkcją (staging własnego importu, klucz sesji `expired` bez rewizji; inne → wyjątek); sweeper i `reserved → expired` pod advisory lockiem; log każdego usunięcia; wersjonowany bucket — wszystkie wersje; nic nie usuwa rewizji | TC-PD-RET-003, TC-PD-RET-005, TC-PD-RET-007, TC-PD-STOR-008, TC-PD-WRK-004, TC-PD-WRK-008, TC-PD-IMP-002, TC-PD-IMP-006 | MVP; wniosek 4 rozstrzygnięty; luka 28 |
 | **D122** | Purge tylko po potwierdzeniu: feature `project_delivery.storage.purge` (bez → 403), kod projektu (bez → 422 `PURGE_CONFIRMATION_REQUIRED`); worker purge (współbieżność 1): wszystkie wersje i markery, pusta lista = `purged`, dopiero wtedy poza quota; niepełne → `purge_failed`; audyt + event `project_delivery.storage.purged` z ID | TC-PD-RET-004, TC-PD-RET-008, TC-PD-QUOTA-005, TC-PD-ACL-005 | MVP; wniosek 3 rozstrzygnięty; luka 29 |
 | **D123** | Import: wpis atomowy (rewizja albo pominięcie z powodem `quota`/`too_large`/`encrypted`/`unsupported_method`/`duplicate`/`error`); statusy `completed`/`partial`/`failed`/`cancelled`; rewizje zostają; duplikat sha256 w folderze pominięty; wznowienie od ostatniego pełnego wpisu | TC-PD-WRK-003, TC-PD-WRK-004, TC-PD-WRK-005, TC-PD-WRK-008, TC-PD-IMP-005, TC-PD-QUOTA-003 | MVP; wnioski 14, 15 rozstrzygnięte; luki 30, 31; rev 5: powód `unsafe_path` (D148), `zip_limit_exceeded` → `failed` (D150), duplikaty nie liczą się do `partial` — TC-PD-SEC-002, TC-PD-WRK-008 |
 | **D124** | sha256: przeglądarka nie liczy (MVP); worker checksum (`project_delivery:checksum`, współbieżność 1, strumieniowo) — NULL do czasu ustawienia, potem niezmienny; import w locie; ZIP czytany zakresami (`Range`) | TC-PD-REV-006, TC-PD-DOC-001, TC-PD-DOC-004, TC-PD-IMP-001, TC-PD-IMP-002 | MVP; wnioski 1, 7 rozstrzygnięte |
 | **D125** | `complete`: rozmiar z HeadObject; rozbieżność ponad tolerancję → 422 `UPLOAD_SIZE_MISMATCH`, bez rewizji, rezerwacja zwolniona, obiekt usuwa sweeper | TC-PD-REV-002, TC-PD-STOR-009, TC-PD-QUOTA-004 | MVP |
-| **D126** | Ledger quota per organizacja (`pd_upload_sessions` + rewizje): rezerwacja pod advisory lockiem, zwolnienie przy abort/wygaśnięciu/`UPLOAD_SIZE_MISMATCH`; rewizje liczone do purge także po soft delete; limit `attachments` nie dotyczy; tenant = suma, tylko raport | TC-PD-QUOTA-001, TC-PD-QUOTA-004, TC-PD-QUOTA-006, TC-PD-STOR-008, TC-PD-TEN-002 | MVP; wniosek 5 rozstrzygnięty |
+| **D126** | Ledger quota per organizacja (`pd_upload_sessions` + rewizje): rezerwacja pod advisory lockiem, zwolnienie przy abort/wygaśnięciu/`UPLOAD_SIZE_MISMATCH`; rewizje liczone do purge także po soft delete; limit `attachments` nie dotyczy; tenant = suma, tylko raport | TC-PD-QUOTA-001, TC-PD-QUOTA-004, TC-PD-QUOTA-006, TC-PD-STOR-008, TC-PD-TEN-002 | MVP; wniosek 5 rozstrzygnięty; rev 5a: ledger obejmuje pozycję bajtów spoza aplikacji z rekoncyliacji (D153) — TC-PD-QUOTA-009 |
 | **D127** | Upload/pobranie/podgląd przez trasy modułu z feature'ami (`documents.upload`, `view`) i ACL folderu; presigned z krótkim TTL per żądanie, nigdy zapisany; tylko presigned PUT; pobranie 302; trasy i metody `storage_s3` nieużywane | TC-PD-ACL-006, TC-PD-ACL-004, TC-PD-STOR-001, TC-PD-STOR-003, TC-PD-DOC-003 | MVP; wniosek 8 rozstrzygnięty |
 | **D128** | Daty gwarancji i rękojmi ręcznie (`project_delivery.projects.manage`), moduł nie wylicza; bez dat brak `retention_until`, „retencja nieustalona”; v2 z `pd_warranty_terms` | TC-PD-RET-002, TC-PD-ACL-005, TC-PD-ADV-001 | MVP; v2; wniosek 9 rozstrzygnięty |
 | **D129** | Lifecycle: na prefiksie dokumentów zero usuwania i zmiany klasy; wyłącznie abort multipartów i wygaszanie `staging/` (z wersjami niebieżącymi i markerami) jako zapas za sweeperem; AbortMultipartUpload ≠ usunięcie dokumentu | TC-PD-STOR-010, TC-PD-POC-003, TC-PD-POC-006, TC-PD-WRK-006, TC-PD-RET-006 | MVP; wniosek 24 rozstrzygnięty |
@@ -1758,7 +1782,7 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza 
 | **D136** | Soft delete dokumentu wymaga `project_delivery.documents.delete` (domyślnie admin, employee → 403); obiekty S3 dalej w quota | TC-PD-RET-004, TC-PD-ACL-005 | MVP; wniosek 29 rozstrzygnięty (folder/projekt — wniosek 38) |
 | **D137** | Macierz feature'ów modułu (13 pozycji, w tym v1 `share_links.manage`, `approvals.review`) i granty pracownika | TC-PD-ACL-005, TC-PD-ACL-006, TC-PD-SHARE-001 | MVP; v1; wniosek 20 (role projektowe — wniosek 36) |
 | **D138** | Dokument-link: tylko `https:`, inne schematy → 422 | TC-PD-DOC-002 | MVP |
-| **D139** | Parametry limitów ZIP (`import.zip_max_bytes` domyślnie 250 MB, `zip_max_entries`, `zip_max_uncompressed_bytes`, `zip_max_ratio`); ZIP w ZIP jako plik; zaszyfrowany → `encrypted` | TC-PD-WRK-003, TC-PD-SEC-002, TC-PD-PERF-003 | MVP; wartość domyślna do potwierdzenia (wniosek 40) |
+| **D139** | Parametry limitów ZIP (`import.zip_max_bytes` domyślnie 250 MB, `zip_max_entries`, `zip_max_uncompressed_bytes`, `zip_max_ratio`); ZIP w ZIP jako plik; zaszyfrowany → `encrypted` | TC-PD-WRK-003, TC-PD-SEC-002, TC-PD-PERF-003 | MVP; wartość domyślna i jej zmiana — D158 |
 | **D140** | `reopened_at` w harmonogramie czyszczone przy ponownym `customers.deal.won` | TC-PD-NOSCHED-005 | v1; wniosek 32 rozstrzygnięty |
 | **D141** | Flaga projektu `deal_reopened_at` (ponowne otwarcie i `customers.deal.lost`), event `project_delivery.project.deal_reopened`, dane bez zmian, komenda `projects.reopen_flag_clear` | TC-PD-PRJ-008 | MVP; wniosek 19 rozstrzygnięty (reszta — wniosek 37) |
 | **D142** | Linki: `expires_at` obowiązkowe (422 `SHARE_LINK_EXPIRY_REQUIRED`), maksimum `share_links.max_expiry_seconds`; cel folder/dokument/rewizja; bez listowania folderów nadrzędnych | TC-PD-SHARE-001, TC-PD-SHARE-003 | v1; wniosek 13 rozstrzygnięty |
@@ -1769,7 +1793,7 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza 
 | **D147** | Brak dostępu w ACL → 404 (jak nieistniejący/inna organizacja); brak feature'a → 403; folder widoczny bez `write` → 403, niewidoczny → 404; po odebraniu dostępu brak nowego URL | TC-PD-ACL-002, TC-PD-ACL-003, TC-PD-ACL-006 | MVP |
 | **D148** | Wpisy `..`, absolutne, symlink → pominięte z powodem `unsafe_path`, import trwa | TC-PD-SEC-002, TC-PD-WRK-008 | MVP |
 | **D149** | `complete` dla sesji `expired` → 409 `UPLOAD_SESSION_EXPIRED`; bez rewizji; rezerwacja już zwolniona; obiekt dla sweepera | TC-PD-STOR-008 | MVP; wniosek 28 rozstrzygnięty |
-| **D150** | Przekroczenie limitu ZIP → `failed`, `zip_limit_exceeded` z nazwą limitu, bez dalszych wpisów, rewizje zostają; wpis > `import.max_file_bytes` → `too_large`; duplikaty nie liczą się do `partial` (`completed` + `skipped_duplicates`) | TC-PD-WRK-003, TC-PD-WRK-008, TC-PD-IMP-005, TC-PD-SEC-002 | MVP; wnioski 30, 31 rozstrzygnięte |
+| **D150** | Przekroczenie limitu ZIP → `failed`, `zip_limit_exceeded` z nazwą limitu, bez dalszych wpisów, rewizje zostają; wpis > `import.max_file_bytes` → `too_large`; duplikaty nie liczą się do `partial` (`completed` + `skipped_duplicates`) | TC-PD-WRK-003, TC-PD-WRK-008, TC-PD-IMP-005, TC-PD-SEC-002 | MVP; wnioski 30, 31 rozstrzygnięte; komunikat dla użytkownika — D158 (TC-PD-WRK-009) |
 | **D151** | MIME z sygnatury zawartości (worker); do ustalenia attachment + `application/octet-stream`; `preview-url` tylko dla rozpoznanego PDF; HTML/SVG/XML nigdy inline; `nosniff` gdzie dostawca pozwala (PoC KA-7); bez proxy | TC-PD-SEC-001, TC-PD-REV-006, TC-PD-DOC-003 | MVP; wniosek 35 rozstrzygnięty |
 | **D152** | Kody linków: `SHARE_LINK_EXPIRY_IN_PAST`, `_TOO_LONG`, `_REQUIRED` (422); 410 `SHARE_LINK_EXPIRED` / `SHARE_LINK_REVOKED`; nieznany token 404; uprawnienia twórcy przy każdym pobraniu; link do dokumentu = head; folder według uprawnień twórcy | TC-PD-SHARE-001, TC-PD-SHARE-002, TC-PD-SHARE-003 | v1; wnioski 13, 35 rozstrzygnięte |
 | **D153** | Rekoncyliacja w sweeperze (ListObjectsV2 + ListObjectVersions): bajty spoza aplikacji w `used` jako osobna pozycja ledgera, liczą się do 80/100 i 413 aż do purge; rekoncyliacja nie blokuje i nie usuwa | TC-PD-QUOTA-009, TC-PD-QUOTA-005 | MVP; TC-PD-QUOTA-009 bez statusu warunkowego |
@@ -1777,6 +1801,7 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza 
 | **D155** | Poziom akceptacji poza kolejnością → 409 `APPROVAL_LEVEL_OUT_OF_ORDER`; zmiana pozycji wysłanego transmittala → 409 `TRANSMITTAL_SENT` | TC-PD-APR-002, TC-PD-FLOW-002 | v1 |
 | **D156** | Odrzucenie bez komentarza → 422 `REJECTION_COMMENT_REQUIRED`; komentarz przy akceptacji opcjonalny | TC-PD-APR-002 | v1 |
 | **D157** | Wysłanie transmittala z dokumentami bez wymaganej akceptacji → 409 `APPROVAL_PENDING` z listą; zamknięcia protokołu i jego akceptacji nie blokuje | TC-PD-APR-004 | v1 |
+| **D158** | Limit paczki ZIP: domyślne `import.zip_max_bytes` = 250 MB, administrator instancji może zmienić; podniesienie domyślnej dopiero po pomiarze RAM dla większej paczki (KA-6, progi D120); `zip_limit_exceeded` z komunikatem (rozmiar paczki, limit) i dwiema drogami: ręczny upload (pojedynczo albo mniejsze ZIP-y) albo dokument-link `kind = link` (`https:`, D138; serwer nie pobiera treści, D105) | TC-PD-WRK-009, TC-PD-WRK-003, TC-PD-PERF-003, TC-PD-SEC-002 | MVP; wniosek 40 rozstrzygnięty; treść komunikatu dla limitów B–D — wniosek 41 |
 
 **Decyzje kontekstowe (wcześniejsze, aktywne) użyte w scenariuszach:**
 
@@ -1800,6 +1825,15 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza 
 ---
 
 ## Changelog
+
+### Rev 5a — 2026-10-23 (rejestr z commita a75dc9f, po merge #22)
+
+- Ta sama niezależna sesja, nadal bez dostępu do spek; jedyne źródło: `.ai/decisions.md` z commita a75dc9f (zmiany względem b0e097f: nowa D158; odesłania do D158 w D115, D120, D150; D126 z pozycją ledgera D153) oraz uzupełnienie recenzenta (komunikat wskazuje przekroczony limit, osobny przypadek na każdy limit)
+- Decyzje, na których oparto zmiany: D105, D115, D120, D126, D138, D150, D153, D158
+- Nowy TC-PD-WRK-009 (D158): wartość domyślna 250 MB, zmiana przez administratora instancji, komunikat z dwiema drogami (ręczny upload albo dokument-link `kind = link`), podniesienie domyślnej dopiero po pomiarze RAM (KA-6); osobne przypadki A–D: rozmiar paczki, suma po rozpakowaniu, liczba wpisów, współczynnik kompresji
+- TC-PD-WRK-003 i TC-PD-PERF-003: adnotacja „do potwierdzenia” zastąpiona przez D158; TC-PD-SEC-002: komunikat przy zip bomb (odesłanie do przypadków B i D)
+- §27: wniosek 40 rozstrzygnięty (D158); nowa luka 41 (wartość zmierzona w komunikacie dla limitów innych niż rozmiar paczki); §28; załącznik — wiersz D158, uzupełnione D115, D120, D126, D139, D150
+- Liczba scenariuszy: 120 → 121 (WRK 8 → 9)
 
 ### Rev 5 — 2026-10-23 (rejestr z commita b0e097f, po merge #19 i #21)
 
