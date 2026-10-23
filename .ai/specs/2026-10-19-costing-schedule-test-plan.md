@@ -3,7 +3,7 @@
 **Dokument**: SPEC ONLY (plan testów niezależny od specyfikacji PR #10, brak kodu)
 **Data**: 2026-10-19
 **Autor**: Copilot (plan testów na podstawie wymagań biznesowych Marka Adamskiego)
-**Rewizja**: rev 8b (2026-10-23, rozstrzygnięcie D31) — wiersz D31 wg nowej treści (przetarg bez części = 1 deal, z częściami — deal i inwestycja na część), nowy TC-DEAL-017 (przetarg z częściami, D132); poprzednio rev 8a (2026-10-23, odbiór #20) — TC-CUR-012: usunięta zbędna linia „Krok 3: kurs ręczny nie odblokowuje…” (treść w linii kroku 3); poprzednio rev 8 (2026-10-23, runda PR D) — TC-CUR-012 i TC-CUR-014: wskazany krok zwracający 422 (samo ustawienie kursu ręcznego nie zwraca 422; 422 przy wysłaniu, odpowiednio przy powtórzeniu dodania pozycji); poprzednio runda rev 8h — waluta bez kursu w żadnej tabeli NBP: TC-CUR-012 przepisany (422 dla waluty oferty, kurs ręczny nie odblokowuje, CNY przechodzi), nowy TC-CUR-014 (v1, 422 dla waluty pozycji), wniosek 26 zamknięty, annex do D97; poprzednio runda rev 8g — TC-CUR-011: wyszukiwanie modułu Waluty o 00:30 czasu warszawskiego daje kurs z dnia poprzedniego, wysłanie oferty liczy datę w Europe/Warsaw, suma deali zaokrąglona do całości, godziny graniczne lato/zima; TC-CUR-001: zamrożony obraz bez źródła kursu; poprzednio rev 7 (runda rev 8f) — waluty przez moduł Waluty platformy (TC-CUR-002..007 przepisane, nowe TC-CUR-008..013), annex do D94; poprzednio rev 6 — zgodność z decyzjami koordynacyjnymi (`.ai/vision.md`, `.ai/decisions.md`, `.ai/om-architecture-checklist.md`) i rozstrzygnięciami Koordynatora z 2026-10-23; mapowanie scenariuszy na decyzje w załączniku „Traceability TC → D”
+**Rewizja**: rev 8c (2026-10-23) — TC-DEAL-016: lookup po postępowaniu + części (etap kodu, D32); poprzednio rev 8b (2026-10-23, rozstrzygnięcie D31) — wiersz D31 wg nowej treści (przetarg bez części = 1 deal, z częściami — deal i inwestycja na część), nowy TC-DEAL-017 (przetarg z częściami, D132); poprzednio rev 8a (2026-10-23, odbiór #20) — TC-CUR-012: usunięta zbędna linia „Krok 3: kurs ręczny nie odblokowuje…” (treść w linii kroku 3); poprzednio rev 8 (2026-10-23, runda PR D) — TC-CUR-012 i TC-CUR-014: wskazany krok zwracający 422 (samo ustawienie kursu ręcznego nie zwraca 422; 422 przy wysłaniu, odpowiednio przy powtórzeniu dodania pozycji); poprzednio runda rev 8h — waluta bez kursu w żadnej tabeli NBP: TC-CUR-012 przepisany (422 dla waluty oferty, kurs ręczny nie odblokowuje, CNY przechodzi), nowy TC-CUR-014 (v1, 422 dla waluty pozycji), wniosek 26 zamknięty, annex do D97; poprzednio runda rev 8g — TC-CUR-011: wyszukiwanie modułu Waluty o 00:30 czasu warszawskiego daje kurs z dnia poprzedniego, wysłanie oferty liczy datę w Europe/Warsaw, suma deali zaokrąglona do całości, godziny graniczne lato/zima; TC-CUR-001: zamrożony obraz bez źródła kursu; poprzednio rev 7 (runda rev 8f) — waluty przez moduł Waluty platformy (TC-CUR-002..007 przepisane, nowe TC-CUR-008..013), annex do D94; poprzednio rev 6 — zgodność z decyzjami koordynacyjnymi (`.ai/vision.md`, `.ai/decisions.md`, `.ai/om-architecture-checklist.md`) i rozstrzygnięciami Koordynatora z 2026-10-23; mapowanie scenariuszy na decyzje w załączniku „Traceability TC → D”
 
 ---
 
@@ -742,12 +742,14 @@ Inwestycję zakłada handlowiec w module kalkulacji; n8n inwestycji nie tworzy. 
   4. Kontrola: tą samą ścieżką (lookup T-Z + PUT) kluczem n8n zmień wartość Deal Z
   5. Kontrola: kluczem API spoza n8n zmień wartość Deal X na 150 000.00 PLN
   6. Kontrola: użytkownik CRM ręcznie edytuje wartość Deal X
+  7. Etap kodu (kontrakt push z kluczem postępowanie + część, D32): postępowanie T-P z częściami 1 i 2 (jak w TC-DEAL-017), deal części 1 z powiązaną kalkulacją po „Zastosuj wartość do deala”; kluczem n8n wyszukaj deal po identyfikatorze postępowania T-P + część 1 (lookup), potem PUT aktualizacji: wartość i pole przetargowe
 - **Oczekiwane wyniki**:
   - Krok 2: lookup zwraca Deal X; PUT przyjęty (bez błędu)
   - Krok 3: wartość 125 000.00 i waluta PLN bez zmian; pole przetargowe i pole roli oferty zaktualizowane; w audycie informacja o pominięciu wartości z n8n
   - Krok 4: wartość Deal Z zmieniona przez n8n (brak powiązanej kalkulacji)
   - Krok 5: wartość Deal X zmieniona na 150 000.00 — reguła dotyczy tylko integracji n8n
   - Krok 6: edycja użytkownika nie jest blokowana; zmiana w historii deala
+  - Krok 7: lookup zwraca deal części 1 (nie deal części 2); wartość deala części 1 bez zmian, pole przetargowe zaktualizowane; deal części 2 nietknięty. Do zmiany kontraktu push lookup po samym identyfikatorze postępowania (klucz bez zmian) i krok nie jest wykonywany
 
 #### TC-DEAL-017: Przetarg z częściami — osobna inwestycja i osobny deal na część, wspólny numer ogłoszenia
 
@@ -2473,8 +2475,8 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 | D25 | Import MS Project od v2 | N/A | etap v2, poza planem |
 | D26 | Harmonogram wewnętrzny, gotowy na integrację | N/A | bez zachowania do testu |
 | D30 | Siatka kalkulacji | TC-COST-024, TC-IMP-007, TC-SEC-006 |  |
-| D31 | Przetarg bez części = 1 deal (`tender_id`), kolejne ogłoszenia aktualizują deal; z częściami — osobny deal i inwestycja na część, wspólny `tender_notice_number` (D132) | TC-DEAL-016, TC-DEAL-017 | nowa treść 2026-10-23 (decyzja Marka, rejestr @82c4ec3); zachowanie n8n testowane w kontrakcie n8n; klucz push postępowanie + część — etap kodu (D32) |
-| D32 | Obszar n8n / integracje | N/A | poza zakresem modułów kalkulacji/harmonogramu, testowane w kontrakcie n8n |
+| D31 | Przetarg bez części = 1 deal (`tender_id`), kolejne ogłoszenia aktualizują deal; z częściami — osobny deal i inwestycja na część, deale łączy wspólny `tender_notice_number` (D132), kolejne ogłoszenia aktualizują deal danej części | TC-DEAL-016, TC-DEAL-017 | nowa treść (decyzja Marka 2026-10-23, decisions @develop po PR #30); zachowanie n8n testowane w kontrakcie n8n; lookup postępowanie + część — etap kodu (D32, TC-DEAL-016 krok 7) |
+| D32 | Idempotencja `om_sync` + hash payloadu; na etapie kodu klucz push postępowanie + część (D31, D132), do tego czasu bez zmian | TC-DEAL-016 (krok 7, etap kodu) | idempotencja testowana w kontrakcie n8n; tu tylko lookup deala części |
 | D33 | Obszar n8n / integracje | N/A | poza zakresem modułów kalkulacji/harmonogramu, testowane w kontrakcie n8n |
 | D34 | Obszar n8n / integracje | N/A | poza zakresem modułów kalkulacji/harmonogramu, testowane w kontrakcie n8n |
 | D35 | Obszar n8n / integracje | N/A | poza zakresem modułów kalkulacji/harmonogramu, testowane w kontrakcie n8n |
@@ -2538,7 +2540,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 | D95 | Waluta bez kursu w żadnej tabeli NBP nie może być walutą oferty ani pozycji; waluty zostają aktywne | TC-CUR-012, TC-CUR-014 | v1: TC-CUR-014; kod błędu — propozycja |
 | D96 | Jedno źródło kursu w sumie deali (wyłączenie dostawcy tabeli C); błąd daty do upstream jako zgłoszenie | TC-CUR-011 | konfiguracja etapu kodu; suma deali z jednego źródła — TC-CUR-011 |
 | D97 | Poprawka platformy dla jednej waluty bazowej pobrana z pierwszym PR modułu | N/A | zależność etapu kodu, brak zachowania modułu |
-| D132 | Postępowanie z częściami: inwestycja i deal na część, `tender_notice_number` (tylko do odczytu, bez unikalności); primary per część; v1 identyfikator `bzp_notice_part` | TC-DEAL-017 | rejestr @82c4ec3 (PR #30); bez warunku od decyzji Marka 2026-10-23 |
+| D132 | Postępowanie z częściami: inwestycja i deal na część, wspólny `tender_notice_number` (tylko do odczytu, bez unikalności, poza dopasowaniem); primary per inwestycja; v1 identyfikator `bzp_notice_part` `{numer}#{część}`, bez `bzp_notice_number` | TC-DEAL-017, TC-DEAL-016 (krok 7) | decisions @develop (po PR #30); aktywna bez warunku |
 
 **Decyzje zastąpione — nie testujemy:**
 - D3 — zastąpione przez D4
@@ -2553,6 +2555,13 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 ---
 
 ## Changelog
+
+### Rev 8c — 2026-10-23 (inputy Cezara do r8)
+
+- TC-DEAL-016: nowy krok 7 — lookup po postępowaniu + części, deal części 2 nietknięty; etap kodu (D32)
+- Załącznik: wiersze D31, D32 (teraz TC-DEAL-016 krok 7) i D132 doprecyzowane; podstawa decisions @develop po PR #30
+- Sprawdzone bez zmian: TC-DEAL-017 pokrywa `tender_notice_number` (tylko do odczytu, bez unikalności, filtr) i `bzp_notice_part` (v1)
+- Liczba scenariuszy bez zmian: 143
 
 ### Rev 8b — 2026-10-23 (rozstrzygnięcie D31)
 
