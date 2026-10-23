@@ -3,7 +3,7 @@
 **Dokument**: SPEC ONLY (plan testów niezależny od specyfikacji PR #10, brak kodu)
 **Data**: 2026-10-19
 **Autor**: Copilot (plan testów na podstawie wymagań biznesowych Marka Adamskiego)
-**Rewizja**: rev 8 (2026-10-23, runda rev 8h) — waluta bez kursu w żadnej tabeli NBP: TC-CUR-012 przepisany (422 dla waluty oferty, kurs ręczny nie odblokowuje, CNY przechodzi), nowy TC-CUR-014 (v1, 422 dla waluty pozycji), wniosek 26 zamknięty, annex do D97; poprzednio runda rev 8g — TC-CUR-011: wyszukiwanie modułu Waluty o 00:30 czasu warszawskiego daje kurs z dnia poprzedniego, wysłanie oferty liczy datę w Europe/Warsaw, suma deali zaokrąglona do całości, godziny graniczne lato/zima; TC-CUR-001: zamrożony obraz bez źródła kursu; poprzednio rev 7 (runda rev 8f) — waluty przez moduł Waluty platformy (TC-CUR-002..007 przepisane, nowe TC-CUR-008..013), annex do D94; poprzednio rev 6 — zgodność z decyzjami koordynacyjnymi (`.ai/vision.md`, `.ai/decisions.md`, `.ai/om-architecture-checklist.md`) i rozstrzygnięciami Koordynatora z 2026-10-23; mapowanie scenariuszy na decyzje w załączniku „Traceability TC → D”
+**Rewizja**: rev 8a (2026-10-23, odbiór #20) — TC-CUR-012: usunięta zbędna linia „Krok 3: kurs ręczny nie odblokowuje…” (treść w linii kroku 3); poprzednio rev 8 (2026-10-23, runda PR D) — TC-CUR-012 i TC-CUR-014: wskazany krok zwracający 422 (samo ustawienie kursu ręcznego nie zwraca 422; 422 przy wysłaniu, odpowiednio przy powtórzeniu dodania pozycji); poprzednio runda rev 8h — waluta bez kursu w żadnej tabeli NBP: TC-CUR-012 przepisany (422 dla waluty oferty, kurs ręczny nie odblokowuje, CNY przechodzi), nowy TC-CUR-014 (v1, 422 dla waluty pozycji), wniosek 26 zamknięty, annex do D97; poprzednio runda rev 8g — TC-CUR-011: wyszukiwanie modułu Waluty o 00:30 czasu warszawskiego daje kurs z dnia poprzedniego, wysłanie oferty liczy datę w Europe/Warsaw, suma deali zaokrąglona do całości, godziny graniczne lato/zima; TC-CUR-001: zamrożony obraz bez źródła kursu; poprzednio rev 7 (runda rev 8f) — waluty przez moduł Waluty platformy (TC-CUR-002..007 przepisane, nowe TC-CUR-008..013), annex do D94; poprzednio rev 6 — zgodność z decyzjami koordynacyjnymi (`.ai/vision.md`, `.ai/decisions.md`, `.ai/om-architecture-checklist.md`) i rozstrzygnięciami Koordynatora z 2026-10-23; mapowanie scenariuszy na decyzje w załączniku „Traceability TC → D”
 
 ---
 
@@ -1652,8 +1652,8 @@ Waluty i kursy pochodzą z modułu Waluty platformy (lista walut aktywnych, walu
   4. Utwórz kalkulację bez deala w walucie CNY
   5. Sprawdź listę walut do wyboru w kalkulacji
 - **Oczekiwane wyniki**:
-  - Kroki 1–3: 422 z kodem błędu waluty bez źródła kursu (kod proponowany) i czytelnym komunikatem: „Waluta CNH nie ma kursu w tabeli A NBP i nie może być walutą oferty ani pozycji — wybierz inną walutę”; nic nie zapisane, K-CNH pozostaje robocza bez zamrożonego obrazu
-  - Krok 3: kurs ręczny nie odblokowuje waluty bez źródła kursu; brak kursu zgadywanego, krzyżowego i kursów kupna/sprzedaży z innej tabeli
+  - Kroki 1–2: 422 z kodem błędu waluty bez źródła kursu (kod proponowany) i czytelnym komunikatem: „Waluta CNH nie ma kursu w tabeli A NBP i nie może być walutą oferty ani pozycji — wybierz inną walutę”; nic nie zapisane
+  - Krok 3: samo ustawienie kursu ręcznego nie zwraca 422 (kurs ręczny jest dozwolony w wersji roboczej); 422 z tym samym kodem i komunikatem zwraca wysłanie wersji (mark-sent); K-CNH pozostaje robocza bez zamrożonego obrazu; brak kursu zgadywanego, krzyżowego i kursów kupna/sprzedaży z innej tabeli
   - Krok 1: błąd waluty bez źródła kursu różni się od błędu nieaktywnej waluty (CNH jest aktywna) i od błędu chwilowego braku kursu
   - Krok 4: 201 — CNY przechodzi walidację (jest w tabeli A); bez kursu z dnia wysłania i bez kursu ręcznego wysłanie kończy się błędem chwilowego braku kursu, nie błędem waluty bez źródła kursu
   - Krok 5: CNY i CNH nadal aktywne w module Waluty (nic nie dezaktywowane); CNH oznaczona jako niedostępna w wyborze (propozycja)
@@ -1683,7 +1683,8 @@ Waluty i kursy pochodzą z modułu Waluty platformy (lista walut aktywnych, walu
   3. Ustaw kurs ręczny pary CNH → PLN 0.5400 (kurs przykładowy) i powtórz krok 1
   4. Wyślij wersję
 - **Oczekiwane wyniki**:
-  - Kroki 1–3: 422 z kodem błędu waluty bez źródła kursu (kod proponowany) i czytelnym komunikatem wskazującym CNH i pozycję: „Waluta CNH nie ma kursu w tabeli A NBP i nie może być walutą oferty ani pozycji — wybierz inną walutę”; pozycja nie zapisana albo bez zmian
+  - Kroki 1–2: 422 z kodem błędu waluty bez źródła kursu (kod proponowany) i czytelnym komunikatem wskazującym CNH i pozycję: „Waluta CNH nie ma kursu w tabeli A NBP i nie może być walutą oferty ani pozycji — wybierz inną walutę”; pozycja nie zapisana albo bez zmian
+  - Krok 3: samo ustawienie kursu ręcznego pary CNH → PLN nie zwraca 422 (kurs ręczny jest dozwolony w wersji roboczej); 422 z tym samym kodem i komunikatem zwraca powtórzony krok 1; pozycja nie zapisana
   - Krok 2: pozycja zostaje w EUR; suma kalkulacji bez zmian (4250.00 PLN)
   - Krok 4: wysłanie przechodzi; zamrożony obraz zawiera tylko parę EUR → PLN, brak wpisu dla CNH
 
@@ -2533,6 +2534,17 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 ---
 
 ## Changelog
+
+### Rev 8a — 2026-10-23 (odbiór #20)
+
+- TC-CUR-012: usunięta stara linia „Krok 3: kurs ręczny nie odblokowuje waluty bez źródła kursu…”; zakaz kursu zgadywanego, krzyżowego i z innej tabeli dopisany do linii kroku 3
+- Liczba scenariuszy bez zmian: 142
+
+### Rev 8 — 2026-10-23 (runda PR D)
+
+- TC-CUR-012: kroki 1–2 → 422; krok 3 — samo ustawienie kursu ręcznego nie zwraca 422, 422 zwraca wysłanie wersji (zgodnie z §3.10 speki kalkulacji i D95)
+- TC-CUR-014: kroki 1–2 → 422; krok 3 — samo ustawienie kursu ręcznego nie zwraca 422, 422 zwraca powtórzony krok 1
+- Liczba scenariuszy bez zmian: 142
 
 ### Rev 8 — 2026-10-23 (runda rev 8h)
 
