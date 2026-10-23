@@ -125,7 +125,7 @@ Data „≤2026-10-20” oznacza decyzję obowiązującą na 2026-10-20, bez pot
 | D73 | 2026-10-23 | Q10 — cena zero (`unit_price = 0`) na pozycji. Wybór (b): dozwolona, ale mark-sent pokazuje ostrzeżenie (lista ostrzeżeń z potwierdzeniem jak w D58), bez blokady. Fazy: MVP (walidacja mark-sent, doprecyzowanie D58); v1/v2 bez zmian. | Rozstrzygnięte przez Koordynatora 2026-10-23 (P1: proces); costing §16 rev 8b (e9857ab7) | active |
 | D74 | 2026-10-23 | Q11 — akceptacja nowych zależności (costing §18a), zgodnie z rekomendacją Koda: `exceljs` — tak (costing MVP import, v1 eksport; schedule v1); siatka — najpierw `packages/ui` (`DataTable` + `InlineEditors`), `react-data-grid` tylko po PoC i akceptacji; Gantt — własny (D21, bez SVAR PRO), `@svar-ui/react-gantt` MIT core tylko jako PoC w v1 schedule, potem osobna decyzja; `xml2js` — decyzja dopiero w v2. Fazy: MVP `exceljs` + `packages/ui`; v1 PoC `@svar-ui`; v2 `xml2js`. | Rozstrzygnięte przez Koordynatora 2026-10-23 (P1: proces) — do potwierdzenia przez Marka, jeśli kwestia biznesowa; costing §16 rev 8b (e9857ab7) | active |
 
-## Decyzje D75–D82 (2026-10-23)
+## Decyzje D75–D83 (2026-10-23)
 
 | # | Data | Decyzja | Uzasadnienie / źródło | Status |
 |---|---|---|---|---|
@@ -137,6 +137,7 @@ Data „≤2026-10-20” oznacza decyzję obowiązującą na 2026-10-20, bez pot
 | D80 | 2026-10-23 | Następnik kamienia milowego (czas trwania 0) startuje w tym samym dniu co kamień milowy (FS bez +1; doprecyzowanie D55). Fazy: v1 (auto-scheduling). | Rozstrzygnięte przez Koordynatora 2026-10-23 (P1, Marek sceduje rozstrzygnięcia na Koordynatora poza Q6) | active |
 | D81 | 2026-10-23 | Wartość deala ustawiona przez apply-to-deal wygrywa; n8n aktualizuje tylko pola przetargowe (szacunkowa wartość zamówienia) i nigdy nie nadpisuje wartości deala, gdy jest powiązana kalkulacja (doprecyzowanie D31/D40/D64/D66). Fazy: MVP (razem z apply-to-deal); wymaga zmiany kontraktu n8n (Enka). | Rozstrzygnięte przez Koordynatora 2026-10-23 (P1, Marek sceduje rozstrzygnięcia na Koordynatora poza Q6) | active |
 | D82 | 2026-10-23 | Speka nie rozstrzyga o SVAR (w tym §18a): Gantt jest własny, `@svar-ui` tylko jako PoC w v1, potem osobna decyzja (doprecyzowanie D74). Fazy: v1 PoC; decyzja po PoC. | Rozstrzygnięte przez Koordynatora 2026-10-23 (P1, Marek sceduje rozstrzygnięcia na Koordynatora poza Q6) | active |
+| D83 | 2026-10-23 | Split = podział inwestycji (wydzielenie kalkulacji i ofert do nowej inwestycji; nie podział oferty) przechodzi z v2 do v1, nie do MVP (wcześniej v2 w costing §2.2). W kroku podziału użytkownik wskazuje ofertę główną (`primary`) dla każdej z inwestycji po podziale; domyślnie zaznaczona jest dotychczasowa (oryginał). Obowiązują zasady primary z D51/D65: jedna oferta `primary` na inwestycję i ten sam komunikat „Istnieje już oferta dla innego wykonawcy — wskaż, która jest główna” (D51). Fazy: v1. | Rozstrzygnięte przez Koordynatora 2026-10-23 | active |
 
 ## Otwarte
 

@@ -6,7 +6,7 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-19 |
-| **Rewizja** | 2026-10-23 (rev 8d — redakcja `redoInput` w `action_logs`, interceptor D81, retencja `pc_command_undo_payloads`, pierwszeństwo kursu ręcznego (D71), źródło decyzji b544719; poprzednio rev 8c, rev 8b 2026-10-23, rev 8a 2026-10-20) |
+| **Rewizja** | 2026-10-23 (rev 8e — D83: split inwestycji w v1, nity n8n przy D81 (`bulk-update-owner`, lookup + POST/PUT, `auth: null`, R21); poprzednio rev 8d, rev 8c, rev 8b 2026-10-23, rev 8a 2026-10-20) |
 | **Moduł** | `project_costing` (`apps/mercato/src/modules/project_costing`) |
 | **Nisza v1** | Prefabrykacja żelbetowa |
 | **Docelowo** | Cała branża budowlana (multi-segment) |
@@ -24,7 +24,7 @@
 - **Oferta główna/alternatywna:** własna encja-rozszerzenie `pc_deal_offer_roles` (deklaracja w `data/extensions.ts`), partial unique na `primary`, przełączenie jedną komendą w jednej transakcji. Zero zapisów do pól/tabel `customers` (jedyny wyjątek: jawna komenda `customers.deals.update` w apply-to-deal, uruchamiana przez użytkownika).
 - **Ukryta marża = ukryty koszt** dla roli bez `project_costing.view_margin`; reguła obowiązuje we wszystkich kanałach (API, query_index, search, audit, eventy, eksport, PDF, compare, analityka, snapshot).
 - **Firma = organizacja OM.** Ustawienia per organizacja przez `ModuleConfigService` (`module_configs`), bez własnej tabeli `pc_settings`.
-- **Inwestycja = jedna encja `pc_investments`** (D63, kanoniczna; MVP minimalnie: ręczne wskazanie z podpowiedzią po kodzie; v1: identyfikatory zewnętrzne, dopasowanie, merge). Inwestycje zakłada handlowiec (n8n ich nie tworzy). `klin:project` importujemy po `--dry-run` i akceptacji raportu, potem wyłączamy.
+- **Inwestycja = jedna encja `pc_investments`** (D63, kanoniczna; MVP minimalnie: ręczne wskazanie z podpowiedzią po kodzie; v1: identyfikatory zewnętrzne, dopasowanie, merge i split — D83). Inwestycje zakłada handlowiec (n8n ich nie tworzy). `klin:project` importujemy po `--dry-run` i akceptacji raportu, potem wyłączamy.
 - **Zaokrąglenia (D62/D16):** half-up do 2 miejsc per linia; sumy = suma zaokrąglonych linii; konfigurowalne per organizacja (`rounding.*`).
 - **Zakres faz:** §14 — MVP/v1/v2 jako listy funkcji i encji; estymaty w dniach usunięte (P11).
 
@@ -372,7 +372,7 @@ Snapshot tworzony przy `mark-sent`. `snapshot_data` zawiera: lines (line_type, l
 
 #### ~~`pc_calculation_audit_log`~~ — usunięte w rev 8a
 
-Audyt akcji (mark-sent, new-revision, accept/reject, activate, apply-to-deal, recalc-from-catalog, set-primary, merge inwestycji, importy) pochodzi z `audit_logs` (`action_logs`) zapisywanego przez komendy. Powód „Nowej rewizji” i inne parametry akcji = metadane/payload komendy. Pola kosztu i marży w `snapshot_before`/`snapshot_after`/`changes_json` są redagowane (§4.3). Lista pól audytu: §0.3.
+Audyt akcji (mark-sent, new-revision, accept/reject, activate, apply-to-deal, recalc-from-catalog, set-primary, merge i split inwestycji, importy) pochodzi z `audit_logs` (`action_logs`) zapisywanego przez komendy. Powód „Nowej rewizji” i inne parametry akcji = metadane/payload komendy. Pola kosztu i marży w `snapshot_before`/`snapshot_after`/`changes_json` są redagowane (§4.3). Lista pól audytu: §0.3.
 
 #### `pc_calculation_pdf_attachments` — PDF per wersja
 
@@ -432,7 +432,7 @@ Indeksy: `(organization_id, tenant_id, status)`; MVP: `(organization_id, tenant_
 
 **MVP (D50):** inwestycję zakłada handlowiec (n8n ich nie tworzy — D63) albo wybiera istniejącą z podpowiedzi po kodzie `INV-…` lub nazwie. Bez identyfikatorów zewnętrznych, bez automatycznego dopasowania i bez merge — to v1.
 
-**Merge inwestycji (v1)**: endpoint `POST /api/project-costing/investments/:id/merge` (body: `{ targetId }`). Przenosi kalkulacje (`pc_calculations.investment_id`), role ofert (`pc_deal_offer_roles.investment_id`) i identyfikatory (`pc_investment_identifiers`) na `targetId`; ustawia `status = 'merged'`, `merged_into_id = targetId`; audyt przez komendę `project_costing.investments.merge` (`audit_logs`). Idempotent. Gdy po merge'u w `targetId` byłyby dwie oferty `primary`, komenda wymaga wskazania jednej (partial unique, `pc_deal_offer_roles`). **Split** (v2): wydzielenie kalkulacji do nowej inwestycji; odwraca merge przez nowy rekord.
+**Merge inwestycji (v1)**: endpoint `POST /api/project-costing/investments/:id/merge` (body: `{ targetId }`). Przenosi kalkulacje (`pc_calculations.investment_id`), role ofert (`pc_deal_offer_roles.investment_id`) i identyfikatory (`pc_investment_identifiers`) na `targetId`; ustawia `status = 'merged'`, `merged_into_id = targetId`; audyt przez komendę `project_costing.investments.merge` (`audit_logs`). Idempotent. Gdy po merge'u w `targetId` byłyby dwie oferty `primary`, komenda wymaga wskazania jednej (partial unique, `pc_deal_offer_roles`). **Split inwestycji (v1, D83)**: endpoint `POST /api/project-costing/investments/:id/split` (body: `{ newInvestment: { name }, dealIds, primaryDealIds: { source, target } }`), komenda `project_costing.investments.split` (`audit_logs`, ACL `project_costing.admin`). W jednej transakcji tworzy nową inwestycję (`investments.create`, nowy kod `INV-…`) i przenosi na nią wskazane deale: ich kalkulacje (`pc_calculations.investment_id`) i role ofert (`pc_deal_offer_roles.investment_id`); identyfikatory zewnętrzne zostają przy inwestycji źródłowej. Odwraca merge przez nowy rekord (rekord `merged` nie jest przywracany). Ofertę główną każdej z dwóch inwestycji wskazuje użytkownik w kroku podziału (D83); domyślnie zaznaczona jest oferta oryginalna, czyli dotychczasowa `primary` inwestycji źródłowej, w tej inwestycji, do której trafia. W inwestycji bez oferty oryginalnej użytkownik wskazuje główną w tym samym kroku (bez cichej automatyki, A18). Zasady primary jak w D51/D65: najwyżej jedna oferta `primary` na inwestycję (partial unique, `pc_deal_offer_roles`); próba zapisu dwóch `primary` w jednej inwestycji → 422 z komunikatem „Istnieje już oferta dla innego wykonawcy — wskaż, która jest główna” (D51) i bez zmian w danych. Split bez ofert w jednej z inwestycji jest dozwolony; pierwsza oferta dołączona później dostaje `primary` (D65). Undo: przywraca `investment_id` kalkulacji i ról oraz poprzednie role z `snapshotBefore`, a nową inwestycję usuwa (soft delete); tylko gdy od podziału nikt nie zmienił ról ani kalkulacji nowej inwestycji, inaczej 409 `UNDO_CONFLICT`.
 
 #### `pc_investment_identifiers` — zewnętrzne identyfikatory inwestycji (v1)
 
@@ -712,7 +712,7 @@ forecast_weighted   = active_version.subtotal_price × p / 100
 
 Widget dashboardu „Prognoza lejka” (v1, §11): obie metryki per etap lejka (D33) lub `expected_close_at` + osobny wiersz „Kalkulacje bez deala”. API zawsze liczy i filtruje po stronie serwera (z redakcją §4).
 
-### 3.12 Rola oferty (`pc_deal_offer_roles`), suma inwestycji i zarządzanie inwestycjami (MVP minimalnie — D50; dopasowanie i merge — v1)
+### 3.12 Rola oferty (`pc_deal_offer_roles`), suma inwestycji i zarządzanie inwestycjami (MVP minimalnie — D50; dopasowanie, merge i split — v1)
 
 **Rev 8a — usunięte:** podejście z custom field `cf_offer_role` (hardkodowany UUID definicji `73f8260a-…`, który nie istnieje w innym tenancie), EAV na encji obcego modułu, sekwencja dwóch komend `customers.deals.update` z akcją kompensującą i ryzyko R10. Rola oferty jest daną `project_costing` (tabela `pc_deal_offer_roles`, §2.2).
 
@@ -779,7 +779,7 @@ type InvestmentMatchCandidate = {
 
 Przyciski: „Tak — połącz" / „Nie — nowa inwestycja" / „Ignoruj".
 
-**Merge/split inwestycji (v1)** (patrz §2.2 `pc_investments`): `POST .../merge`, komenda `project_costing.investments.merge` (audyt w `audit_logs`).
+**Merge/split inwestycji (v1)** (patrz §2.2 `pc_investments`): `POST .../merge`, komenda `project_costing.investments.merge`; `POST .../split`, komenda `project_costing.investments.split` (D83: split w v1, nie w MVP; ofertę główną wskazuje użytkownik w kroku podziału, domyślnie oferta oryginalna; jedna `primary` na inwestycję i komunikat D51 jak przy `offer_roles.assign`/`set_primary`, D65). Obie z audytem w `audit_logs`.
 
 `pg_trgm` wymagane w v1: `CREATE EXTENSION IF NOT EXISTS pg_trgm;` w migracji v1.
 
@@ -1152,6 +1152,7 @@ POST      /api/project-costing/investments/:id/offer-roles/set-primary   (MVP; b
 
 GET/POST/DELETE /api/project-costing/investments/:id/identifiers[/:identifierId]   (v1)
 POST      /api/project-costing/investments/:id/merge   (v1; body: { targetId })
+POST      /api/project-costing/investments/:id/split   (v1, D83; body: { newInvestment: { name }, dealIds, primaryDealIds: { source, target } }; dwie primary w jednej inwestycji → 422 z komunikatem D51)
 GET       /api/project-costing/investments/match-candidates?name=&location=&identifiers[]=   (v1)
 ```
 
@@ -1182,7 +1183,7 @@ Wersje z `status != 'draft'`: API odrzuca PATCH/DELETE z 409. Odpowiedzi zawiera
 - działa **tylko z wersji aktywnej** (`is_active_version = true`, D59); inna wersja → 422 `NOT_ACTIVE_VERSION`, a przycisk jest nieaktywny;
 - wykonanie = komenda właściciela `customers.deals.update` (`packages/core/src/modules/customers/commands/deals.ts`) przez `commandBus` z kontekstem użytkownika — z audytem, undo i ACL `customers` (użytkownik musi mieć prawo edycji deala oraz `project_costing.apply_to_deal`);
 - costing nie pisze bezpośrednio do tabel `customers` ani do custom fieldów deala.
-- **Pierwszeństwo wartości (D81):** gdy deal ma powiązaną kalkulację (`pc_calculations.deal_id`, wersja aktywna), wartość deala ustala apply-to-deal; n8n aktualizuje tylko pola przetargowe i nie nadpisuje `value_amount`/`value_currency` (mechanizm: interceptor §10.2; R20, R21).
+- **Pierwszeństwo wartości (D81):** gdy deal ma powiązaną kalkulację (`pc_calculations.deal_id`, wersja aktywna), wartość deala ustala apply-to-deal; n8n aktualizuje tylko pola przetargowe i nie nadpisuje `value_amount`/`value_currency` (mechanizm: interceptor §10.2; R20, R21). Interceptor przepuszcza bez błędu i bez zmian wywołania z `auth: null` (np. z workerów bulk) — brak `auth` to nie n8n (§10.2).
 
 ```typescript
 await commandBus.execute({ commandId: 'customers.deals.update',
@@ -1263,7 +1264,7 @@ Role OM: `superadmin`, `admin`, `employee` (`packages/core/src/modules/customers
 | `project_costing.apply_to_deal` | Zastosuj wartość do deala (§8.7) | MVP | ✅ | ❌ |
 | `project_costing.import` | Import XLSX linii i harmonogramu do partii (`xlsx_import`) | MVP | ✅ | ✅ |
 | `project_costing.export` | Eksport XLSX/CSV (PDF oferty wymaga `view` + `view_prices`) | v1 | ✅ | ✅ |
-| `project_costing.admin` | Ustawienia (w tym `rounding.*`), cennik, kategorie, typy elementów; merge inwestycji (v1) | MVP | ✅ | ❌ |
+| `project_costing.admin` | Ustawienia (w tym `rounding.*`), cennik, kategorie, typy elementów; merge i split inwestycji (v1, D83) | MVP | ✅ | ❌ |
 | `project_costing.new_revision` | „Nowa rewizja” wersji wysłanej (D57) | v1 | ✅ | ❌ |
 | `project_costing.manage_investments` | Zakładanie i edycja inwestycji, dołączanie kalkulacji do inwestycji | MVP | ✅ | ✅ |
 | `project_costing.manage_offer_roles` | Przypisanie i zmiana oferty głównej (D50) | MVP | ✅ | ✅ |
@@ -1310,9 +1311,10 @@ Payload każdego eventu = `{ id, organizationId, tenantId, dealId?, investmentId
   - `id: 'project_costing.d81-deal-value-guard'`, `targetCommand` na `customers.deals.create` i `customers.deals.update` (jedyne komendy zapisu deala w `customers/commands/deals.ts`), hook `beforeExecute`;
   - **bez `features`** — runner pomija interceptor, gdy aktor nie ma wymienionych feature'ów (`authorizeFeatures` w `command-interceptor-runner.ts`), a klucz API n8n nie ma feature'ów `project_costing`;
   - rozpoznanie n8n: `context.auth.isApiKey === true` **i** `context.auth.keyId` na liście `integrations.n8n_api_key_ids` w ustawieniach modułu (`module_configs`, §2.2); samo `isApiKey` nie wystarcza (inne integracje i klucze użytkowników mają wartość deala zapisywać normalnie);
+  - **`auth: null`** (`CommandRuntimeContext.auth` jest typu `AuthContext | null`, np. wywołania z workerów bulk bez aktora): interceptor sprawdza `context.auth?.isApiKey` bezpiecznie (bez dereferencji `null`); brak `auth` to nie n8n, więc `beforeExecute` zwraca „przepuść” bez `modifiedInput` i bez błędu; input przechodzi bez zmian;
   - gdy deal ma powiązaną kalkulację (`pc_calculations.deal_id`, `deleted_at IS NULL`) i input zawiera `valueAmount` lub `valueCurrency`: `modifiedInput: { valueAmount: undefined, valueCurrency: undefined }` — runner scala `modifiedInput` płytko, więc pola są usuwane przez ustawienie `undefined`, a pozostałe pola inputu przechodzą bez zmian; dotyczy to też `cf_offer_role` i pozostałych `cf_*`, które n8n wysyła zgodnie z D64 do czasu migracji;
   - audyt: `metadata: { logContext: { d81: { strippedFields: ['valueAmount','valueCurrency'], calculationId } } }` — klucz `logContext` trafia do kontekstu wpisu `action_logs` komendy `customers.deals.update`; bez kwot;
-  - inne ścieżki zapisu n8n: upsert po identyfikatorze przetargu i trasy zbiorcze muszą wykonywać `customers.deals.create`/`update` przez `commandBus` (np. worker `bulk-update-stage` woła `customers.deals.update` per rekord); ścieżka zapisu deala z kluczem n8n z pominięciem `commandBus` jest niezgodna z D81 — test integracyjny obejmuje create, update, upsert i trasę zbiorczą wywołane kluczem z listy;
+  - inne ścieżki zapisu n8n: lookup + POST/PUT po stronie n8n (przez `makeCrudRoute`, czyli `commandBus`) i trasy zbiorcze muszą wykonywać `customers.deals.create`/`update` przez `commandBus` (workery `bulk-update-stage` i `bulk-update-owner` wołają `customers.deals.update` per rekord); ścieżka zapisu deala z kluczem n8n z pominięciem `commandBus` jest niezgodna z D81 — test integracyjny obejmuje create, update, lookup + POST/PUT i trasę zbiorczą wywołane kluczem z listy oraz wywołanie z `auth: null` (worker bulk), które przechodzi bez błędu i bez zmiany inputu;
   - zapis wartości przez użytkownika (apply-to-deal, edycja deala) i przez klucze spoza listy nie jest zmieniany (R20, R21).
 
 ### 10.3 Integracja z `project_schedule` (rev 8a)
@@ -1410,7 +1412,7 @@ Rev 8b (P11): estymaty w dniach usunięte ze specyfikacji. Fazy opisujemy wyłą
 
 **Encje MVP:** `pc_cost_categories`, `pc_element_types`, `pc_price_sources` (seed), `pc_price_catalog`, `pc_calculations`, `pc_calculation_lines` (sub-resource), `pc_offer_snapshots`, `pc_calculation_pdf_attachments`, `pc_import_column_mappings`, `pc_production_batches`, `pc_investments` (minimalnie), `pc_deal_offer_roles`, `pc_document_sequences` (systemowa).
 
-**Poza MVP:** Gantt, formuły, wiersz sumy częściowej (D78), marża po zamknięciu deala (D75), zakres „tylko własne” (D79), eksport XLSX, tryb B, reguły cennika, segmenty, szablony, identyfikatory i dopasowanie inwestycji, merge, „Nowa rewizja”, accepted/rejected, porównanie wersji, koszty rzeczywiste, analityka.
+**Poza MVP:** Gantt, formuły, wiersz sumy częściowej (D78), marża po zamknięciu deala (D75), zakres „tylko własne” (D79), eksport XLSX, tryb B, reguły cennika, segmenty, szablony, identyfikatory i dopasowanie inwestycji, merge, split (D83), „Nowa rewizja”, accepted/rejected, porównanie wersji, koszty rzeczywiste, analityka.
 
 ### `project_costing` — v1
 
@@ -1419,7 +1421,7 @@ Rev 8b (P11): estymaty w dniach usunięte ze specyfikacji. Fazy opisujemy wyłą
 2. Wielopoziomowe reguły cennika (`pc_price_list_rules`).
 3. Segmenty.
 4. Szablony kalkulacji.
-5. Inwestycje — pełne: identyfikatory zewnętrzne (priorytet D6: e-Zamówienia > TED > BIP > INV), dopasowanie (identyfikator → pg_trgm), merge.
+5. Inwestycje — pełne: identyfikatory zewnętrzne (priorytet D6: e-Zamówienia > TED > BIP > INV), dopasowanie (identyfikator → pg_trgm), merge, split z wyborem oferty głównej (D83).
 6. Pełny cykl wersji: „Nowa rewizja” jako jedna akcja (D57), `accepted`/`rejected`/`superseded`.
 7. Porównanie wersji (`/compare` + UI).
 8. Koszty rzeczywiste + raport budżet vs wykonanie.
@@ -1476,8 +1478,8 @@ Każda encja i trasa z fazy przechodzi przez konwencje repo: migracja i snapshot
 | R17 | Brak tabeli A NBP z dnia mark-sent (weekend, święto, przed publikacją) albo niedostępne API NBP (gdy Q6 ≠ (a)) | Waluty | Średnia | Kurs ręczny ma pierwszeństwo przed NBP; bez niego ostatnia opublikowana tabela A z `effective_date` w snapshocie; ręczna korekta kursu przed mark-sent (D71; po mark-sent zablokowana); przy braku kursu mark-sent zwraca 422 `FX_RATE_UNAVAILABLE` z prośbą o ręczny kurs | Niskie |
 | R18 | Deal ponownie otwarty po wygranej, a harmonogram wykonawczy wygląda na obowiązujący | Dane / harmonogram | Niska | Flaga „deal ponownie otwarty” (`reopened_at`) i badge w UI, bez usuwania danych (D72); ponowne `won` czyści flagę | Niskie |
 | R19 | `action_logs.command_payload` albo tabela pre-image/post-image (`pc_command_undo_payloads`) staje się kanałem wycieku kosztu i marży | Bezpieczeństwo / audyt | Średnia | `redoInput`, `payload`, snapshoty i `changes` zredagowane w `buildLog` (§0.3 pkt 1); tabela bez trasy API, indeksu, wyszukiwania i eventów; odczyt tylko w `undo()`/`redo()` po `authorizeReplay`, z filtrem org/tenant; twarde usuwanie przy mark-sent, usunięciu kalkulacji i braku wpisu `action_logs` (§0.3 pkt 6). Testy integracyjne: po każdej komendzie z polem wrażliwym `action_logs.command_payload`, `snapshot_before`, `snapshot_after` i `changes_json` nie zawierają wartości kosztu, narzutu ani marży; użytkownik bez `view_margin` nie cofnie ani nie ponowi zmiany kosztu (403) | Niskie |
-| R20 | Push n8n nadpisuje wartość deala ustawioną przez apply-to-deal (D31, D40) | Integracja n8n | Średnia | D81: interceptor `project_costing` (bez `features`) na `customers.deals.create`/`update` rozpoznaje n8n po `isApiKey` i `keyId` z `integrations.n8n_api_key_ids`; usuwa `valueAmount`/`valueCurrency` przez `undefined`, reszta inputu (w tym `cf_*`, D64) przechodzi; audyt w `logContext`; test integracyjny create/update/upsert/trasa zbiorcza (§10.2) | Niskie |
-| R21 | Kontrakt Enki/n8n nie zostanie zmieniony (n8n dalej wysyła wartość deala) albo n8n zapisze deal z pominięciem `commandBus` lub kluczem spoza listy | Integracja n8n / zależność zewnętrzna | Średnia | D81 wymaga zmiany kontraktu po stronie Enki (poza tymi specami); do tego czasu interceptor jest jedyną ochroną; lista `integrations.n8n_api_key_ids` utrzymywana przy rotacji kluczy (checklista wdrożenia); test kontraktowy z Enką przed włączeniem apply-to-deal | Średnie — zależy od zmiany po stronie n8n |
+| R20 | Push n8n nadpisuje wartość deala ustawioną przez apply-to-deal (D31, D40) | Integracja n8n | Średnia | D81: interceptor `project_costing` (bez `features`) na `customers.deals.create`/`update` rozpoznaje n8n po `isApiKey` i `keyId` z `integrations.n8n_api_key_ids`; usuwa `valueAmount`/`valueCurrency` przez `undefined`, reszta inputu (w tym `cf_*`, D64) przechodzi; audyt w `logContext`; `auth: null` (workery bulk `bulk-update-stage`, `bulk-update-owner`) = nie n8n, przepuszczane bez błędu; test integracyjny create/update/lookup + POST/PUT/trasa zbiorcza oraz przypadek `auth: null` (§10.2) | Niskie |
+| R21 | Kontrakt Enki/n8n nie zostanie zmieniony (n8n dalej wysyła wartość deala) albo n8n zapisze deal z pominięciem `commandBus` lub kluczem spoza listy | Integracja n8n / zależność zewnętrzna | Średnia | D81 wymaga zmiany kontraktu po stronie Enki (poza tymi specami); do tego czasu interceptor jest jedyną ochroną; lista `integrations.n8n_api_key_ids` utrzymywana przy rotacji kluczy (checklista wdrożenia); test kontraktowy z Enką przed włączeniem apply-to-deal; zmiana kontraktu n8n i klucz API n8n czekają na wdrożenie modułu i migrację (Q2/D64), klucz API generuje Marek (zadanie ClickUp 869fm3281) | Średnie — zależy od zmiany po stronie n8n |
 
 (R10 z rev 7 — sekwencja dwóch komend `cf_offer_role` — usunięte: rola oferty zmieniana jedną komendą w jednej transakcji, §3.12.)
 
@@ -1485,7 +1487,7 @@ Każda encja i trasa z fazy przechodzi przez konwencje repo: migracja i snapshot
 
 ## 16. Pytania otwarte do Marka (rev 8b)
 
-**Zamknięte** (`.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`): D1–D82):
+**Zamknięte** (`.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`): D1–D82; D83 — `.ai/decisions.md` z tego PR, gałąź `spec/rev8e`):
 
 | # | Temat | Rozstrzygnięcie |
 |---|---|---|
@@ -1510,6 +1512,7 @@ Każda encja i trasa z fazy przechodzi przez konwencje repo: migracja i snapshot
 | — | Następnik kamienia milowego | D80: startuje tego samego dnia (schedule §3a.1) |
 | — | Wartość deala po apply-to-deal a push n8n | D81: wartość z apply-to-deal wygrywa; n8n aktualizuje tylko pola przetargowe (§8.7, §10.2, R20, R21) |
 | — | SVAR w §18a | D82: §18a nie przesądza SVAR; PoC w v1 (§18a) |
+| — | Split inwestycji i oferta główna | D83: v1; ofertę główną wskazuje użytkownik w kroku podziału, domyślnie oferta oryginalna; jedna `primary` na inwestycję, komunikat D51 (§2.2, §3.12) |
 
 **Otwarte (biznesowe, rev 8b):**
 
@@ -1598,7 +1601,7 @@ apps/mercato/src/modules/project_costing/
 │   │                       production-forecast}/
 │   ├── calculation-lines/ + batch/
 │   ├── cost-entries/ + import/ | deals/:dealId/budget-vs-actual/
-│   ├── investments/[id]/{identifiers,merge,match-candidates,offer-roles}/
+│   ├── investments/[id]/{identifiers,merge,split,match-candidates,offer-roles}/
 │   └── import-column-mappings/
 ├── backend/project-costing/
 │   ├── settings/, segments/, templates/, price-sources/, price-catalog/
@@ -1628,7 +1631,7 @@ apps/mercato/src/modules/project_costing/
     ├── import.service.ts
     ├── visibility.ts
     ├── forecast.ts               # metryki nieważona i ważona (§3.11)
-    ├── investment.service.ts     # match candidates, merge/split
+    ├── investment.service.ts     # match candidates, merge, split (v1, D83)
     ├── offer-roles.service.ts    # assign (D65), set-primary w jednej transakcji (MVP)
     ├── settings.ts               # projectCostingSettings: merge org → tenant → defaults
     └── schedule-source/
@@ -1698,11 +1701,11 @@ Brak punktów ⚠️. Ryzyka rezydualne: §15 (R1, R2, R15, R16).
 
 ---
 
-## 22. Decision traceability (D1–D82)
+## 22. Decision traceability (D1–D83)
 
-Źródło: `.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`, merge PR #13) dla D1–D82. D49 jest aktywna w fazie v1 (D75). Zakres D1–D82: 73 aktywnych i 9 zastąpionych. D70 i D71 są warunkowe — obowiązują, gdy Q6 ≠ (a) (Q6 otwarte, §16). Tabela obejmuje wszystkie aktywne decyzje; w kolumnach wskazane są sekcje, które je realizują, w obu specach (schedule ma skrót w schedule §21). Decyzje zastąpione nie są cytowane w tekście spec: D3 superseded by D4; D7 superseded by D63; D8 superseded by D10; D13 superseded by D48, D49; D27 superseded by D60; D28 superseded by D29; D29 superseded by D50; D39 superseded by D64 (z okresem przejściowym do migracji); D43 superseded by D63.
+Źródło: `.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`, merge PR #13) dla D1–D82; D83 — `.ai/decisions.md` z tego PR (gałąź `spec/rev8e`, Koordynator 2026-10-23). D49 jest aktywna w fazie v1 (D75). Zakres D1–D83: 74 aktywnych i 9 zastąpionych. D70 i D71 są warunkowe — obowiązują, gdy Q6 ≠ (a) (Q6 otwarte, §16). Tabela obejmuje wszystkie aktywne decyzje; w kolumnach wskazane są sekcje, które je realizują, w obu specach (schedule ma skrót w schedule §21). Decyzje zastąpione nie są cytowane w tekście spec: D3 superseded by D4; D7 superseded by D63; D8 superseded by D10; D13 superseded by D48, D49; D27 superseded by D60; D28 superseded by D29; D29 superseded by D50; D39 superseded by D64 (z okresem przejściowym do migracji); D43 superseded by D63.
 
-Bilans: 73 aktywnych, z czego 62 realizowanych w specach i 11 N/A (D4, D31, D32, D34, D35, D36, D37, D38, D41, D44, D46). N/A to kontrakt n8n → `customers` albo Enka: specy go nie zmieniają, moduły tylko czytają dane deala.
+Bilans: 74 aktywnych, z czego 63 realizowanych w specach i 11 N/A (D4, D31, D32, D34, D35, D36, D37, D38, D41, D44, D46). N/A to kontrakt n8n → `customers` albo Enka: specy go nie zmieniają, moduły tylko czytają dane deala.
 
 | D | Decyzja (skrót) | costing | schedule |
 |---|---|---|---|
@@ -1779,6 +1782,7 @@ Bilans: 73 aktywnych, z czego 62 realizowanych w specach i 11 N/A (D4, D31, D32,
 | **D80** | Następnik kamienia milowego (FS) startuje tego samego dnia (`P.start + lag`) | — | §3a.1, §16 (A16) |
 | **D81** | Wartość z apply-to-deal wygrywa; n8n aktualizuje tylko pola przetargowe i nie nadpisuje wartości deala z powiązaną kalkulacją | §8.7, §10.2, §15 (R20, R21), §19 (`commands/interceptors.ts`) | — |
 | **D82** | §18a nie przesądza SVAR; `@svar-ui` zostaje PoC w v1 | §15 (R16), §18a | §3.2, §14 (R13) |
+| **D83** | Split inwestycji w v1; ofertę główną wskazuje użytkownik w kroku podziału (domyślnie oryginał); jedna `primary` na inwestycję i komunikat D51 (D65) | §2.2 (`pc_investments`, split), §3.12, §8 (trasa `split`), §9 (`admin`), §14 v1, §19 | N/A — komenda costingu; rekord harmonogramu inwestycji (D77) zostaje przy inwestycji źródłowej (schedule §21) |
 
 Pytanie otwarte: Q6 (wiele walut, §16). Pozostałe pytania Q1–Q11 mają numery D (§16).
 
@@ -1788,6 +1792,7 @@ Pytanie otwarte: Q6 (wiele walut, §16). Pozostałe pytania Q1–Q11 mają numer
 
 | Data | Zmiana |
 |------|--------|
+| 2026-10-23 | **rev 8e** — **D83** (`.ai/decisions.md`, ten PR): split inwestycji przeniesiony z v2 do v1 — komenda `project_costing.investments.split`, trasa `POST .../split`, ofertę główną wskazuje użytkownik w kroku podziału (domyślnie oferta oryginalna), jedna `primary` na inwestycję i komunikat D51 (D65), undo z kontrolą konfliktu (§2.2, §3.12, §8, §9, §14, §19); traceability D1–D83 (§22, §16). **Nity n8n (D81):** worker `bulk-update-owner` obok `bulk-update-stage`; „upsert po identyfikatorze przetargu” → lookup + POST/PUT po stronie n8n przez `makeCrudRoute`/`commandBus` (§10.2); interceptor przepuszcza `auth: null` (workery bulk) bez błędu, z testem (§8.7, §10.2, R20); R21: zmiana kontraktu n8n i klucz API czekają na wdrożenie i migrację (Q2/D64), klucz generuje Marek (ClickUp 869fm3281). |
 | 2026-10-23 | **rev 8d** — odbiór 8324f29. **Wyciek:** komendy z polami wrażliwymi ustawiają `redoInput` na projekcję zredagowaną (bez tego szyna zapisuje surowy input w `action_logs.command_payload`); post-image `fields_after` w `pc_command_undo_payloads` dla `redo()`; komenda bez post-image = `replayable: false` (§0.3, §4.3, R19 z testem `command_payload`). **Retencja:** mark-sent, usunięcie kalkulacji, brak wpisu `action_logs` / redo; indeks `calculation_id`; lookup z filtrem org/tenant; jawny wyjątek od `deleted_at` (tabela techniczna, twarde usuwanie). **D81:** interceptor bez `features`, n8n = `isApiKey` + `keyId` z `integrations.n8n_api_key_ids`, pola przez `undefined` (merge płytki), audyt w `logContext`, `cf_*` przechodzą (D64), create/update/upsert/trasy zbiorcze, `commands/interceptors.ts` w §19, nowe R21 (kontrakt Enki). **D71:** kurs ręczny ma pierwszeństwo przed NBP (§3.10, A33, R17). Źródło decyzji: `.ai/decisions.md`@b544719 (`develop_OM_CRM`), D1–D82 (§16, §22). |
 | 2026-10-23 | **rev 8c** — decyzje D70–D74 (`.ai/decisions.md` 72a63c9) i D75–D82 (Koordynator 2026-10-23); traceability D1–D82 (§22). **D71:** ręczna korekta kursu przed mark-sent, po mark-sent zablokowana; brak tabeli → ostatnia opublikowana (A33), `FX_RATE_UNAVAILABLE` i R17 bez zmian. **D76:** blokada mark-sent z ujemną marżą dla osoby bez `view_margin` z komunikatem bez znaku i kwoty (§3.8, §4.3, §9). **Undo** pól bez wartości w audycie: pre-image w `pc_command_undo_payloads` (§0.3, §4.3, R19). **D81:** pierwszeństwo apply-to-deal przed push n8n (§8.7, §10.2, R20). **D75/D79:** marża po zamknięciu i „tylko własne” w v1 (§4.2–§4.4, §9, §14). **D78:** tylko automatyczne sumy sekcji. **D82:** §18a bez przesądzenia SVAR (§18a, R16). Spec-check: D60 → `module_configs` `pdf.*` (§2.2), `deleted_at` w `pc_production_batches`, usunięty martwy link do kontraktu n8n (§22). |
 | 2026-10-23 | **rev 8b** — spójność, review P1/P2, decyzje D47–D69 (`.ai/decisions.md` d818aa2), wnioski z planu testów. **P11:** usunięte wszystkie estymaty w dniach (tabele, sumy, narzut OM, rezerwy procentowe, porównania; też w starszych wierszach changelogu); §14 = listy funkcji i encji per faza; R15 bez rezerwy w dniach. **D50:** do MVP weszły minimalne `pc_investments`, `pc_deal_offer_roles` (D51 komunikat, D65 pierwsza = primary), linie `note`, partie ręczne + import harmonogramu XLSX `xlsx_import` (D56: zastąpienie po potwierdzeniu, raport odrzuconych wierszy); importy CLI `klin:project`/`cf_offer_role` jako wdrożeniowe. **D62/D16:** half-up 2 miejsca per linia, suma = suma zaokrąglonych linii, `rounding.*` per organizacja; wzory §3 przepisane; reszta trybu B na największej linii; zaokrąglanie bankierskie usunięte. **Jednostki:** słownik + własne `pc_unit_conversions` (v1), §2.4. **D6:** priorytet e-Zamówienia > TED > BIP > INV. **D57:** „Przelicz z cennika” (MVP) tylko bez override; „Nowa rewizja” = jedna akcja (zastępuje unlock + duplicate). **D58:** walidacja mark-sent (blokady/ostrzeżenia). **D59/D66:** apply-to-deal przycisk z wersji aktywnej, komenda `customers.deals.update`; `activate` w MVP. **D49:** `view_margin_after_close` przy won albo lost. **D61:** kalkulacja bez deala poza prognozą ważoną. **D68:** `employee` bez kosztów/marży. **D63/D64/D69:** §10.4, §3.12, R12, R13. **§16:** Q1–Q5 zamknięte; nowe Q6–Q11. **Kod p5:** §0.6 statusy deala (`closure_outcome`, etapy D33). **p6/p8:** write path (`calculate()`, `save_lines`, lock na nagłówku, pola pochodne nieprzechowywane, audyt). **p9:** przypadki brzegowe i bezpieczeństwo importu, limity 10 MB / 100 MB / 10 000 wierszy / 200 kolumn (wspólne ze schedule). **p10:** PDF na `pdf-lib`; siatka na `packages/ui`; §18a lista zależności. **p13:** `subtotal` usunięty. **p18:** numeracja sekwencjami PG (`pc_document_sequences`). **p19:** CHECK (marża < 1, narzut > −1), qty 0, ujemne ceny blokują mark-sent; bez SERIALIZABLE. **Plan testów:** pola audytu, jeden limit importu, definicja błędnego wiersza, narzut jako ułamek, prognoza nieważona + ważona, bezpieczeństwo XLSX, filtrowanie po stronie serwera. **A2–A5:** nagłówek „Kluczowe cechy”, cache `total_quantity` przez kolejkę, jedno źródło partii, `investment_key` na `pc_investments`. **Założenia przenumerowane** (stary → nowy): A1–A11 → A1–A11 (A1, A6, A8–A11 zaktualizowane); A12 usunięte; A13→A12, A14→A13, A15→A14, A16→A15, A17→A16, A18→A17, A19→A18, A20→A19, A21→A20, A22→A21, A23→A22, A24→A23, A25→A24, A26→A25, A27→A26, A28→A27; A29 usunięte; nowe A28–A32. **Follow-up (spec-check):** §22 Decision traceability — wszystkie aktywne decyzje z d818aa2 z sekcjami albo N/A z powodem, decyzje zastąpione tylko jako „superseded by”; rozstrzygnięcia Koordynatora 2026-10-23 Q7–Q11 zamknięte w §16 i wpisane w §0.6, §2.3, §3.8, §3.10, §6.1, §14 v2, §15 (R16–R18), §18a; Q6 otwarte; poprawka odsyłacza w §14 „Zakres zbiorczy” (schedule §12). |
