@@ -3,7 +3,7 @@
 **Dokument**: SPEC ONLY (plan testów niezależny od specyfikacji PR #10, brak kodu)
 **Data**: 2026-10-19
 **Autor**: Copilot (plan testów na podstawie wymagań biznesowych Marka Adamskiego)
-**Rewizja**: rev 7 (2026-10-23, runda rev 8f) — waluty przez moduł Waluty platformy (TC-CUR-002..007 przepisane, nowe TC-CUR-008..013), annex do D94; poprzednio rev 6 — zgodność z decyzjami koordynacyjnymi (`.ai/vision.md`, `.ai/decisions.md`, `.ai/om-architecture-checklist.md`) i rozstrzygnięciami Koordynatora z 2026-10-23; mapowanie scenariuszy na decyzje w załączniku „Traceability TC → D”
+**Rewizja**: rev 8 (2026-10-23, runda rev 8g) — TC-CUR-011: wyszukiwanie modułu Waluty o 00:30 czasu warszawskiego daje kurs z dnia poprzedniego, wysłanie oferty liczy datę w Europe/Warsaw, suma deali zaokrąglona do całości, godziny graniczne lato/zima; TC-CUR-001: zamrożony obraz bez źródła kursu; poprzednio rev 7 (runda rev 8f) — waluty przez moduł Waluty platformy (TC-CUR-002..007 przepisane, nowe TC-CUR-008..013), annex do D94; poprzednio rev 6 — zgodność z decyzjami koordynacyjnymi (`.ai/vision.md`, `.ai/decisions.md`, `.ai/om-architecture-checklist.md`) i rozstrzygnięciami Koordynatora z 2026-10-23; mapowanie scenariuszy na decyzje w załączniku „Traceability TC → D”
 
 ---
 
@@ -1478,7 +1478,7 @@ Waluty i kursy pochodzą z modułu Waluty platformy (lista walut aktywnych, walu
 - **Oczekiwane wyniki**:
   - Bez deala waluta = waluta bazowa (PLN); po podpięciu waluta = waluta deala
   - Kalkulacja jednowalutowa: jedna waluta na kalkulację, brak mieszanych walut w liniach
-  - W PLN kwoty mają 2 miejsca po przecinku; kurs = 1, zapisany w zamrożonym obrazie jako 1
+  - W PLN kwoty mają 2 miejsca po przecinku; kurs = 1, zapisany w zamrożonym obrazie jako 1, z pustym rodzajem i pustym źródłem kursu (ani „NBP tabela A”, ani „ręczny”)
   - Brak pobierania kursu (zero żądań do NBP, brak nowych wierszy w tabeli kursów)
 
 #### TC-CUR-002: Kurs z tabeli A NBP pobrany przy wysłaniu, zamrożony w wysłanej wersji
@@ -1620,21 +1620,25 @@ Waluty i kursy pochodzą z modułu Waluty platformy (lista walut aktywnych, walu
   - Krok 4: 403
   - Tenant istniejący przed wdrożeniem: ten sam wynik bez synchronizacji ról
 
-#### TC-CUR-011: Kurs zapisany dla daty D znajdowany dla tej samej daty, także w sumach deali w EUR
+#### TC-CUR-011: Kurs zapisany dla daty D znajdowany dla tej samej daty, także w sumach deali w EUR; godziny graniczne
 
 - **Priorytet**: P0 | **Etap**: MVP | **Poziom**: Integration
-- **Warunki wstępne**: Waluta bazowa PLN; strefa serwera i organizacji Europe/Warsaw; tabela A NBP z datą D = 2026-10-23, EUR 4.3281 (kurs przykładowy); deale: 2 w EUR (10 000 EUR i 5 000 EUR) i 1 w PLN (20 000 PLN)
+- **Warunki wstępne**: Waluta bazowa PLN; strefa serwera i organizacji Europe/Warsaw; w tabeli kursów tylko wiersze dostawcy „NBP tabela A” (bez wierszy tabeli C); tabela A z datą D-1 = 2026-10-22: EUR 4.3305 (kurs przykładowy) i z datą D = 2026-10-23: EUR 4.3281 (kurs przykładowy); dla przypadku zimowego tabela A z 2026-10-26: EUR 4.3350 i z 2026-10-27: EUR 4.3400 (kursy przykładowe); pobieranie kursów z sieci wyłączone w teście (dostawca podstawiony, bez automatycznego dociągania); deale: 2 w EUR (10 000 EUR i 5 000 EUR) i 1 w PLN (20 000 PLN)
 - **Kroki**:
-  1. Pobierz kursy z tabeli A dla daty D (zapis przez moduł Waluty)
-  2. Odczytaj kurs EUR → PLN dla daty D tak, jak robi to moduł Waluty (wyszukanie po dacie)
-  3. Odczytaj kurs dla daty D o godzinie 00:30 i 23:30 czasu warszawskiego
-  4. Otwórz podsumowanie deali (wartość lejka w walucie bazowej)
-  5. Wyślij kalkulację w EUR w dniu D
+  1. Zapisz kursy z tabeli A dla daty D przez dostawcę „NBP tabela A” (wiersz z datą D 00:00 UTC), nie przez dostawcę tabeli C
+  2. Wyszukaj kurs EUR → PLN tak, jak robi to moduł Waluty, dla chwili D 12:00 czasu warszawskiego
+  3. Wyszukaj kurs tak, jak robi to moduł Waluty, dla chwil: D 23:30 i D 00:30 czasu warszawskiego
+  4. Przy zegarze ustawionym na D 12:00 czasu warszawskiego otwórz podsumowanie deali (wartość lejka w walucie bazowej)
+  5. Wyślij kalkulację w EUR w dniu D o 12:00, o 23:30 i (na świeżych danych) o 00:30 czasu warszawskiego
+  6. Przypadek graniczny, czas letni (D = 2026-10-23, UTC+2): wyszukaj kurs jak moduł Waluty dla D 01:59:59 i D 02:00:00 czasu warszawskiego; wyślij kalkulację o D 01:59:59
+  7. Przypadek graniczny, czas zimowy (D = 2026-10-27, UTC+1): wyszukaj kurs jak moduł Waluty dla D 00:59:59 i D 01:00:00 czasu warszawskiego; wyślij kalkulację o D 00:59:59
 - **Oczekiwane wyniki**:
   - Krok 2: kurs znaleziony dla daty D (4.3281), bez cofania do dni poprzednich
-  - Krok 3: obie godziny dają kurs z daty D — data zapisu i data wyszukiwania są w tej samej konwencji
-  - Krok 4: podsumowanie nie zgłasza braku kursu EUR; suma = 15 000 × 4.3281 + 20 000 = 84 921.50 PLN; wszystkie deale przeliczone
-  - Krok 5: zamrożony obraz ma kurs z tabeli z datą D
+  - Krok 3: 23:30 → kurs z daty D (4.3281); 00:30 → kurs z daty D-1 (4.3305) — wyszukiwanie modułu Waluty liczy dzień w UTC, więc o 00:30 czasu warszawskiego widzi jeszcze poprzedni dzień; zachowanie udokumentowane w specyfikacji, nie błąd
+  - Krok 4: podsumowanie nie zgłasza braku kursu EUR (wszystkie deale przeliczone, lista walut bez kursu pusta); suma = 15 000 × 4.3281 + 20 000 = 84 921.50 → **84 922 PLN** (podsumowanie deali zaokrągla do pełnych złotych; przykład liczbowy na kursach przykładowych)
+  - Krok 5: każde z trzech wysłań zamraża kurs z tabeli z datą D (4.3281) — data wysłania to data kalendarzowa w Europe/Warsaw, niezależnie od godziny; w realnym NBP o 00:30 tabela z dnia D nie jest jeszcze opublikowana i wynikiem byłaby tabela z D-1
+  - Krok 6: 01:59:59 → D-1 (4.3305); 02:00:00 → D (4.3281); wysłanie o 01:59:59 → kurs z daty D (4.3281)
+  - Krok 7: 00:59:59 → 2026-10-26 (4.3350); 01:00:00 → 2026-10-27 (4.3400); wysłanie o 00:59:59 → kurs z 2026-10-27 (4.3400)
   - Test regresyjny dla opisanego w specyfikacji błędu daty (zapis o północy czasu warszawskiego, wyszukiwanie o północy UTC)
 
 #### TC-CUR-012: Waluta bez kursu w tabeli NBP — `FX_RATE_UNAVAILABLE`
@@ -2386,7 +2390,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
     - **Otwarte**: Dezaktywować takie waluty (dziś CNH), zostawić je z kursem ręcznym czy dodać inne źródło kursu?
     - **Do czasu decyzji**: wysłanie bez kursu ręcznego kończy się błędem braku kursu (TC-CUR-012).
 
-27. **Kurs zapisany dla daty nie jest znajdowany dla tej samej daty** (TC-CUR-011) — opisane w specyfikacji kalkulacji (ryzyko daty kursu); scenariusz regresyjny P0.
+27. **Kurs zapisany dla daty nie jest znajdowany dla tej samej daty** (TC-CUR-011) — opisane w specyfikacji kalkulacji (ryzyko daty kursu; konwencja daty wysłania w Europe/Warsaw; wyszukiwanie modułu Waluty o 00:00–02:00 latem i 00:00–01:00 zimą widzi dzień poprzedni); scenariusz regresyjny P0.
 
 ---
 
@@ -2509,6 +2513,14 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 ---
 
 ## Changelog
+
+### Rev 8 — 2026-10-23
+
+**Runda rev 8g — poprawki po review PR #16:**
+- TC-CUR-011 (P0): krok 1 — zapis przez dostawcę „NBP tabela A”; krok 3 — wyszukiwanie modułu Waluty o 23:30 daje kurs z D, o 00:30 kurs z D-1 (dzień liczony w UTC); krok 4 — suma deali 84 922 PLN (zaokrąglenie do całości) i brak walut bez kursu; krok 5 — wysłanie o 12:00, 23:30 i 00:30 zamraża kurs z D (data w Europe/Warsaw); nowe kroki 6–7 — godziny graniczne lato (01:59:59 / 02:00:00) i zima (00:59:59 / 01:00:00)
+- TC-CUR-001: zamrożony obraz przy walucie bazowej bez rodzaju i źródła kursu
+- §22 pkt 27 doprecyzowany
+- Liczba scenariuszy bez zmian: 141
 
 ### Rev 7 — 2026-10-23
 
