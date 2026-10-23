@@ -3,7 +3,7 @@
 **Dokument**: SPEC ONLY (plan testów niezależny od specyfikacji PR #10, brak kodu)
 **Data**: 2026-10-19
 **Autor**: Copilot (plan testów na podstawie wymagań biznesowych Marka Adamskiego)
-**Rewizja**: rev 5 (2026-10-23) — zgodność z decyzjami koordynacyjnymi (`.ai/vision.md`, `.ai/decisions.md`, `.ai/om-architecture-checklist.md`) i rozstrzygnięciami Koordynatora z 2026-10-23; mapowanie scenariuszy na decyzje w załączniku „Traceability TC → D”
+**Rewizja**: rev 6 (2026-10-23) — zgodność z decyzjami koordynacyjnymi (`.ai/vision.md`, `.ai/decisions.md`, `.ai/om-architecture-checklist.md`) i rozstrzygnięciami Koordynatora z 2026-10-23; mapowanie scenariuszy na decyzje w załączniku „Traceability TC → D”
 
 ---
 
@@ -16,7 +16,7 @@
 | Powiązania deal/projekt/inwestycja (TC-DEAL) | 16 |
 | Wersje i oferta (TC-VER) | 12 |
 | Cenniki (TC-PRICE) | 5 |
-| Widoczność i uprawnienia (TC-PERM) | 11 |
+| Widoczność i uprawnienia (TC-PERM) | 12 |
 | Koszty rzeczywiste (TC-REAL) | 3 |
 | Harmonogram Gantt (TC-GANTT) | 11 |
 | Testy wydajności (TC-PERF) | 3 |
@@ -27,7 +27,7 @@
 | Bezpieczeństwo plików (TC-SEC) | 6 |
 | Izolacja multi-tenant (TC-TEN) | 7 |
 | Edycja równoległa (TC-CONC) | 5 |
-| **Razem** | **134** |
+| **Razem** | **135** |
 
 ---
 
@@ -38,7 +38,7 @@
 | # | Ryzyko | Prawdopodobieństwo | Wpływ | Priorytet | Obszar | Scenariusze |
 |----|--------|-------------------|-------|-----------|--------|-------------|
 | R1 | Błędy kalkulacji finansowej (zaokrąglenia, dzielenie przez zero) | Wysoki | Krytyczny | P0 | Kalkulacja | TC-COST-001 do TC-COST-024 |
-| R2 | Wyciek danych międzytenantowych (multitenant izolacja) | Średni | Krytyczny | P0 | Uprawnienia + Tenant | TC-PERM-001 do TC-PERM-011, TC-TEN-001 do TC-TEN-007, TC-VER-009, TC-VER-011 |
+| R2 | Wyciek danych międzytenantowych (multitenant izolacja) | Średni | Krytyczny | P0 | Uprawnienia + Tenant | TC-PERM-001 do TC-PERM-012, TC-TEN-001 do TC-TEN-007, TC-VER-009, TC-VER-011 |
 | R3 | Uszkodzenie danych przy imporcie (złe kodowanie, formatowanie) | Wysoki | Wysoki | P1 | Import/eksport | TC-IMP-001 do TC-IMP-008 |
 | R4 | Utrata integralności oferty po wysłaniu (zmiana ceny, marży) | Średni | Wysoki | P1 | Wersje | TC-VER-001 do TC-VER-012, TC-PRICE-005 |
 | R5 | Niekonwersja oferty przy wygranym dealu (brak synchronizacji) | Średni | Wysoki | P1 | Harmonogram wykonawczy | TC-EXEC-001 do TC-EXEC-005 |
@@ -67,11 +67,10 @@
 
 | Etap | Zakres | Scenariusze |
 |------|--------|-------------|
-| **MVP** | Tryby ceny A (suma linii) i C (koszt × (1 + narzut)); wiersze: sekcja, pozycja, notatka; sumy sekcji automatyczne; import XLSX linii i harmonogramu; ręczne partie; prognoza; zamrożony obraz + PDF; blokady i ostrzeżenia wysłania; „Zastosuj wartość do deala” z aktywnej wersji; „Przelicz z cennika” dla linii bez ręcznej ceny; minimalne inwestycje (ręczne wskazanie, podpowiedź po kodzie), role ofert, pierwsza oferta główna; import CLI inwestycji i ról ofert jako krok wdrożenia; jedna waluta (PLN, kurs 1) | TC-COST (poza -007, -012), TC-IMP-001..007, TC-DEAL-001..005, TC-DEAL-011..016, TC-VER-002, -003, -006..-012, TC-PRICE-003, -005, TC-PERM (poza -004, -006, -008), w tym -010, -011, TC-PERF-001, -003, TC-CUR-001, TC-NOSCHED-001, -003, TC-FCST-002..006, TC-SEC (poza -003), TC-TEN, TC-CONC |
-| **v1** | Cały moduł harmonogramu z Ganttem (włączanie per organizacja, harmonogram inwestycji, faza wykonawcza); tryb B (marża docelowa); eksport XLSX; „Nowa rewizja”; porównanie wersji; cennik warstwowy; przeliczniki jednostek; marża po zamknięciu deala; „tylko własne deale”; koszty rzeczywiste; dopasowanie inwestycji po identyfikatorach | TC-COST-007, -012, TC-IMP-008, TC-DEAL-006..008, TC-VER-001, -004, -005, TC-PRICE-001, -002, TC-PERM-004, -006, TC-REAL, TC-GANTT, TC-PERF-002, TC-NOSCHED-002, -004, -005, TC-FCST-001, TC-EXEC, TC-SEC-003 |
+| **MVP** | Tryby ceny A (suma linii) i C (koszt × (1 + narzut)); wiersze: sekcja, pozycja, notatka; sumy sekcji automatyczne; import XLSX linii i harmonogramu; ręczne partie; prognoza; zamrożony obraz + PDF; blokady i ostrzeżenia wysłania; „Zastosuj wartość do deala” z aktywnej wersji; „Przelicz z cennika” dla linii bez ręcznej ceny; minimalne inwestycje (ręczne wskazanie, podpowiedź po kodzie), role ofert, pierwsza oferta główna; import CLI inwestycji i ról ofert jako krok wdrożenia; jedna waluta (PLN, kurs 1) | TC-COST (poza -007, -012), TC-IMP-001..007, TC-DEAL-001..005, TC-DEAL-011..016, TC-VER-002, -003, -006..-012, TC-PRICE-003, -005, TC-PERM (poza -004, -006, -008), w tym -010..-012, TC-PERF-001, -003, TC-CUR-001, TC-NOSCHED-001, -003, TC-FCST-002..006, TC-SEC (poza -003), TC-TEN, TC-CONC |
+| **v1** | Cały moduł harmonogramu z Ganttem (włączanie per organizacja, harmonogram inwestycji, faza wykonawcza); tryb B (marża docelowa); eksport XLSX; „Nowa rewizja”; porównanie wersji; cennik warstwowy; przeliczniki jednostek; marża po zamknięciu deala; „tylko własne deale”; koszty rzeczywiste; dopasowanie inwestycji po identyfikatorach; scalanie i rozdzielanie inwestycji (wybór oferty głównej); dashboard rankingu marż | TC-COST-007, -012, TC-IMP-008, TC-DEAL-006..010, TC-VER-001, -004, -005, TC-PRICE-001, -002, TC-PERM-004, -006, -008, TC-REAL, TC-GANTT, TC-PERF-002, TC-NOSCHED-002, -004, -005, TC-FCST-001, TC-EXEC, TC-SEC-003 |
 | **v2** | Integracje cenników zewnętrznych | TC-PRICE-004 |
 | **Warunkowe** | Waluty inne niż PLN — tylko gdy firma je dopuści (faza v1/v2) | TC-CUR-002..007 |
-| **Poza MVP, etap wg speki** | Scalanie i podział inwestycji; dashboard rankingu marż | TC-DEAL-009, -010, TC-PERM-008 |
 
 ---
 
@@ -263,14 +262,17 @@ Podstawowe operacje kalkulacji, arytmetyka finansowa, zaokrąglenia, jednostki, 
 
 #### TC-COST-013: Trzy sposoby ustalenia ceny — koszt × (1 + narzut)
 
-- **Priorytet**: P0 | **Etap**: MVP (tryb C) | **Poziom**: Integration
+- **Priorytet**: P0 | **Etap**: MVP (tryb C) | **Poziom**: Unit + Integration
 - **Kroki**:
-  1. Mode: "Koszt × (1 + narzut)"
-  2. Całkowity koszt = 1000, narzut = 50%
-  3. Cena = 1000 × 1.50 = 1500 PLN
+  1. Tryb ceny: „Koszt × (1 + narzut)”
+  2. Pozycja P1: koszt 600.00; pozycja P2: koszt 400.00; narzut 50%
+  3. Odczytaj cenę każdej pozycji, cenę oferty, marżę i narzut
 - **Oczekiwane wyniki**:
-  - Cena oferty = 1500 PLN
-  - Marża = 500 PLN (na koszcie, nie na cenie)
+  - Narzut liczony per pozycja: P1 = 600.00 × 1.50 = 900.00; P2 = 400.00 × 1.50 = 600.00
+  - Cena oferty = 900.00 + 600.00 = 1 500.00 PLN (suma pozycji już zaokrąglonych)
+  - Marża kwotowo = 1 500.00 − 1 000.00 = 500.00 PLN
+  - Marża % liczona od ceny sprzedaży: 500.00 / 1 500.00 = 33.33%
+  - Narzut 50% (od kosztu) to wartość wejściowa i widok pomocniczy — narzut ≠ marża; UI i API nie pokazują 50% jako marży
 
 #### TC-COST-014: Marża — kwotowa i procentowa
 
@@ -571,7 +573,7 @@ Inwestycję zakłada handlowiec w module kalkulacji; n8n inwestycji nie tworzy. 
   - System pokazuje komunikat: "Istnieje już oferta główna. Zmienić na nową?"
   - Użytkownik potwierdza
   - Audit trail (`audit_logs`): kto, kiedy, stara→nowa
-  - Deal A → alternatywna, Deal B → główna — w jednej transakcji; w bazie nigdy dwie oferty `primary` na inwestycję (unikalność częściowa `WHERE offer_role='primary'`)
+  - Deal A → alternatywna, Deal B → główna — w jednej transakcji; w bazie nigdy dwie oferty `primary` na inwestycję (baza gwarantuje najwyżej jedną ofertę główną na inwestycję)
 
 #### TC-DEAL-005: Komunikat — wielokrotne oferty dla tej samej inwestycji
 
@@ -621,7 +623,7 @@ Inwestycję zakłada handlowiec w module kalkulacji; n8n inwestycji nie tworzy. 
 
 #### TC-DEAL-009: Inwestycja — scalanie
 
-- **Priorytet**: P2 | **Etap**: poza MVP (v1 lub v2 — etap wg speki) | **Poziom**: Integration + E2E
+- **Priorytet**: P2 | **Etap**: v1 | **Poziom**: Integration + E2E
 - **Kroki**:
   1. Dwie inwestycje "Hala A" i "Hala B" (ta sama fizycznie, różne ID)
   2. Admin: "Scal inwestycje"
@@ -631,17 +633,23 @@ Inwestycję zakłada handlowiec w module kalkulacji; n8n inwestycji nie tworzy. 
   - Identyfikatory zapamiętane (mapowanie)
   - Audit trail
 
-#### TC-DEAL-010: Inwestycja — rozdzielanie
+#### TC-DEAL-010: Inwestycja — rozdzielanie i wybór oferty głównej
 
-- **Priorytet**: P2 | **Etap**: poza MVP (v1 lub v2 — etap wg speki) | **Poziom**: Integration
+- **Priorytet**: P2 | **Etap**: v1 | **Poziom**: Integration + E2E/UI + `pg`
+- **Warunki wstępne**: Inwestycja „Kompleks” z trzema ofertami: Deal 1 (oryginał, oferta główna), Deal 2 i Deal 3 (alternatywne); admin. Rozdzielenie: Deal 1 i Deal 2 zostają w „Hala A”, Deal 3 przechodzi do nowej „Hala B”
 - **Kroki**:
-  1. Inwestycja "Kompleks" z 3 dealami
-  2. Deal 1 i 2 powinny być "Hala A", Deal 3 = "Hala B"
-  3. Admin: rozdziel
+  1. Rozdziel inwestycję, akceptując domyślny wybór oferty głównej
+  2. Na świeżych danych: rozdziel, w kroku podziału wybierz Deal 2 jako ofertę główną „Hala A”
+  3. Na świeżych danych: w kroku podziału zaznacz dwie oferty główne dla „Hala A” (UI i API)
+  4. Po każdym kroku: przez `pg` policz oferty główne na inwestycję
 - **Oczekiwane wyniki**:
-  - Nowa inwestycja "Hala B" stworzona
-  - Deal 3 przeniesiony
-  - Oferta główna: czy Deal 1 w Hali A czy Deal 3 w Hali B?
+  - Rozdzielenie niedostępne w MVP (brak akcji w UI, API odrzuca)
+  - Krok podziału pokazuje wybór oferty głównej; domyślnie zaznaczony oryginał (Deal 1)
+  - Krok 1: „Hala A” — Deal 1 główna, Deal 2 alternatywna; „Hala B” — Deal 3 główna (pierwsza oferta na inwestycji)
+  - Krok 2: „Hala A” — Deal 2 główna, Deal 1 alternatywna
+  - Krok 3: odrzucone z komunikatem dokładnie „Istnieje już oferta dla innego wykonawcy — wskaż, która jest główna”; rozdzielenie nie wykonane, dane bez zmian
+  - Krok 4: zawsze dokładnie jedna oferta główna na inwestycję
+  - Audit trail rozdzielenia
 
 #### TC-DEAL-011: Pierwsza oferta na inwestycji — automatycznie główna
 
@@ -726,17 +734,20 @@ Inwestycję zakłada handlowiec w module kalkulacji; n8n inwestycji nie tworzy. 
 #### TC-DEAL-016: Wartość deala z „Zastosuj wartość do deala” wygrywa z aktualizacją z n8n
 
 - **Priorytet**: P1 | **Etap**: MVP | **Poziom**: Integration + API (kontrakt n8n)
-- **Warunki wstępne**: Deal X z powiązaną kalkulacją; Deal Z bez powiązanej kalkulacji; klucz API integracji n8n
+- **Warunki wstępne**: Deal X (postępowanie T-X) z powiązaną kalkulacją; Deal Z (postępowanie T-Z) bez powiązanej kalkulacji; klucz API integracji n8n; drugi klucz API spoza n8n (inna integracja)
 - **Kroki**:
   1. Na Deal X kliknij „Zastosuj wartość do deala” z aktywnej wersji: 125 000.00 PLN
-  2. Kluczem API integracji n8n wyślij aktualizację Deal X: wartość 140 000.00, waluta EUR, zmiana pola przetargowego (szacunkowa wartość zamówienia, termin składania ofert) i pola roli oferty
+  2. Kluczem n8n, ścieżką jak w integracji: wyszukaj deal po identyfikatorze postępowania T-X (lookup), potem PUT aktualizacji Deal X: wartość 140 000.00, waluta EUR, zmiana pola przetargowego (szacunkowa wartość zamówienia, termin składania ofert) i pola roli oferty
   3. Sprawdź Deal X, historię deala i audyt
-  4. Kontrola: tą samą aktualizacją z n8n zmień wartość Deal Z
-  5. Kontrola: użytkownik CRM ręcznie edytuje wartość Deal X
+  4. Kontrola: tą samą ścieżką (lookup T-Z + PUT) kluczem n8n zmień wartość Deal Z
+  5. Kontrola: kluczem API spoza n8n zmień wartość Deal X na 150 000.00 PLN
+  6. Kontrola: użytkownik CRM ręcznie edytuje wartość Deal X
 - **Oczekiwane wyniki**:
+  - Krok 2: lookup zwraca Deal X; PUT przyjęty (bez błędu)
   - Krok 3: wartość 125 000.00 i waluta PLN bez zmian; pole przetargowe i pole roli oferty zaktualizowane; w audycie informacja o pominięciu wartości z n8n
   - Krok 4: wartość Deal Z zmieniona przez n8n (brak powiązanej kalkulacji)
-  - Krok 5: edycja użytkownika nie jest blokowana; zmiana w historii deala
+  - Krok 5: wartość Deal X zmieniona na 150 000.00 — reguła dotyczy tylko integracji n8n
+  - Krok 6: edycja użytkownika nie jest blokowana; zmiana w historii deala
 
 ---
 
@@ -922,21 +933,25 @@ Numeracja wersji, statusy, zamrożenie, PDF, porównanie wersji, wysłanie (blok
   - Historia kwot pól wrażliwych jest dostępna tylko w zamrożonych obrazach wersji, z tą samą redakcją widoczności (employee nie widzi kosztu ani marży w obrazie)
   - Payloady eventów zawierają tylko ID
 
-#### TC-VER-012: Cofnięcie zmiany kosztu jednostkowego (undo)
+#### TC-VER-012: Cofnięcie i ponowienie zmiany kosztu jednostkowego (undo / redo)
 
 - **Priorytet**: P2 | **Etap**: MVP | **Poziom**: Integration + E2E/UI
-- **Warunki wstępne**: Rola własna R z `project_costing.edit`, bez `project_costing.view_costs`
+- **Warunki wstępne**: Admin (ma `project_costing.view_costs`); rola własna R z `project_costing.edit`, bez `project_costing.view_costs`
 - **Kroki**:
-  1. Wersja robocza: pozycja z kosztem jednostkowym 100.00
-  2. Zmień koszt na 120.00, zapisz
-  3. Cofnij zmianę
-  4. Admin zmienia koszt na 130.00; jako R spróbuj cofnąć tę zmianę (UI i API)
-  5. Spróbuj cofnięcia zmiany kosztu na wersji wysłanej
+  1. Jako admin: wersja robocza, pozycja z kosztem jednostkowym 100.00
+  2. Jako admin: zmień koszt na 120.00, zapisz
+  3. Jako admin: cofnij zmianę
+  4. Jako R: spróbuj ponowić (redo) cofniętą zmianę (UI i API)
+  5. Jako admin: ponów (redo) zmianę
+  6. Jako R: spróbuj cofnąć zmianę admina (UI i API)
+  7. Wyślij wersję; spróbuj cofnąć lub ponowić zmianę kosztu
 - **Oczekiwane wyniki**:
-  - Koszt wraca do 100.00; sumy i marża przeliczone
-  - Wpis audytu cofnięcia bez wartości (pole wrażliwe)
-  - Krok 4: R dostaje 403; wartości kosztu nie widzi nigdzie — odpowiedź API, historia akcji, wyszukiwarka, payloady zdarzeń
-  - Krok 5: po wysłaniu wersji cofnięcie zmian kosztu jest niedostępne (brak akcji w UI, API odrzuca)
+  - Krok 3: koszt wraca do 100.00; sumy i marża przeliczone; wpis audytu bez wartości (pole wrażliwe, TC-PERM-012)
+  - Krok 4: 403; koszt bez zmian (100.00)
+  - Krok 5: koszt = 120.00; sumy i marża przeliczone
+  - Krok 6: 403; koszt bez zmian (120.00)
+  - Kroki 4 i 6: R nie widzi wartości kosztu nigdzie — odpowiedź API, historia akcji, wyszukiwarka, payloady zdarzeń
+  - Krok 7: po wysłaniu wersji cofnięcie i ponowienie zmian kosztu są niedostępne (brak akcji w UI, API odrzuca)
 
 ---
 
@@ -1014,7 +1029,7 @@ Reguły warstwowe, historyczność, proweniencja ceny.
 
 ---
 
-## 8. Scenariusze testowe: Widoczność i Uprawnienia — 11 TC
+## 8. Scenariusze testowe: Widoczność i Uprawnienia — 12 TC
 
 Role, widoczność kosztów/marży/cen, multi-tenant izolacja, uprawnienia do edycji.
 
@@ -1076,7 +1091,7 @@ Role w scenariuszach: `superadmin`, `admin`, `employee` i role własne z fixture
 - **Priorytet**: P0 | **Etap**: MVP | **Poziom**: Integration + API
 - **Kroki**:
   1. Zaloguj się jako użytkownik Firmy A
-  2. Spróbuj dostępu do API `/api/v1/costing/DEAL_ID_FIRMY_B`
+  2. Przez API odczytaj kalkulację deala Firmy B po jego ID
   3. Spróbuj /kalkulacje?ids=id_firmy_b_1,id_firmy_b_2
   4. (od v1) Eksport wszystkich kalkulacji
 - **Oczekiwane wyniki**:
@@ -1111,7 +1126,7 @@ Role w scenariuszach: `superadmin`, `admin`, `employee` i role własne z fixture
 
 #### TC-PERM-008: Widoczność w dashboardach / analityce
 
-- **Priorytet**: P1 | **Etap**: poza MVP (etap wg speki) | **Poziom**: Integration + UI
+- **Priorytet**: P1 | **Etap**: v1 | **Poziom**: Integration + UI
 - **Kroki**:
   1. Dashboard "Ranking marż TOP 10"
   2. Employee z `project_costing.view_margin` otwiera ranking
@@ -1166,6 +1181,23 @@ Role w scenariuszach: `superadmin`, `admin`, `employee` i role własne z fixture
 - **Oczekiwane wyniki**:
   - Krok 1: 422; ustawienia bez zmian
   - Krok 2: U2 widzi wszystkie kalkulacje organizacji, w tym Deal X; koszt i marża zredagowane zgodnie z feature'ami U2 (domyślnie ukryte)
+
+#### TC-PERM-012: Dziennik akcji bez kosztu, narzutu i marży — także undo i redo
+
+- **Priorytet**: P0 | **Etap**: MVP | **Poziom**: Integration + `pg`
+- **Warunki wstępne**: Admin; wersja robocza z pozycją P1. Wartości kontrolne, łatwe do wyszukania: koszt jednostkowy 777.77, narzut 37.5%, wynikowa marża pozycji znana z góry
+- **Kroki**:
+  1. Zmień koszt jednostkowy P1 na 777.77
+  2. Zmień narzut P1 na 37.5%
+  3. Zmień cenę P1 tak, by zmieniła się marża
+  4. Dodaj pozycję P2 z kosztem i narzutem; usuń P2
+  5. Import XLSX z kolumną kosztu (wartość 777.77)
+  6. Cofnij (undo) krok 1, potem ponów (redo)
+  7. Po każdym kroku: przez `pg` odczytaj wpisy `action_logs` tej kalkulacji — kolumny `command_payload`, `snapshot_before`, `snapshot_after`, `changes_json`
+- **Oczekiwane wyniki**:
+  - Żadna z czterech kolumn, w żadnym wpisie (także undo i redo), nie zawiera wartości kosztu, narzutu ani marży — ani wartości kontrolnych, ani wartości sprzed zmiany
+  - Dozwolone: ID rekordów i nazwy zmienionych pól, bez wartości
+  - Undo i redo działają (koszt wraca i ponownie przyjmuje 777.77 — weryfikacja przez API jako admin), mimo braku wartości w dzienniku
 
 ---
 
@@ -1250,14 +1282,14 @@ Konwencja dat: data końca wliczona; czas trwania = koniec − start + 1 w dniac
   3. Zmień lag FS na 1
   4. Zmień na SS z lagiem 0
   5. Zmień na FF z lagiem −2
-  6. Zmień na SF
+  6. Zmień na SF z lagiem 0
 - **Oczekiwane wyniki**:
   - Krok 1: czas trwania 6 − 2 + 1 = 5 dni
   - Krok 2: „Produkcja” 2026-11-07 (sobota — dzień po końcu poprzednika, weekend się liczy) – 2026-11-16
   - Krok 3: 2026-11-08 (niedziela) – 2026-11-17
   - Krok 4: 2026-11-02 – 2026-11-11
   - Krok 5: koniec = 2026-11-06 − 2 = 2026-11-04, start 2026-10-26
-  - Krok 6: typ obsługiwany; dokładna reguła dat dla SF — do potwierdzenia
+  - Krok 6: następnik kończy się najpóźniej dzień przed startem poprzednika + lag: „Produkcja” koniec 2026-11-01 (dzień przed 2026-11-02), start 2026-10-23 (czas trwania 10 dni kalendarzowych)
   - Brak cykli (TC-GANTT-004)
 
 #### TC-GANTT-003: Lag ujemny i weekend
@@ -1900,9 +1932,9 @@ API cross-tenant, wyszukiwanie inwestycji, eksport, PDF, webhooki, cenniki cross
 - **Warunki wstępne**: Firma A (organizacja A), Firma B (organizacja B); kalkulacja `calc-B-123` należy do Firmy B
 - **Kroki**:
   1. Zaloguj się jako użytkownik Firmy A
-  2. GET `/api/v1/costing/calculations/calc-B-123`
-  3. PUT `/api/v1/costing/calculations/calc-B-123` z ciałem kalkulacji
-  4. DELETE `/api/v1/costing/calculations/calc-B-123`
+  2. Przez API kalkulacji odczytaj (GET) kalkulację `calc-B-123`
+  3. Przez API kalkulacji zapisz (PUT) kalkulację `calc-B-123` z ciałem kalkulacji
+  4. Przez API kalkulacji usuń (DELETE) kalkulację `calc-B-123`
 - **Oczekiwane wyniki**:
   - GET, PUT, DELETE: 404 (nie ujawniać, że zasób istnieje pod inną organizacją)
   - Brak 403 (to ujawniłoby istnienie zasobu) — konsekwentnie 404
@@ -1915,8 +1947,8 @@ API cross-tenant, wyszukiwanie inwestycji, eksport, PDF, webhooki, cenniki cross
 - **Warunki wstępne**: Jak wyżej; deal `deal-B-456` należy do Firmy B
 - **Kroki**:
   1. Zaloguj jako użytkownik Firmy A
-  2. POST `/api/v1/costing/calculations` z body `{"deal_id": "deal-B-456", "name": "Atak"}`
-  3. PUT `/api/v1/costing/calculations/calc-A-789` z body `{"organization_id": "org-B"}` (próba zmiany właściciela)
+  2. Przez API kalkulacji utwórz (POST) kalkulację z body `{"deal_id": "deal-B-456", "name": "Atak"}`
+  3. Przez API kalkulacji zapisz (PUT) kalkulację `calc-A-789` z body `{"organization_id": "org-B"}` (próba zmiany właściciela)
 - **Oczekiwane wyniki**:
   - POST z obcym deal_id: 404 lub 422 "Deal not found" (deal z org B nie widoczny dla org A)
   - PUT próba zmiany organization_id: pole ignorowane lub 422 "Cannot change organization"
@@ -1928,7 +1960,7 @@ API cross-tenant, wyszukiwanie inwestycji, eksport, PDF, webhooki, cenniki cross
 - **Warunki wstępne**: Inwestycja "Hala A" istnieje w Firmie A i w Firmie B (przypadkowa zbieżność nazwy)
 - **Kroki**:
   1. Zaloguj jako użytkownik Firmy A
-  2. Wyszukaj inwestycje: `GET /api/v1/projects?q=Hala`
+  2. Wyszukaj inwestycje: wyszukiwarką inwestycji (API) fraza „Hala”
   3. Podpięcie identyfikatora e-Zamówienia współdzielonego przez obie firmy
 - **Oczekiwane wyniki**:
   - Wyniki wyszukiwania: tylko inwestycje Firmy A (zero z Firmy B — mimo zbieżności nazwy)
@@ -2018,8 +2050,8 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 - **Priorytet**: P0 | **Etap**: MVP | **Poziom**: API
 - **Warunki wstępne**: Kalkulacja K2 z updatedAt=T0
 - **Kroki**:
-  1. GET `/api/v1/costing/calculations/K2` → odpowiedź zawiera `updatedAt: T0`
-  2. PUT `/api/v1/costing/calculations/K2` z nagłówkiem `If-Unmodified-Since: T0` i zmienionymi danymi
+  1. Przez API kalkulacji odczytaj K2 → odpowiedź zawiera `updatedAt: T0`
+  2. Przez API kalkulacji zapisz K2 z nagłówkiem `If-Unmodified-Since: T0` i zmienionymi danymi
   3. Niezależnie: inny klient zapisuje K2 (updatedAt→T1)
   4. PUT z `If-Unmodified-Since: T0` ponownie
 - **Oczekiwane wyniki**:
@@ -2047,13 +2079,13 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 - **Priorytet**: P1 | **Etap**: MVP | **Poziom**: Integration
 - **Warunki wstępne**: Inwestycja I1; aktualnie oferta główna = Deal A; Użytkownik A i Użytkownik B jednocześnie próbują zmienić ofertę główną
 - **Kroki**:
-  1. Użytkownik A: zmienia ofertę główną na Deal B (PUT `/api/v1/projects/I1/primary-deal`, body `{dealId: "B"}`)
+  1. Użytkownik A: zmienia ofertę główną na Deal B (przez API inwestycji: wskazanie oferty głównej I1 = Deal B)
   2. Użytkownik B: jednocześnie zmienia na Deal C (PUT `.../primary-deal`, body `{dealId: "C"}`)
   3. Oba żądania docierają do serwera prawie jednocześnie
 - **Oczekiwane wyniki**:
   - Jedno żądanie wygrywa (serialized): inwestycja ma jedną ofertę główną
   - Drugie żądanie: 409 Conflict lub wymusza potwierdzenie ("Oferta główna właśnie zmieniona na B. Nadpisać na C?")
-  - Brak stanu inconsistentnego: nigdy dwie oferty główne jednocześnie (gwarancja w bazie: unikalność częściowa `WHERE offer_role='primary'`, asercja przez `pg`)
+  - Brak stanu inconsistentnego: nigdy dwie oferty główne jednocześnie (baza gwarantuje najwyżej jedną ofertę główną na inwestycję; asercja przez `pg`)
   - Audit trail: dwa wpisy (zmiana A→B, i opcjonalne B→C)
 
 #### TC-CONC-005: Równoległy import XLSX — dwa importy tej samej kalkulacji
@@ -2142,7 +2174,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 
 | Kryterium | Wymaganie | Status |
 |-----------|-----------|--------|
-| **Pokrycie P0 scenariuszy** | 100% (TC-COST-003, TC-COST-004, TC-COST-021, TC-DEAL-004, TC-DEAL-011, TC-DEAL-013, TC-DEAL-014, TC-VER-003, TC-VER-006, TC-VER-007, TC-VER-008, TC-VER-009, TC-PERM-001, TC-PERM-002, TC-PERM-005, TC-PERM-010, TC-PERM-007, TC-SEC-001, TC-SEC-002, TC-SEC-003, TC-CONC-001, TC-CONC-002, TC-CONC-003, TC-TEN-001, TC-TEN-002, TC-TEN-003, TC-TEN-004, TC-TEN-007, TC-EXEC-001, TC-EXEC-002, TC-FCST-006, TC-NOSCHED-002) | TBD |
+| **Pokrycie P0 scenariuszy** | 100% (TC-COST-003, TC-COST-004, TC-COST-021, TC-DEAL-004, TC-DEAL-011, TC-DEAL-013, TC-DEAL-014, TC-VER-003, TC-VER-006, TC-VER-007, TC-VER-008, TC-VER-009, TC-PERM-001, TC-PERM-002, TC-PERM-005, TC-PERM-010, TC-PERM-012, TC-PERM-007, TC-SEC-001, TC-SEC-002, TC-SEC-003, TC-CONC-001, TC-CONC-002, TC-CONC-003, TC-TEN-001, TC-TEN-002, TC-TEN-003, TC-TEN-004, TC-TEN-007, TC-EXEC-001, TC-EXEC-002, TC-FCST-006, TC-NOSCHED-002) | TBD |
 | **Multi-tenant izolacja** | Brak przecieków danych przez API, eksport, PDF, webhooki (TC-PERM-005, TC-TEN-001 do TC-TEN-007) | TBD |
 | **Budżety wydajności** | Import < 10s, Gantt render < 3s, API < 500ms (TC-PERF-*) | TBD |
 | **Budżety bezpieczeństwa plików** | Zip bomb odrzucony < 5s, RAM import < 1 GB, brak SSRF (TC-SEC-001 do TC-SEC-006) | TBD |
@@ -2246,22 +2278,24 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 21. **Cofnięcie zmiany kosztu** (TC-VER-012) — ✅ **ROZSTRZYGNIĘTE (Koordynator 2026-10-23)**
     - **Decyzja**: Undo komendy na wersji roboczej; bez prawa do pola kosztu 403 i brak wartości w API, historii, wyszukiwarce i zdarzeniach; po wysłaniu niedostępne.
 
-22. **Zależność SF** (TC-GANTT-002, krok 6) — **do potwierdzenia**
-    - **Otwarte**: Dokładna reguła wyliczenia daty dla zależności start–koniec przy konwencji „koniec wliczony”.
+22. **Zależność SF** (TC-GANTT-002, krok 6) — ✅ **ROZSTRZYGNIĘTE (Koordynator 2026-10-23)**
+    - **Decyzja**: Przy końcu wliczonym następnik kończy się najpóźniej dzień przed startem poprzednika + lag.
 
 23. **Waluty inne niż PLN** (TC-CUR-002..007) — **otwarte**
     - **Otwarte**: Czy firma dopuszcza waluty inne niż PLN; do czasu decyzji scenariusze walutowe są warunkowe.
 
-24. **Etap dashboardu rankingu marż** (TC-PERM-008) — **do potwierdzenia w specy**
+24. **Etap dashboardu rankingu marż** (TC-PERM-008) — ✅ **ROZSTRZYGNIĘTE (Koordynator 2026-10-23)**
+    - **Decyzja**: v1.
 
-25. **Etap scalania i podziału inwestycji** (TC-DEAL-009, TC-DEAL-010) — **do potwierdzenia w specy** (poza MVP)
+25. **Etap scalania i podziału inwestycji** (TC-DEAL-009, TC-DEAL-010) — ✅ **ROZSTRZYGNIĘTE (Koordynator 2026-10-23)**
+    - **Decyzja**: oba v1. Przy rozdzieleniu użytkownik wybiera ofertę główną (domyślnie oryginał); jedna oferta główna na inwestycję, próba dwóch daje ten sam komunikat co przy duplikacie oferty.
 
 ---
 
 ## 23. Podsumowanie
 
 **Dokument**: Niezależny plan testów — spec only
-**Liczba scenariuszy**: 134 (rev 5: +25; rev 2–4: 109; rev 1: 72)
+**Liczba scenariuszy**: 135 (rev 6: +1; rev 5: +25; rev 2–4: 109; rev 1: 72)
 **Liczba wniosków do speki**: 25 (15 oryginalnych + 5 z rev 2 + 5 z rev 5)
 **Status**: SPEC ONLY — bez kodu, bez testów wykonywalnych
 
@@ -2274,7 +2308,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 
 ## Załącznik: Traceability TC → D
 
-Źródło: `.ai/decisions.md`@b544719 (develop_OM_CRM) — 73 aktywne decyzje, w tym D75–D82 i poprawiona D71. N/A = decyzja bez zachowania testowanego w tym planie.
+Źródło: `.ai/decisions.md`@b544719 (develop_OM_CRM) — 73 aktywne decyzje, w tym D75–D82 i poprawiona D71. D83: rozstrzygnięte przez Koordynatora 2026-10-23 (decisions.md w PR rev 8e). N/A = decyzja bez zachowania testowanego w tym planie.
 
 | D | Treść skrócona | TC | Uwagi |
 |---|---|---|---|
@@ -2287,14 +2321,14 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 | D10 | Kalkulacja bez deala, podpięcie później | TC-DEAL-001, TC-DEAL-002 |  |
 | D11 | PDF oferty w pierwszej wersji | TC-VER-006, TC-PERM-007 | |
 | D12 | Własny cennik użytkownika, później cenniki zewnętrzne | TC-PRICE-003, TC-PRICE-005, TC-PRICE-004 | |
-| D14 | Marża % od ceny, tryby ceny | TC-COST-014, TC-COST-012 |  |
+| D14 | Marża % od ceny, tryby ceny | TC-COST-013, TC-COST-014, TC-COST-012 |  |
 | D15 | Izolacja organizacji | TC-TEN-006, TC-TEN-007 |  |
 | D16 | Zaokrąglenie half-up | TC-COST-003, TC-TEN-007 |  |
 | D17 | Słownik jednostek | TC-COST-016, TC-COST-007, TC-COST-023 |  |
 | D18 | Własny moduł `project_costing` zamiast modułu `sales` | N/A | decyzja architektoniczna, bez zachowania do testu |
 | D19 | Firmy bez harmonogramu | TC-NOSCHED-001..005 |  |
 | D20 | Ręczne partie i import harmonogramu | TC-NOSCHED-001, TC-NOSCHED-003, TC-FCST-002 |  |
-| D21 | Komponent Gantta | TC-GANTT-001 | testowane zachowanie; licencja i biblioteka nie są testowane |
+| D21 | Własna implementacja Gantta | TC-GANTT-001 | testowane zachowanie Gantta |
 | D22 | Auto-planowanie | TC-GANTT-005, TC-GANTT-006 |  |
 | D23 | Harmonogram ofertowy → wykonawczy | TC-GANTT-008 |  |
 | D24 | Przejście przy wygraniu deala | TC-EXEC-001, TC-EXEC-002 |  |
@@ -2316,10 +2350,10 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 | D46 | Obszar n8n / integracje | N/A | poza zakresem modułów kalkulacji/harmonogramu, testowane w kontrakcie n8n |
 | D45 | Architektura wdrożenia | N/A | decyzja architektoniczna |
 | D47 | Harmonogram per organizacja, wyłącznik tenanta | TC-NOSCHED-002, TC-NOSCHED-004, TC-NOSCHED-005 |  |
-| D48 | Widoczność przez feature'y ról | TC-PERM-001, TC-PERM-002, TC-PERM-003 |  |
+| D48 | Widoczność przez feature'y ról | TC-PERM-001, TC-PERM-002, TC-PERM-003, TC-PERM-012 |  |
 | D49 | Marża odsłania się po zamknięciu deala (wygrany lub przegrany) | TC-PERM-006 | etap v1 (status: active, faza v1); w MVP TC-PERM-010 |
 | D50 | Etapy MVP/v1 | TC-COST-019, TC-IMP-001, TC-NOSCHED-001, TC-NOSCHED-003, TC-DEAL-012 | pole „Etap” we wszystkich scenariuszach |
-| D51 | Komunikat duplikatu oferty | TC-DEAL-003, TC-DEAL-005 |  |
+| D51 | Komunikat duplikatu oferty | TC-DEAL-003, TC-DEAL-005, TC-DEAL-010 |  |
 | D52 | Import CLI starej encji projektu | TC-DEAL-013, TC-DEAL-014 |  |
 | D53 | Jeden harmonogram na inwestycję | TC-GANTT-008 |  |
 | D54 | Przesuwanie tylko w przód, przypięte zadania | TC-GANTT-005, TC-GANTT-006 |  |
@@ -2333,7 +2367,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 | D62 | Zaokrąglenie per organizacja, słownik jednostek | TC-COST-003, TC-TEN-007, TC-COST-023, TC-DEAL-008 | |
 | D63 | Inwestycje i role ofert w module | TC-DEAL-013, TC-DEAL-014, TC-DEAL-015 |  |
 | D64 | Okres przejściowy ról ofert z n8n | TC-DEAL-015 |  |
-| D65 | Pierwsza oferta główna | TC-DEAL-011 |  |
+| D65 | Pierwsza oferta główna | TC-DEAL-011, TC-DEAL-010 |  |
 | D66 | Wartość deala tylko jawnie, aktywna wersja | TC-VER-007, TC-DEAL-002 |  |
 | D67 | Uzupełnienie harmonogramów po włączeniu | TC-NOSCHED-004, TC-NOSCHED-005 |  |
 | D68 | Lista feature'ów ACL | TC-PERM-001, TC-PERM-002, TC-PERM-009 |  |
@@ -2351,6 +2385,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 | D80 | Następnik kamienia milowego tego samego dnia | TC-GANTT-009 | |
 | D81 | Wartość z „Zastosuj do deala” wygrywa; n8n tylko pola przetargowe | TC-DEAL-016 | |
 | D82 | Gantt własny, zewnętrzna biblioteka tylko PoC w v1 | N/A | zależności, nie zachowanie; scenariusze Gantta bez nazwy biblioteki |
+| D83 | Rozdzielenie w v1; wybór oferty głównej, domyślnie oryginał | TC-DEAL-010 | etap v1; źródło: Rozstrzygnięte przez Koordynatora 2026-10-23 (decisions.md w PR rev 8e) |
 
 **Decyzje zastąpione — nie testujemy:**
 - D3 — zastąpione przez D4
@@ -2365,6 +2400,19 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 ---
 
 ## Changelog
+
+### Rev 6 — 2026-10-23
+
+**Poprawki po odbiorze rev 5 (Koordynator):**
+- TC-COST-013: marża liczona od ceny sprzedaży (500.00 / 1 500.00 = 33.33%), narzut ≠ marża; narzut per pozycja (600.00 + 400.00 → 900.00 + 600.00)
+- Nowy TC-PERM-012 (P0): `action_logs` (`command_payload`, `snapshot_before`, `snapshot_after`, `changes_json`) bez kosztu, narzutu i marży, także przy undo i redo
+- TC-VER-012: kroki 1–3 wykonuje admin; redo przez R → 403, redo przez admina → 120.00
+- TC-DEAL-016: ścieżka n8n lookup + PUT; kontrola klucza API spoza n8n (wartość zmieniona)
+- TC-GANTT-002 krok 6: reguła SF z przykładem liczbowym
+- TC-PERM-008, TC-DEAL-009 → v1; TC-DEAL-010 → v1 z wyborem oferty głównej (domyślnie oryginał) i komunikatem przy dwóch ofertach głównych (D83); §1.3 bez wiersza „poza MVP”
+- §22 pkt 22, 24, 25 rozstrzygnięte
+- Porządki: TC-VER-009 „employee” zamiast „R”; opis D21 w aneksie; ścieżki API i warunki SQL zastąpione opisem zachowania (TC-PERM-005, TC-TEN-001..003, TC-CONC-002, TC-CONC-004, TC-DEAL-004)
+- Liczba scenariuszy: 134 → 135
 
 ### Rev 5 — 2026-10-23
 
@@ -2431,5 +2479,5 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 ---
 
 **Koniec dokumentu**
-*Data wygenerowania: 2026-10-19 | Rev 2: 2026-10-19 | Rev 3: 2026-10-20 | Rev 4: 2026-10-20 | Rev 5: 2026-10-23*
+*Data wygenerowania: 2026-10-19 | Rev 2: 2026-10-19 | Rev 3: 2026-10-20 | Rev 4: 2026-10-20 | Rev 5: 2026-10-23 | Rev 6: 2026-10-23*
 
