@@ -4,7 +4,7 @@
 **Docelowa ścieżka w repo**: `.ai/specs/2026-10-23-project-delivery-docs-test-plan.md`
 **Data**: 2026-10-23
 **Autor**: Grok Bot (runner planu testów; specyfikacji modułu nie czytał); rev 4 — niezależna sesja testerska, wyłącznie na podstawie `.ai/decisions.md` z commita 865714e, bez dostępu do spek
-**Rewizja**: rev 4 (2026-10-23) — dopasowanie do D116–D132 (rejestr z commita 865714e, po merge #20): projekt bez oferty i podpięcie oferty, jeden projekt na deal i na inwestycję, limit miękki quota z alertami 80/100% i blokadą od 110%, oryginał ZIP jako dowód, strzeżona funkcja usuwania i purge po potwierdzeniu, wpis atomowy importu, worker checksum, progi pomiaru RAM, faza projektu w harmonogramie; postępowania z częściami — warunkowo; poprzednio rev 3 — rejestr z commita 4f83bd4: bufor tylko w RAM (partSize × queueSize), zero plików tymczasowych także w workerze, współbieżność 1 tylko dla kolejki modułu, dwa parametry presji RAM; PoC dostawcy domyślnego jako kryterium akceptacji etapu kodu z fallbackiem na B2; poprzednio rev 2 — rejestr finalny (akceptacje, worker, linki, dostawca storage, warianty, retencja)
+**Rewizja**: rev 4a (2026-10-23) — poprawki odbioru rundy 3 (`STORAGE_NOT_CONFIGURED`, jednoznaczne kody, warunkowy TC-PD-QUOTA-009); poprzednio rev 4 (2026-10-23) — dopasowanie do D116–D132 (rejestr z commita 865714e, po merge #20): projekt bez oferty i podpięcie oferty, jeden projekt na deal i na inwestycję, limit miękki quota z alertami 80/100% i blokadą od 110%, oryginał ZIP jako dowód, strzeżona funkcja usuwania i purge po potwierdzeniu, wpis atomowy importu, worker checksum, progi pomiaru RAM, faza projektu w harmonogramie; postępowania z częściami — warunkowo; poprzednio rev 3 — rejestr z commita 4f83bd4: bufor tylko w RAM (partSize × queueSize), zero plików tymczasowych także w workerze, współbieżność 1 tylko dla kolejki modułu, dwa parametry presji RAM; PoC dostawcy domyślnego jako kryterium akceptacji etapu kodu z fallbackiem na B2; poprzednio rev 2 — rejestr finalny (akceptacje, worker, linki, dostawca storage, warianty, retencja)
 **Podstawa**: rejestr decyzji (`.ai/decisions.md` z commita 865714e, sekcja modułu `project_delivery` D98–D132 oraz decyzje kontekstowe), research `om-project-docs-research.md`, `odoo-project-docs.md`, `om-overlap-audit.md`, dokumentacja Backblaze B2 S3-Compatible API (stan na X 2026; dotyczy dostawcy zapasowego). Numery decyzji występują w załączniku pokrycia, w changelogu oraz w adnotacjach scenariuszy warunkowych (TC-PD-PRJ-011, TC-PD-PRJ-012).
 **Dostawca storage**: „dostawca domyślny” = najtańszy w UE dostawca w pełni kompatybilny z `storage_s3` i multipartem (wg rejestru: OVHcloud Object Storage, region i klasa jako parametry wdrożenia); „dostawca zapasowy” = Backblaze B2 EU Central z adapterem bez `If-None-Match` (wyłącznie unikalne klucze). Scenariusze storage przechodzą dla obu; różnice opisane w scenariuszu.
 
@@ -36,7 +36,7 @@
 | Ryzyka prawne — brak funkcji (TC-PD-LEGAL) | 1 |
 | Izolacja multi-tenant (TC-PD-TEN) | 3 |
 | Bezpieczeństwo plików (TC-PD-SEC) | 4 |
-| **Razem** | **119** (w tym 1 warunkowy poza werdyktem: TC-PD-PRJ-012) |
+| **Razem** | **119** (w tym 2 warunkowe poza werdyktem: TC-PD-PRJ-012, TC-PD-QUOTA-009) |
 
 ---
 
@@ -337,7 +337,7 @@ Zasady:
   2. Spróbuj dodać link `javascript:`, `file:`, `http://localhost`, adres z sieci prywatnej
 - **Oczekiwane wyniki**:
   - Krok 1: dokument typu link, brak obiektu w S3, brak wpływu na quota; otwarcie w nowej karcie z `rel="noopener noreferrer"`
-  - Krok 2: 422 dla schematów innych niż `https` (i `http`, jeśli speka dopuści — brak reguły w rejestrze, §27 wniosek 35); link nie jest pobierany przez serwer
+  - Krok 2: dozwolony wyłącznie `https:` — każdy inny schemat, w tym `http:`, → 422; link nie jest pobierany przez serwer
 
 #### TC-PD-DOC-003: Podgląd PDF przez presigned GET
 
@@ -382,7 +382,7 @@ Zasady:
   3. Porównaj R0 przed i po
 - **Oczekiwane wyniki**:
   - Krok 1: powstaje R1 z nowym kluczem obiektu; R0 ma ten sam klucz, sha256 i rozmiar; obiekt R0 nadal pobieralny
-  - Krok 2: 405 albo 409/422; brak zmian w `pg` i w buckecie (brak PutObject na klucz R0)
+  - Krok 2: 409 `REVISION_IMMUTABLE`; brak zmian w `pg` i w buckecie (brak PutObject na klucz R0)
   - Dokument wskazuje R1 jako najnowszą
 
 #### TC-PD-REV-002: Klucz obiektu nowej rewizji nie może trafić w istniejący obiekt
@@ -524,7 +524,7 @@ Zasady:
   - Krok 1: zero sekretów; zero zakodowanych endpointów i nazw bucketów w kodzie modułu
   - Krok 2: zapis i odczyt działają z każdą konfiguracją bez zmian kodu (dowolny dostawca zgodny z S3)
   - Krok 3: ustawienia zawierają najwyżej endpoint, region, bucket i wariant; brak access key i secret w odpowiedzi i w `module_configs`; próba zapisu pola wyglądającego na klucz → 422; poświadczenia wariantu A wyłącznie ze zmiennych środowiskowych wdrożenia (`credentialsEnvPrefix`)
-  - Krok 4: health storage zgłasza błąd konfiguracji, upload zwraca czytelny błąd 503, bez wycieku konfiguracji w treści
+  - Krok 4: health storage zgłasza błąd konfiguracji; upload → 422 `STORAGE_NOT_CONFIGURED` z komunikatem `pl`, bez wycieku konfiguracji w treści; dokumenty-linki i metadane działają (reguła recenzenta, 2026-10-23)
 
 #### TC-PD-STOR-007: Wybór wariantu storage A albo B w ustawieniach organizacji
 
@@ -565,7 +565,7 @@ Zasady:
   2. Zadeklaruj rozmiar mniejszy niż faktyczny i wyślij większy plik
   3. Odczytaj domyślną konfigurację storage (bez nadpisań)
 - **Oczekiwane wyniki**:
-  - Krok 1: 413 albo 422 przed wydaniem URL; brak multipartu w S3
+  - Krok 1: 413 `FILE_TOO_LARGE` przed wydaniem URL; brak multipartu w S3
   - Krok 2: S3 odrzuca nadmiarowe dane (podpisana długość części) albo `complete` porównuje rozmiar z HeadObject z deklaracją → 422 `UPLOAD_SIZE_MISMATCH`, rewizja nie powstaje, rezerwacja zwolniona (TC-PD-REV-002)
   - Krok 3: domyślny dostawca z konfiguracji wdrożenia (OVHcloud, region UE i klasa jako parametry); przełączenie na zapasowy B2 włącza adapter bez `If-None-Match`; limit nie ma wartości zakodowanej w module (pochodzi z konfiguracji)
 
@@ -690,16 +690,18 @@ Zasady:
   1. Dwa importy ZIP w dwóch projektach (oryginały zachowane jako rewizje, TC-PD-IMP-002); ręczne pliki
   2. Otwórz widok zużycia organizacji
 - **Oczekiwane wyniki**:
-  - Pozycja „archiwum dowodowe” = suma rozmiarów oryginałów ZIP (`pd_imports.original_revision_id`); oryginały wliczone do `used` bez wyjątków; suma pozycji widoku = `used`
+  - Pozycja „archiwum dowodowe” = suma rozmiarów oryginałów ZIP (`pd_imports.original_revision_id`); oryginały wliczone do `used` bez wyjątków; pole „zajęte” = `used` (widok pokazuje też wybrane projekty, więc suma pozycji nie musi równać się `used` — bez takiej asercji)
 
-#### TC-PD-QUOTA-009: Wersje obiektów w quota; nocna kopia B2 poza quota klienta
+#### TC-PD-QUOTA-009: WARUNKOWY — wersje obiektów w quota; nocna kopia B2 poza quota klienta
+
+> **WARUNKOWY**: scenariusz zależy od reguły o wersjach obiektu zapisanych poza aplikacją, która dopiero wejdzie do rejestru. Do tego czasu TC-PD-QUOTA-009 **nie wchodzi do werdyktu** (§26). Purge kopii B2 sprawdza też TC-PD-RET-008.
 
 - **Priorytet**: P1 | **Etap**: MVP (wersje), v1 (kopia B2) | **Poziom**: Integration (emulator wersjonowany) + `pg`
 - **Kroki**:
   1. MVP: na buckecie wersjonowanym emulatora zapisz bezpośrednio (poza aplikacją, profil bez warunkowego zapisu) drugą wersję pod kluczem rewizji testowej; odczytaj zużycie przed i po purge
   2. v1: włącz `storage.backup_copy`; uruchom nocną kopię do B2; odczytaj zużycie
 - **Oczekiwane wyniki**:
-  - Krok 1: quota liczy wszystkie wersje obiektu do potwierdzonego purge (pusty ListObjectVersions); po purge zużycie spada
+  - Krok 1: przed purge `used` zawiera rozmiar rewizji; purge usuwa obie wersje (pusty ListObjectVersions) i dopiero wtedy `used` spada; jeśli wersja zostaje → `purge_failed`, `used` bez zmian
   - Krok 2: zużycie klienta bez zmian po kopii (kopia B2 to koszt operacyjny planu); purge obejmuje też kopię (TC-PD-RET-008)
 
 ---
@@ -1098,7 +1100,7 @@ Import ZIP i multipart po stronie serwera idą przez istniejącą kolejkę OM (P
 - **Kroki**:
   1. Utwórz link do dokumentu bez daty wygaśnięcia; z datą w przeszłości; z datą powyżej maksimum (parametr); z poprawną datą
 - **Oczekiwane wyniki**:
-  - Pierwsze trzy: 422; UI nie pozwala zapisać bez daty
+  - Pierwsze trzy: 422 `SHARE_LINK_EXPIRY_REQUIRED`; UI nie pozwala zapisać bez daty
   - Poprawny: token losowy, zapisany autor, zakres, data wygaśnięcia; wpis w `audit_logs`
 
 #### TC-PD-SHARE-002: Link po wygaśnięciu i odwołaniu
@@ -1530,7 +1532,7 @@ Akceptacje v1 (rewizje dokumentów, transmittale, protokoły): własna walidacja
   1. Import ZIP: wysoki współczynnik kompresji; wpisy `../../x`, ścieżki absolutne; symlinki; ZIP w ZIP; zaszyfrowany ZIP; uszkodzony katalog centralny
 - **Oczekiwane wyniki**:
   - Bomb: przerwanie po limicie (TC-PD-WRK-003), RAM ograniczony
-  - Ścieżki znormalizowane do folderu projektu albo wpis odrzucony; symlinki pominięte; ZIP w ZIP importowany jako plik; zaszyfrowany i uszkodzony — błąd w raporcie, bez awarii workera
+  - Wpisy ze ścieżką zawierającą `..`, ścieżki absolutne i symlinki → odrzucone (nie importowane, odnotowane w raporcie); ZIP w ZIP importowany jako plik; zaszyfrowany i uszkodzony — błąd w raporcie, bez awarii workera
 
 #### TC-PD-SEC-003: SSRF przy imporcie z URL
 
@@ -1579,7 +1581,7 @@ Akceptacje v1 (rewizje dokumentów, transmittale, protokoły): własna walidacja
 |-----------|-----------|--------|
 | **Dostawca storage** | PoC OVHcloud (TC-PD-POC-001..003: warunkowy PUT, presigned PUT/GET, multipart i wznawianie) zaliczony; inaczej B2 z adapterem zaliczony (TC-PD-POC-004..006) i ustawiony jako domyślny | TBD |
 | **Pokrycie P0** | 100% scenariuszy P0 etapu MVP przechodzi (scenariusze warunkowe poza werdyktem) | TBD |
-| **Scenariusze warunkowe** | TC-PD-PRJ-012 nie wchodzi do werdyktu, dopóki Marek nie rozstrzygnie konfliktu D31 ↔ D132; do tego czasu obowiązuje kontrolny TC-PD-PRJ-011 | TBD |
+| **Scenariusze warunkowe** | TC-PD-PRJ-012 nie wchodzi do werdyktu, dopóki Marek nie rozstrzygnie konfliktu D31 ↔ D132; do tego czasu obowiązuje kontrolny TC-PD-PRJ-011. TC-PD-QUOTA-009 nie wchodzi do werdyktu, dopóki reguła o wersjach zapisanych poza aplikacją nie trafi do rejestru | TBD |
 | **Pamięć** | Szczytowy RSS aplikacji i workera niezależny od rozmiaru pliku dla dwóch rozmiarów; worker ≤ partSize × queueSize + bufor dekompresji + narzut (TC-PD-PERF-001..002); pomiar na wersji testowej z importem ZIP 250 MB: przyrost RSS workera ≤ 256 MB, `MemAvailable` ≥ 300 MB, zero OOM, zero restartów, przyrost swapu ≤ 512 MB; dowolne przekroczenie = FAIL i osobny kontener workera (TC-PD-PERF-003) | TBD |
 | **Dysk VPS** | Zero plików projektu i plików tymczasowych (TC-PD-STOR-005) | TBD |
 | **Brak proxy aplikacji** | Treść pliku nie przechodzi przez proces aplikacji (TC-PD-STOR-001..003) | TBD |
@@ -1645,14 +1647,14 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza 
 32. **Czyszczenie `reopened_at` po ponownym `won`** (TC-PD-NOSCHED-005): lista poprawek to zakłada, rejestr nie (ustala tylko ustawienie flagi).
 33. **Liczba inwestycji dla postępowania z częściami w wariancie „jedno postępowanie = jeden deal”** (TC-PD-PRJ-011): rejestr ustala tylko jeden deal i najwyżej jeden projekt.
 34. **Konflikt D31 ↔ D132 — decyzja Marka** (TC-PD-PRJ-011, TC-PD-PRJ-012): do decyzji obowiązuje D31; TC-PD-PRJ-012 poza werdyktem.
-35. **Pozostałe „wg speki” bez reguły w rejestrze**: TC-PD-DOC-002 (dopuszczalność `http`), TC-PD-SEC-001 (niezgodność rozszerzenia i typu — oznaczyć czy odrzucić), TC-PD-SHARE-003 (zakres linku, v1).
+35. **Pozostałe „wg speki” bez reguły w rejestrze**: ~~TC-PD-DOC-002 (dopuszczalność `http`)~~ — zamknięte w rev 4a (tylko `https:`, lista nitów recenzenta); TC-PD-SEC-001 (niezgodność rozszerzenia i typu — oznaczyć czy odrzucić), TC-PD-SHARE-003 (zakres linku, v1).
 
 ---
 
 ## 28. Podsumowanie
 
 **Dokument**: Niezależny plan testów — spec only
-**Liczba scenariuszy**: 119 (MVP 97, v1 15, v2 7; etap liczony z pierwszej fazy scenariusza — TC-PD-STOR-007 obejmuje MVP, v1 i v2); w tym 1 warunkowy poza werdyktem (TC-PD-PRJ-012)
+**Liczba scenariuszy**: 119 (MVP 97, v1 15, v2 7; etap liczony z pierwszej fazy scenariusza — TC-PD-STOR-007 obejmuje MVP, v1 i v2); w tym 2 warunkowe poza werdyktem (TC-PD-PRJ-012, TC-PD-QUOTA-009)
 **Liczba wniosków do speki**: 35 (rozstrzygnięte: 1–11, 14–16, 18, 21–24; częściowo: 20; otwarte: 12, 13, 17, 19; luki rev 4: 25–33, 35; decyzja Marka: 34)
 **Status**: SPEC ONLY — bez kodu, bez testów wykonywalnych
 
@@ -1719,9 +1721,24 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza 
 | **D5** | Jedna oferta `primary` na inwestycję | TC-PD-PRJ-002, TC-PD-PRJ-012 | per część tylko przy D132 |
 | **D63** | Inwestycje zakłada handlowiec (`pc_investments`) | TC-PD-PRJ-012 | |
 
+**Reguły spoza rejestru @865714e (źródło: recenzent Cezar, 2026-10-23; do rejestru w kolejnym PR — bez numeru D):**
+
+- Upload, gdy storage modułu nie jest skonfigurowany → 422 `STORAGE_NOT_CONFIGURED` — TC-PD-STOR-006 (krok 4)
+- Kody z listy nitów rundy 3 (`pr19-fixes-r2.md`): `REVISION_IMMUTABLE` (TC-PD-REV-001), `FILE_TOO_LARGE` (TC-PD-STOR-009), `SHARE_LINK_EXPIRY_REQUIRED` (TC-PD-SHARE-001); tylko `https:` (TC-PD-DOC-002); odrzucenie ścieżek `..`, absolutnych i symlinków (TC-PD-SEC-002); TC-PD-QUOTA-009 warunkowy
+
 ---
 
 ## Changelog
+
+### Rev 4a — 2026-10-23 (odbiór rundy 3 PR #19)
+
+- Ta sama niezależna sesja, nadal bez dostępu do spek. Źródła: reguła `STORAGE_NOT_CONFIGURED` od recenzenta (Cezar, 2026-10-23); nity z `pr19-fixes-r2.md` (N-R2-1, N-R2-7, N-R2-8, N-R2-9, N-R2-10); rejestr bez zmian (865714e)
+- Blocker P19-R2-B1: TC-PD-STOR-006 krok 4 — upload bez skonfigurowanego storage → 422 `STORAGE_NOT_CONFIGURED` (było 503; zapis pochodził z rev 1–3); innych miejsc z 503 w planie nie ma
+- TC-PD-REV-001 krok 2: 409 `REVISION_IMMUTABLE`; TC-PD-STOR-009 krok 1: 413 `FILE_TOO_LARGE`; TC-PD-SHARE-001: 422 `SHARE_LINK_EXPIRY_REQUIRED` (jeden kod zamiast „albo”)
+- TC-PD-QUOTA-008: bez asercji „suma pozycji widoku = `used`”; „zajęte” = `used`
+- TC-PD-QUOTA-009: oznaczony WARUNKOWY (reguła o wersjach zapisanych poza aplikacją jeszcze poza rejestrem), poza werdyktem; krok 1 wg nitu N-R2-9
+- TC-PD-SEC-002: ścieżki `..`, absolutne i symlinki tylko odrzucane; TC-PD-DOC-002: wyłącznie `https:` (wniosek 35 częściowo zamknięty)
+- Liczba scenariuszy bez zmian: 119 (2 warunkowe poza werdyktem)
 
 ### Rev 4 — 2026-10-23 (rejestr z commita 865714e, po merge #20; poprawki PR #19)
 
