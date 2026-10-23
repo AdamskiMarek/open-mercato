@@ -6,7 +6,7 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-19 |
-| **Rewizja** | 2026-10-23 (rev 8j — PR D: zakres D98–D130 w §21; poprzednio rev 8i — zmiana na potrzeby `project_delivery` (D98, D100): provider harmonogramu wykonawczego w `executionScheduleRegistry` costingu, zakres zbiorczy trzech modułów; poprzednio rev 8h — zakres traceability D1–D97: D95–D97 N/A; poprzednio rev 8f — zakres traceability D1–D94: D91 realizowana, D84–D90 i D92–D94 N/A; poprzednio rev 8e — zakres traceability D1–D83, D83 N/A; poprzednio rev 8d, rev 8c, rev 8b 2026-10-23, rev 8a 2026-10-20) |
+| **Rewizja** | 2026-10-23 (rev 8k — odbiór #20: faza projektu w harmonogramie inwestycji (D131), `ensureExecution` per projekt i faza, `findProjectPhase`; rev 8j — PR D: zakres D98–D130 w §21; poprzednio rev 8i — zmiana na potrzeby `project_delivery` (D98, D100): provider harmonogramu wykonawczego w `executionScheduleRegistry` costingu, zakres zbiorczy trzech modułów; poprzednio rev 8h — zakres traceability D1–D97: D95–D97 N/A; poprzednio rev 8f — zakres traceability D1–D94: D91 realizowana, D84–D90 i D92–D94 N/A; poprzednio rev 8e — zakres traceability D1–D83, D83 N/A; poprzednio rev 8d, rev 8c, rev 8b 2026-10-23, rev 8a 2026-10-20) |
 | **Moduł** | `project_schedule` (`apps/mercato/src/modules/project_schedule`) |
 | **Zależności upstream** | **`project_costing` (moduł bazowy)**, `customers`, `dictionaries`, `dashboards`, `attachments`, `notifications`, `configs`, `feature_toggles`, `audit_logs`, `query_index`, `progress` |
 | **Powiązany spec** | `.ai/specs/2026-10-19-project-costing-offer-calculator.md`; zmiana na potrzeby project_delivery (D98): `.ai/specs/2026-10-23-project-delivery-docs.md` — `project_delivery` nie importuje `project_schedule` i odwrotnie; spotykają się w `executionScheduleRegistry` costingu (§5.2) |
@@ -56,7 +56,7 @@ customers: eventy customers.deal.won ──────────────�
   executionScheduleRegistry                <─register── di.ts: InternalExecutionScheduleProvider (zmiana na potrzeby project_delivery, D100)
 ```
 
-> **Zmiana na potrzeby project_delivery (D98, D100):** trzeci moduł `project_delivery` (projekty realizacji i dokumentacja) nie ma własnego Gantta. Harmonogram wykonawczy jest tutaj. `project_delivery` nie importuje `project_schedule` i nie subskrybuje jego eventów. Czyta stan i uruchamia fazę wykonawczą wyłącznie przez `executionScheduleRegistry` (rejestr w costingu), w którym ten moduł rejestruje providera (§5.2). Bez `project_schedule` delivery działa (provider nieobecny albo `isAvailable = false`).
+> **Zmiana na potrzeby project_delivery (D98, D100):** trzeci moduł `project_delivery` (projekty realizacji i dokumentacja) nie ma własnego Gantta. Harmonogram wykonawczy jest tutaj. `project_delivery` nie importuje `project_schedule` i nie subskrybuje jego eventów. Czyta stan i uruchamia fazę wykonawczą wyłącznie przez `executionScheduleRegistry` (rejestr w costingu), w którym ten moduł rejestruje providera (§5.2). Inwestycja może mieć wiele projektów delivery (D116); harmonogram inwestycji zostaje jeden (D77), a każdy projekt ma w nim własną fazę — zadanie-podsumowanie WBS z `execution_project_id` (D131). Bez `project_schedule` delivery działa (provider nieobecny albo `isAvailable = false`).
 
 - Kierunek: `project_schedule` → `project_costing` (import typów/tokenów DI, subskrypcja eventów). Odwrotnie nic: costing nie zna eventów, tras ani tabel schedule (`packages/core/AGENTS.md` § Cross-Module Coupling).
 - Zero HTTP między modułami. Wszystkie wcześniejsze wywołania HTTP (`GET /api/project-costing/element-types`, `GET /api/project-schedule/schedules/:id/summary` wołane przez costing) zastąpione serwisami DI.
@@ -217,10 +217,11 @@ Reguła (harmonogramy deali): `execution` harmonogram jest kopią `offer` z zach
 | `sort_order` | `int` DEFAULT 0 | kolejność wśród rodzeństwa (per parent_task_id) |
 | `external_id` | `text` NULL | ID w zewnętrznym narzędziu |
 | `external_tool_id` | `uuid` NULL | FK → ps_external_integrations.id |
+| `execution_project_id` | `uuid` NULL | D131 (v1): FK-id projektu `project_delivery` (opaque, bez FK między modułami); ustawiony tylko na zadaniu-podsumowaniu fazy projektu w harmonogramie inwestycji (`parent_task_id` NULL) |
 | `created_at` | `timestamptz` | |
 | `updated_at` | `timestamptz` | |
 
-Indeksy: `(schedule_id)`, `(parent_task_id)`, `(organization_id, tenant_id)`.
+Indeksy: `(schedule_id)`, `(parent_task_id)`, `(organization_id, tenant_id)`; `UNIQUE (schedule_id, execution_project_id) WHERE execution_project_id IS NOT NULL` — jedna faza na projekt w harmonogramie (D131; wyścig `23505` → istniejące zadanie jako sukces).
 
 Constraints: `CHECK (is_milestone = false OR planned_start_at = planned_end_at)` (milestone: start = end), `CHECK (planned_end_at IS NULL OR planned_start_at IS NULL OR planned_end_at >= planned_start_at)`, `CHECK (duration_days IS NULL OR duration_days >= 0)`.
 
@@ -526,7 +527,7 @@ Kierunek: `project_schedule` używa kontraktów `project_costing` i rejestruje w
 | `calculationLookupService.getById / listByInvestment` | costing | powiązanie harmonogramu z kalkulacją, cross-deal Gantt (§7.3) |
 | `projectCostingSettings` | costing | `schedule.enabled` per organizacja (§1.0) |
 | komenda `project_costing.calculations.refresh_schedule_totals` | costing | wywoływana z subscribera tego modułu po `schedule.rescheduled` / `batch.*` (kolejka, debounce) |
-| `executionScheduleRegistry.register(InternalExecutionScheduleProvider)` — **zmiana na potrzeby project_delivery (D100)** | costing (rejestr) | `di.ts` rejestruje providera: `isAvailable(ctx)` = `false`, gdy `schedule.enabled` wyłączony w organizacji (§1.0, D67); `findForInvestment(investmentId)` → `{ scheduleId, phase }` rekordu inwestycji (D77) albo `null`; `ensureExecution({ investmentId, dealId })` → istniejący rekord inwestycji (gdy go brak — `POST /schedules` z `investmentId` przez komendę tego modułu) i komenda `create_execution` (idempotentna, §2.2; 409 `SCHEDULE_ALREADY_EXISTS` traktowane jako sukces z istniejącym ID). Konsument: `project_delivery` (v1, delivery §4.1). Zapis wyłącznie komendami tego modułu |
+| `executionScheduleRegistry.register(InternalExecutionScheduleProvider)` — **zmiana na potrzeby project_delivery (D100)** | costing (rejestr) | `di.ts` rejestruje providera: `isAvailable(ctx)` = `false`, gdy `schedule.enabled` wyłączony w organizacji (§1.0, D67); `findForInvestment(investmentId)` → `{ scheduleId, phase }` rekordu inwestycji (D77) albo `null`; `findProjectPhase({ investmentId, projectId })` → `{ scheduleId, phaseTaskId }` albo `null` (D131); `ensureExecution({ investmentId, dealId, projectId, projectLabel })` → `{ scheduleId, phaseTaskId, created }`, idempotentne per projekt i faza (D131): istniejący rekord inwestycji (gdy go brak — `POST /schedules` z `investmentId` przez komendę tego modułu), komenda `create_execution`, gdy rekord jest jeszcze w fazie `offer` (idempotentna, §2.2; 409 `SCHEDULE_ALREADY_EXISTS` traktowane jako sukces z istniejącym ID; rekord już w `execution` — faza i `execution_deal_id` bez zmian), i komenda `ensure_project_phase` — zadanie-podsumowanie fazy projektu z `execution_project_id` i etykietą `projectLabel` (wyścig `23505` → istniejące zadanie). Wiele projektów jednej inwestycji = wiele faz w jednym harmonogramie. Konsument: `project_delivery` (v1, delivery §4.1). Zapis wyłącznie komendami tego modułu |
 
 Endpointy `/api/project-schedule/*` (§6) służą UI i klientom zewnętrznym, nie innym modułom.
 
@@ -1029,14 +1030,14 @@ Zakres D1–D97: `.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`) dla D1�
 | **D68** | `employee` bez kosztów i marży | §9 |
 | **D72** | Flaga „deal ponownie otwarty”, bez usuwania danych | §1.2, §2.2 (`reopened_at`, `execution_deal_id` — także rekord inwestycji), §6.1, §14 (R15) |
 | **D74** | Zależności: `exceljs` tak; siatka najpierw `packages/ui`; `@svar-ui` tylko PoC w v1, potem osobna decyzja; `xml2js` w v2; nic nie instalujemy na etapie speki | §3.2, §8.2, §12, §14 (R13) |
-| **D77** | Jeden rekord harmonogramu na inwestycję z fazą (najpierw ofertowa, potem wykonawcza); klucz wymusza jeden główny rekord na inwestycję | §1.2, §2.2 (indeks unikalny, wyścig → 409, undo zmiany fazy), §6.1, §7.3, §14 (R10) |
+| **D77** | Jeden rekord harmonogramu na inwestycję z fazą (najpierw ofertowa, potem wykonawcza); klucz wymusza jeden główny rekord na inwestycję | §1.2, §2.2 (indeks unikalny, wyścig → 409, undo zmiany fazy), §6.1, §7.3, §14 (R10); w rekordzie osobna faza każdego projektu delivery (D131) |
 | **D80** | Następnik kamienia milowego (FS) startuje tego samego dnia (`P.start + lag`) | §3a.1, §16 (A16) |
 | **D82** | §18a nie przesądza SVAR; `@svar-ui` zostaje PoC w v1 | §3.2, §14 (R13) |
 | **D91** | XLSX na `exceljs`; moduł OM `sync_excel` (tylko CSV) nieużywany | §8.1 |
 
 D83 (split inwestycji w v1, wybór oferty głównej) — N/A w tej specyfikacji: to komenda `project_costing.investments.split` (costing §2.2, §3.12). Rekord harmonogramu inwestycji (D77) zostaje przy inwestycji źródłowej; nowa inwestycja zaczyna bez harmonogramu.
 
-Zmiana na potrzeby project_delivery (D98–D130): D98 (trzy moduły) i D100 (brak Gantta w delivery, provider w `executionScheduleRegistry`) realizowane w §0, §5.2 i §13. Pozostałe D99 (zastąpiona przez D116), D101–D130 — N/A w tej specyfikacji (projekt realizacji, dokumenty, storage, retencja: delivery §19).
+Zmiana na potrzeby project_delivery (D98–D131): D98 (trzy moduły) i D100 (brak Gantta w delivery, provider w `executionScheduleRegistry`) realizowane w §0, §5.2 i §13; D131 (faza projektu w harmonogramie inwestycji, `execution_project_id`, `ensureExecution` per projekt i faza) w §0, §2.2 (`ps_schedule_tasks`) i §5.2. Pozostałe D99 (zastąpiona przez D116), D101–D130 — N/A w tej specyfikacji (projekt realizacji, dokumenty, storage, retencja: delivery §19).
 
 D84–D90 i D92–D94 — N/A w tej specyfikacji (realizacja w costing §3.10, §14, §18a):
 - D84–D89 (waluty, kursy `NBP_A`, waluta bazowa, `decimal_places`, `snapshot_data.fx`, job kursów): harmonogram nie liczy kwot ani kursów; sumy kosztów pochodzą z costing przez DI.
@@ -1056,6 +1057,7 @@ D95–D97 — N/A w tej specyfikacji (realizacja w costing §3.10, §15, §18b; 
 
 | Data | Zmiana |
 |------|--------|
+| 2026-10-23 | **rev 8k** — odbiór #20 (Koordynator 2026-10-23, bez potwierdzenia Marka): D131 — inwestycja może mieć wiele projektów delivery (D116), harmonogram inwestycji zostaje jeden (D77), każdy projekt ma w nim własną fazę (zadanie-podsumowanie WBS, nowa kolumna `ps_schedule_tasks.execution_project_id` z unikalnością per harmonogram); provider: `findProjectPhase`, `ensureExecution({ investmentId, dealId, projectId, projectLabel })` idempotentne per projekt i faza, komenda `ensure_project_phase`; §21: D131. |
 | 2026-10-23 | **rev 8j** — PR D (tylko dokumentacja): §21 zakres D98–D130 (D116–D130 N/A; D99 — zastąpiona przez D116); changelog rev 8i: zakres D98–D115. |
 | 2026-10-23 | **rev 8i** — zmiana na potrzeby project_delivery (D98, D100), bez zmian w modelu danych, trasach i eventach. Nagłówek „Powiązany spec” + notka w §0 (trzy moduły). §5.2: rejestracja `InternalExecutionScheduleProvider` w `executionScheduleRegistry` costingu (`isAvailable`, `findForInvestment`, `ensureExecution` → `create_execution`, idempotentne). §13 „Zakres zbiorczy (trzy moduły)”. §21: akapit o D98–D115. |
 | 2026-10-23 | **rev 8h** — traceability D1–D97 (§21): D95–D97 (waluta bez źródła kursu, jedno źródło kursu, c46ad643) N/A z powodami — dotyczą costing. Źródło D95–D97: `.ai/decisions.md` z tego PR; D84–D94: @0f0c6aa. |

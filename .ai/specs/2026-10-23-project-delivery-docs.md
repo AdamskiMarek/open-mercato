@@ -6,7 +6,7 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-23 |
-| **Rewizja** | 2026-10-23 (rev 5 — PR D: decyzje Koordynatora D116–D120 (zamykają O1, O11, O13, O14; ZIP przetargu jako dowód) i reguły speki przeniesione do rejestru jako D121–D130; odwołania w specu; rev 4a — D110: proces serwera HTTP zamiast „RAM aplikacji”, bufor RAM tylko w workerze; rev 4 — odbiór #18: bufor tylko w RAM, współbieżność 1 tylko dla kolejek `project_delivery`, parametry presji RAM (O13), PoC OVHcloud (R22, KA-7), kopia zapasowa przy jednej strefie (O14); rev 3 — uwagi z niezależnego planu testów (PR C), rozstrzygnięcia techniczne §5.12; rev 2 — D114 akceptacje, D115 worker na istniejącej kolejce, domyślny dostawca S3 wg tabeli §5.11; rev 1 — decyzje D98–D113, stan VPS na 23.10, warianty storage A/B, retencja, kryteria akceptacji) |
+| **Rewizja** | 2026-10-23 (rev 5a — odbiór #20: §0.4 zdarzenia quota zgodne z D118, jeden projekt na deal bez unikalności per inwestycja i faza projektu w harmonogramie inwestycji (D116, D131), dopłata za nadwyżkę (D118), oryginał ZIP jako archiwum dowodowe (D119), kopia B2 poza quota (D117); rev 5 — PR D: decyzje Koordynatora D116–D120 (zamykają O1, O11, O13, O14; ZIP przetargu jako dowód) i reguły speki przeniesione do rejestru jako D121–D130; odwołania w specu; rev 4a — D110: proces serwera HTTP zamiast „RAM aplikacji”, bufor RAM tylko w workerze; rev 4 — odbiór #18: bufor tylko w RAM, współbieżność 1 tylko dla kolejek `project_delivery`, parametry presji RAM (O13), PoC OVHcloud (R22, KA-7), kopia zapasowa przy jednej strefie (O14); rev 3 — uwagi z niezależnego planu testów (PR C), rozstrzygnięcia techniczne §5.12; rev 2 — D114 akceptacje, D115 worker na istniejącej kolejce, domyślny dostawca S3 wg tabeli §5.11; rev 1 — decyzje D98–D113, stan VPS na 23.10, warianty storage A/B, retencja, kryteria akceptacji) |
 | **Moduł** | `project_delivery` (`apps/mercato/src/modules/project_delivery`; nazwa i prefiks tabel `pd_`, D98) |
 | **Zależności upstream** | **`project_costing` (moduł bazowy)**, `customers`, `directory`, `auth`, `configs` (ModuleConfigService), `audit_logs`, `query_index`, `progress` (ProgressJob), `notifications`, `feature_toggles`, **`@open-mercato/storage-s3`** (klient S3, preset env, `endpoint-safety`; moduł `storage_s3` za `OM_ENABLE_STORAGE_S3`), `@open-mercato/queue` |
 | **Moduły powiązane** | `project_costing` (spec `.ai/specs/2026-10-19-project-costing-offer-calculator.md`) — baza, właściciel kontraktów DI; `project_schedule` (spec `.ai/specs/2026-10-19-project-schedule.md`) — opcjonalny dostawca harmonogramu wykonawczego, rejestruje się w rejestrze costingu; `project_delivery` nie importuje `project_schedule` i odwrotnie (D98, D100) |
@@ -19,10 +19,10 @@
 ## TLDR
 
 - **Co:** trzeci moduł Klin #1 (D98). Po wygranym przetargu handlowiec jawną komendą „wygrany przetarg → realizacja” zakłada **projekt realizacji** z szablonu segmentu (D116; także dla deala bez kalkulacji w OM). Projekt ma etapy, zadania, kamienie milowe, foldery z ACL i dokumenty z rewizjami (D106).
-- **Powiązania:** projekt wskazuje deal (`closure_outcome = 'won'`), zwycięską wersję oferty (kalkulacja + snapshot) i inwestycję (`pc_investments`), o ile kalkulacja jest w OM; bez kalkulacji wartość i walutę bierze z deala, a kalkulację można podpiąć później. Jeden projekt na deal (D116; D99 — zastąpiona przez D116).
-- **Bez własnego Gantta (D100):** harmonogram wykonawczy to `project_schedule` (jeden rekord na inwestycję, D77). Projekt go linkuje albo uruchamia (v1) przez rejestr DI w costingu. Bez harmonogramu projekt działa normalnie (D19, D47, D67). Kamienie milowe linkują pozycje i sekcje kalkulacji (D101).
+- **Powiązania:** projekt wskazuje deal (`closure_outcome = 'won'`), zwycięską wersję oferty (kalkulacja + snapshot) i inwestycję (`pc_investments`), o ile kalkulacja jest w OM; bez kalkulacji wartość i walutę bierze z deala, a kalkulację można podpiąć później. Jeden projekt na wygrany deal; inwestycja może mieć wiele projektów, np. wygrane części przetargu (D116; D99 — zastąpiona przez D116).
+- **Bez własnego Gantta (D100):** harmonogram wykonawczy to `project_schedule` (jeden rekord na inwestycję, D77; w nim osobna faza każdego projektu, D131). Projekt go linkuje albo uruchamia (v1) przez rejestr DI w costingu. Bez harmonogramu projekt działa normalnie (D19, D47, D67). Kamienie milowe linkują pozycje i sekcje kalkulacji (D101).
 - **Dokumenty (D102–D105):** metadane w OM, pliki w storage zgodnym z S3 w UE. Domyślny dostawca = najtańszy w UE w pełni kompatybilny z `storage-s3` (z `If-None-Match`): wg tabeli §5.11 OVHcloud Object Storage; fallback Backblaze B2 EU Central z adapterem (D111). **Żadnych plików na VPS i żadnych plików w procesie serwera HTTP aplikacji (D110):** upload i pobieranie tylko przez presigned URL (multipart dla dużych plików); import ZIP strumieniowo w istniejącym workerze kolejki OM, bez nowego kontenera (D115). Rewizje są niemutowalne, do produkcji idzie najnowsza zatwierdzona (D103).
-- **Storage per organizacja (D112):** wariant A (nasz bucket u domyślnego dostawcy z D111, limit GB w abonamencie jako limit miękki: ostrzeżenia przy 80% i 100%, blokada nowych plików powyżej 110%, bez automatycznego usuwania — D118) albo B (storage klienta). MVP: tylko A z quota per organizacja; wersjonowanie bucketu OVHcloud włączone i kopia bazy, v1 nocna kopia do B2 (D117).
+- **Storage per organizacja (D112):** wariant A (nasz bucket u domyślnego dostawcy z D111, limit GB w abonamencie jako limit miękki: ostrzeżenia przy 80% i 100%, zużycie ponad 100% płatne jako dopłata za nadwyżkę w okresie rozliczeniowym, blokada nowych plików powyżej 110%, bez automatycznego usuwania — D118) albo B (storage klienta). MVP: tylko A z quota per organizacja; wersjonowanie bucketu OVHcloud włączone i kopia bazy, v1 nocna kopia do B2, poza quota klienta (D117).
 - **Retencja (D113):** pole w ustawieniach i data końca retencji na projekcie (podpowiedź: koniec gwarancji i rękojmi). **Nigdy** automatycznego usunięcia bez potwierdzenia administratora.
 - **Fazy:** MVP — projekt, struktura, dokumenty na S3, podgląd PDF, import e-Zamówień, TED tylko metadane i link. v1 — rejestr rysunków, akceptacje (własna walidacja progów za `ApprovalEngine`, D114, §9), transmittale, RFI, protokoły, Google Drive (link), billing % kamieni (D107); alerty quota w MVP (D118). v2 — gwarancja/rękojmia, jakość per partia, inne dyski, bucket klienta, OCR, DWG, podpis kwalifikowany (D108).
 - **Prawo (D109):** e-dziennik budowy, rękojmia, zabezpieczenie Pzp i retencja to ryzyka do weryfikacji prawnej (§12), nie wymagania.
@@ -79,7 +79,7 @@ Reguły (`packages/core/AGENTS.md` § Cross-Module Coupling; checklista Kod p1):
 | `calculationLookupService.getWinningOffer(dealId, ctx)` | `{ calculationId, snapshotId, investmentId, offerRole, calculationStatus, closureOutcome, segmentCode, currency } \| null`. Wersja = kalkulacja deala w statusie `sent`/`accepted` z istniejącym `pc_offer_snapshots`; rola z `pc_deal_offer_roles`. Bez kwot kosztu i marży. `null` = deal bez kalkulacji w OM → projekt bez oferty (D116) | `project_costing` | `project_delivery` (komenda tworzenia projektu i podpięcia oferty, §3) |
 | `calculationLookupService.listStructure(calculationId, ctx)` | sekcje i pozycje wersji: `{ lineId, parentLineId, lineType, label, sortOrder, unit, quantity }`, bez cen, kosztów i marży (checklista p3) | `project_costing` | `project_delivery` (linki kamieni, D101) |
 | `calculationLookupService.getSnapshotSectionPriceTotals(snapshotId, ctx)` — **v1** | sumy cen sprzedaży sekcji ze snapshotu (bez kosztu i marży) do billing % | `project_costing` | `project_delivery` v1 (D101) |
-| `executionScheduleRegistry` | `register(provider)`, `get(ctx)`. `ExecutionScheduleProvider`: `isAvailable(ctx)`, `findForInvestment(investmentId, ctx) → { scheduleId, phase } \| null`, `ensureExecution({ investmentId, dealId }, ctx) → { scheduleId, created }` (idempotentne) | `project_costing/di.ts` (pusty rejestr) | `project_schedule/di.ts` rejestruje providera; `project_delivery` czyta |
+| `executionScheduleRegistry` | `register(provider)`, `get(ctx)`. `ExecutionScheduleProvider`: `isAvailable(ctx)`, `findForInvestment(investmentId, ctx) → { scheduleId, phase } \| null`, `findProjectPhase({ investmentId, projectId }, ctx) → { scheduleId, phaseTaskId } \| null`, `ensureExecution({ investmentId, dealId, projectId, projectLabel }, ctx) → { scheduleId, phaseTaskId, created }` (idempotentne per projekt i faza, D131) | `project_costing/di.ts` (pusty rejestr) | `project_schedule/di.ts` rejestruje providera; `project_delivery` czyta |
 
 Costing nie woła `executionScheduleRegistry` sam. To czysty punkt styku, wzorem `scheduleSourceRegistry`. Gdy żaden provider nie jest zarejestrowany, `get()` zwraca `null`.
 
@@ -126,12 +126,11 @@ project_delivery.document.revision_created   (clientBroadcast: true)
 project_delivery.document.revision_approved  (clientBroadcast: true)
 project_delivery.document.deleted
 project_delivery.import.completed       (clientBroadcast: true)
-project_delivery.storage.quota_threshold_reached   (v1 alerty; MVP: tylko przy przekroczeniu)
-project_delivery.storage.quota_exceeded
+project_delivery.storage.quota_threshold_reached   (MVP, D118: progi 80% i 100% liczone od `used`, raz na przejście progu; payload z ID i progiem)
 project_delivery.storage.purged
 ```
 
-Payload = ID: `{ id, organizationId, tenantId, projectId?, dealId?, investmentId? }`. Bez nazw plików, bez kwot. `clientBroadcast` tylko z ID.
+Payload = ID: `{ id, organizationId, tenantId, projectId?, dealId?, investmentId? }`. Bez nazw plików, bez kwot. Blokada powyżej 110% (D118) nie ma eventu: to tylko odpowiedź 413 `STORAGE_QUOTA_EXCEEDED`; event `quota_exceeded` nie istnieje. `clientBroadcast` tylko z ID.
 
 ### 0.5 Subskrypcje (wszystkie `persistent: true`)
 
@@ -214,7 +213,7 @@ Wniosek (D110): jeden import dokumentacji budowlanej (setki MB) buforowany w RAM
 | `template_id` | `uuid` NULL | FK → `pd_project_templates` |
 | `deal_id` | `uuid` NOT NULL | FK-id → deal (`customers`) |
 | `winning_offer_version_id` | `uuid` NULL | FK-id → `pc_calculations.id` (wersja zwycięskiej oferty); NULL = deal bez kalkulacji w OM, do podpięcia komendą `link_winning_offer` (D116) |
-| `winning_offer_snapshot_id` | `uuid` NULL | FK-id → `pc_offer_snapshots.id` (zamrożona oferta); NULL razem z `winning_offer_version_id` (CHECK, D116) |
+| `winning_offer_snapshot_id` | `uuid` NULL | FK-id → `pc_offer_snapshots.id` (zamrożona oferta); NULL razem z `winning_offer_version_id` (CHECK `pd_projects_offer_all_or_none`, D116) |
 | `investment_id` | `uuid` NULL | FK-id → `pc_investments.id`; z oferty, NULL bez oferty (D116) |
 | `deal_snapshot` | `jsonb` NOT NULL | `title`, `closure_outcome`, `owner_user_id`, `customer` (nazwa, NIP), `value_amount`, `value_currency` (wartość i waluta projektu bez oferty, D116), `deleted` |
 | `offer_snapshot` | `jsonb` NULL | NULL bez oferty (D116); `calculation_number`, `version_no`, `currency`, `sent_at`, `offer_role` — bez kosztów i marży |
@@ -231,14 +230,18 @@ Indeksy (D116; D99 — zastąpiona przez D116):
 ```sql
 CREATE UNIQUE INDEX pd_projects_one_per_deal
   ON pd_projects (organization_id, tenant_id, deal_id) WHERE deleted_at IS NULL;
-CREATE UNIQUE INDEX pd_projects_one_per_investment
+CREATE INDEX pd_projects_by_investment
   ON pd_projects (organization_id, tenant_id, investment_id)
-  WHERE deleted_at IS NULL AND investment_id IS NOT NULL;
+  WHERE deleted_at IS NULL AND investment_id IS NOT NULL;   -- bez UNIQUE: inwestycja może mieć wiele projektów (D116)
+ALTER TABLE pd_projects ADD CONSTRAINT pd_projects_offer_all_or_none CHECK (
+  (winning_offer_version_id IS NULL) = (winning_offer_snapshot_id IS NULL)
+  AND (winning_offer_version_id IS NULL) = (offer_snapshot IS NULL)
+);
 ```
 
-Główna reguła to jeden projekt na deal (`deal_id` NOT NULL). Projekt może powstać bez oferty i bez inwestycji (D116), więc `winning_offer_version_id`, `winning_offer_snapshot_id` i `investment_id` są nullable. Indeksu per wersja oferty nie ma: wersja oferty należy do deala, a deal ma najwyżej jeden projekt. Unikalność per inwestycja jest indeksem częściowym `… AND investment_id IS NOT NULL`: projekty bez inwestycji nie są unikalne per inwestycja, a unikalność pilnuje indeks per deal. Konflikt przy tworzeniu albo przy podpięciu oferty → 409 `PROJECT_EXISTS`. Nie używamy `NULLS NOT DISTINCT`: wymaga Postgresa 15+ i dawałby jeden projekt „bez inwestycji” na organizację, czyli złą semantykę (§5.12 pkt 6).
+Jedyna reguła unikalności to jeden projekt na wygrany deal (`deal_id` NOT NULL, `pd_projects_one_per_deal`). Projekt może powstać bez oferty i bez inwestycji (D116), więc `winning_offer_version_id`, `winning_offer_snapshot_id`, `offer_snapshot` i `investment_id` są nullable; trzy kolumny oferty są NULL razem albo razem ustawione (`pd_projects_offer_all_or_none`). Indeksu per wersja oferty nie ma: wersja oferty należy do deala, a deal ma najwyżej jeden projekt. Unikalności per inwestycja nie ma: inwestycja może mieć wiele projektów (każda wygrana część przetargu to osobny deal i osobny projekt), a `pd_projects_by_investment` jest zwykłym indeksem do wyszukiwania. Drugi projekt dla tego samego deala (przy tworzeniu) → 409 `PROJECT_EXISTS`. Nie używamy `NULLS NOT DISTINCT`: wymaga Postgresa 15+, a unikalność dotyczy tylko `deal_id` NOT NULL (§5.12 pkt 6).
 
-Jedna inwestycja ma najwyżej jedną ofertę `primary` (D51, D65), a wygrać można najwyżej jedną (D5). Dlatego unikalność per inwestycja jest zgodna z „jeden projekt na deal” (D116). Split inwestycji (D83, v1): projekt zostaje przy inwestycji, do której trafił deal projektu. Komenda split jest w costingu, a delivery odświeża `investment_id` subscriberem `project_costing.investment.updated` (v1).
+Projekty tej samej inwestycji dzielą jeden harmonogram inwestycji (D77), a każdy projekt ma w nim własną fazę (zadanie-podsumowanie WBS, D131). Split inwestycji (D83, v1): projekt zostaje przy inwestycji, do której trafił deal projektu. Komenda split jest w costingu, a delivery odświeża `investment_id` subscriberem `project_costing.investment.updated` (v1).
 
 #### `pd_project_templates` + `pd_project_template_items`
 
@@ -326,7 +329,11 @@ Zużycie organizacji = suma `pd_document_revisions.size_bytes` (bez usuniętych 
 
 #### `pd_imports` (§5.6)
 
-`project_id`, `source` (`ezamowienia` | `ted` | `zip_upload`), `source_ref`, `progress_job_id`, `status`, `report` (`jsonb`: liczba plików, pominięte z powodem, linki zewnętrzne, bajty). Raport bez treści plików.
+`project_id`, `source` (`ezamowienia` | `ted` | `zip_upload`), `source_ref`, `progress_job_id`, `status`, `original_revision_id` (`uuid` NULL; rewizja oryginału ZIP w `00 Przetarg`, D119 — podstawa pozycji „archiwum dowodowe” w widoku zużycia), `report` (`jsonb`: liczba plików, pominięte z powodem, linki zewnętrzne, bajty). Raport bez treści plików.
+
+#### `pd_storage_usage_periods` (§5.5, D118)
+
+`organization_id`, `tenant_id`, `period_start`, `period_end`, `peak_used_bytes` (`bigint`; szczytowe `used` w okresie), `quota_bytes` (limit obowiązujący w okresie); unique `(organization_id, period_start)`. Aktualizowane przy zatwierdzeniu zużycia pod advisory lockiem per organizacja. Nadwyżka okresu = `max(0, peak_used_bytes − quota_bytes)`; stawka i okres z cennika. Bez kwot pieniężnych w tabeli.
 
 #### `pd_document_sequences`
 
@@ -350,18 +357,18 @@ Sekwencje numeracji projektów (i od v1 transmittali, RFI, protokołów) per org
 
 ## 3. Tworzenie projektu — „wygrany przetarg → realizacja” (D116; D99 — zastąpiona przez D116)
 
-**Wejście:** przycisk na zakładce deala (`detail:customers.deal:tabs`, widoczny tylko dla `closure_outcome = 'won'`) albo `POST /api/project-delivery/projects/from-won-deal` `{ dealId, templateCode?, segmentCode?, name?, managerUserId? }` (`segmentCode` wymagany tylko bez oferty).
+**Wejście:** przycisk na zakładce deala (`detail:customers.deal:tabs`, widoczny tylko dla `closure_outcome = 'won'`) albo `POST /api/project-delivery/projects/from-won-deal` `{ dealId, templateCode?, segmentCode?, name?, managerUserId? }` (`segmentCode` wymagany tylko bez oferty; brak → 422 `SEGMENT_REQUIRED`).
 
 **Walidacje w komendzie `create_from_won_deal` (jedna transakcja):**
 1. Moduł włączony w organizacji (§0.6), feature `project_delivery.projects.create`.
 2. Deal istnieje, `deleted_at IS NULL`, `closure_outcome = 'won'` → inaczej 422 `DEAL_NOT_WON`.
-3. `calculationLookupService.getWinningOffer(dealId)`: gdy zwraca ofertę, musi to być oferta z rolą `primary` (D51, D65) ze snapshotem → inaczej 422 `OFFER_NOT_PRIMARY`; projekt dostaje ofertę, snapshot oferty i inwestycję. Gdy zwraca `null` (deal bez kalkulacji w OM), projekt powstaje bez oferty i bez inwestycji, a wartość i walutę bierze z deala (`deal_snapshot.value_amount`, `value_currency`); kamienie milowe nie mają linków do oferty (D116).
-4. Brak aktywnego projektu dla deala i (gdy jest inwestycja) dla inwestycji (partial unique, D116). Wyścig → `23505` → 409 `PROJECT_EXISTS` z `existingProjectId`.
+3. `calculationLookupService.getWinningOffer(dealId)`: gdy zwraca ofertę, musi to być oferta z rolą `primary` (D51, D65) ze snapshotem → inaczej 422 `OFFER_NOT_PRIMARY`; projekt dostaje ofertę, snapshot oferty i inwestycję. Gdy zwraca `null` (deal bez kalkulacji w OM), projekt powstaje bez oferty i bez inwestycji (bez `segmentCode` → 422 `SEGMENT_REQUIRED`), a wartość i walutę bierze z deala (`deal_snapshot.value_amount`, `value_currency`); kamienie milowe nie mają linków do oferty (D116).
+4. Brak aktywnego projektu dla deala (partial unique `pd_projects_one_per_deal`, D116); inny projekt tej samej inwestycji nie blokuje. Istniejący projekt deala albo wyścig (`23505`) → 409 `PROJECT_EXISTS` z `existingProjectId`.
 5. Szablon: `templateCode` albo domyślny dla `segment_code` oferty (bez oferty: `segmentCode` z żądania). Brak szablonu → projekt z jednym etapem i folderem `00 Przetarg` (bez błędu).
 
 **Efekt:** projekt + etapy, zadania, kamienie milowe i foldery z szablonu. Snapshot deala i oferty, właściciel/kierownik, event `project_delivery.project.created`. Z UI opcjonalnie: start importu dokumentacji przetargowej (§5.6) i (v1) uruchomienie harmonogramu wykonawczego (§4.1).
 
-**Podpięcie kalkulacji później (D116):** `POST /api/project-delivery/projects/:id/winning-offer` `{ calculationId }` → komenda `link_winning_offer` (feature `project_delivery.projects.manage`, audyt). Wymaga projektu bez oferty i wersji oferty deala projektu z rolą `primary` i snapshotem → inaczej 422 `OFFER_NOT_PRIMARY`; inwestycja zajęta przez inny projekt → 409 `PROJECT_EXISTS`. Po podpięciu działają linki kamieni (D101).
+**Podpięcie kalkulacji później (D116):** `POST /api/project-delivery/projects/:id/winning-offer` `{ calculationId }` → komenda `link_winning_offer` (feature `project_delivery.projects.manage`, audyt). Projekt, który ma już ofertę → 409 `OFFER_ALREADY_LINKED` (zmiana podpiętej oferty nie jest w zakresie; undo komendy wg reguły wyżej). Wersja oferty musi należeć do deala projektu, mieć rolę `primary` i snapshot → inaczej 422 `OFFER_NOT_PRIMARY`. Inny projekt tej samej inwestycji nie blokuje podpięcia (D116). Po podpięciu działają linki kamieni (D101) i faza projektu w harmonogramie inwestycji (D131, v1).
 
 **Nie robimy:** automatycznego tworzenia projektu przez subscriber `customers.deal.won` ani przez n8n (D116; wizja: n8n nie tworzy projektów). Projekt to świadoma decyzja handlowca.
 
@@ -373,12 +380,13 @@ Sekwencje numeracji projektów (i od v1 transmittali, RFI, protokołów) per org
 
 ### 4.1 Harmonogram wykonawczy (D100; v1)
 
-- `project_delivery` nie ma Gantta, zależności zadań ani auto-planowania. Harmonogram wykonawczy to rekord `ps_schedules` inwestycji w fazie `execution` (D77). Po wygraniu deala schedule sam zmienia fazę oferty na wykonawczą (D24, subscriber `dealWon.ts` w schedule).
+- `project_delivery` nie ma Gantta, zależności zadań ani auto-planowania. Harmonogram wykonawczy to rekord `ps_schedules` inwestycji w fazie `execution` (D77). Inwestycja może mieć wiele projektów (D116); każdy projekt ma w tym rekordzie własną fazę: zadanie-podsumowanie WBS z `execution_project_id` = ID projektu (D131). Druga wygrana część przetargu tworzy nowy projekt i nową fazę w tym samym harmonogramie. Po wygraniu deala schedule sam zmienia fazę oferty na wykonawczą (D24, subscriber `dealWon.ts` w schedule).
 - Zakładka „Harmonogram” na projekcie: `executionScheduleRegistry.get(ctx)`:
   - `null` albo `isAvailable() = false` (moduł nieobecny, wyłączony w organizacji, D19/D47/D67) → komunikat „Harmonogram nie jest używany w tej firmie”, bez błędu;
-  - `findForInvestment(investmentId)` zwraca rekord → link do widoku Gantta inwestycji w schedule (`/project-schedule/investments/:investmentId/gantt`, schedule §6.1);
-  - brak rekordu → przycisk „Uruchom harmonogram wykonawczy” (feature `project_delivery.projects.manage` **oraz** feature schedule wymagany przez jego komendę) → `ensureExecution({ investmentId, dealId })` → komenda schedule `create-execution` (idempotentna; schedule §6.1, D77).
-- Brak przechowywanego `schedule_id` w `pd_projects`: link rozwiązywany przy odczycie, więc nie ma rozjazdu po zmianach w schedule.
+  - projekt bez inwestycji (bez oferty, D116) → komunikat „Harmonogram dostępny po podpięciu oferty”, bez przycisku;
+  - `findProjectPhase({ investmentId, projectId })` zwraca fazę → link do widoku Gantta inwestycji w schedule (`/project-schedule/investments/:investmentId/gantt`, schedule §6.1) z zaznaczoną fazą projektu;
+  - brak fazy projektu → przycisk „Uruchom harmonogram wykonawczy” (feature `project_delivery.projects.manage` **oraz** feature schedule wymagany przez jego komendę) → `ensureExecution({ investmentId, dealId, projectId, projectLabel })` → rekord inwestycji, komenda schedule `create-execution` (idempotentna; schedule §6.1, D77) i faza projektu (idempotentna per projekt, D131).
+- Brak przechowywanego `schedule_id` ani ID fazy w `pd_projects`: link rozwiązywany przy odczycie, więc nie ma rozjazdu po zmianach w schedule.
 - MVP: zakładka ukryta. Schedule nie wchodzi do MVP (costing §14 „Zakres zbiorczy”), a projekt działa bez harmonogramu.
 
 ### 4.2 Kamienie milowe ↔ kalkulacja (D101)
@@ -418,7 +426,7 @@ Reguły:
 - MVP przyjmuje tylko `A`. Zapis `B` → 422 `STORAGE_VARIANT_NOT_AVAILABLE` z informacją o fazie. UI pokazuje B jako niedostępny („od v1/v2”).
 - Zmiana wariantu nie przenosi i nie usuwa istniejących plików. Pliki w A zostają i liczą się do quota, aż administrator je zarchiwizuje lub usunie (§5.8).
 - W wariancie B (link) pliki nie zużywają quota A. Linki działają we wszystkich wariantach (ręczny link, MVP).
-- Limity i ceny to **parametry konfiguracji bez wartości** (należą do cennika): `storage.quota_bytes` (limit miękki, D118), ewentualna stawka za zużycie ponad 100% i `storage.backup_copy` (v1, D117). Spec nie podaje wartości.
+- Limity i ceny to **parametry konfiguracji bez wartości** (należą do cennika): `storage.quota_bytes` (limit miękki, D118), `storage.overage_rate` (stawka dopłaty za nadwyżkę ponad 100%, rozliczanej w okresie rozliczeniowym, D118, D112) i `storage.backup_copy` (v1, D117; kopia B2 nie liczy się do quota klienta — koszt operacyjny w cenie). Spec nie podaje wartości.
 
 ### 5.3 Upload z przeglądarki — presigned PUT i multipart (D102, D110)
 
@@ -453,10 +461,12 @@ Serwer nie widzi bajtów pliku. Moduł ma **własne trasy i własne feature'y** 
 - Quota core `attachments` jest **per tenant** i ma jeden limit z env (`quota-service.ts` l.148–163: suma per `tenant_id`, porównanie z `resolveAttachmentTenantQuotaBytes()`; domyślnie 512 MB, `upload-limits.ts` l.2). Nie pasuje do „quota per organizacja” ani do wariantu A z limitem miękkim (D118). Dlatego moduł ma własny ledger (`pd_upload_sessions` + suma rewizji, §2.2), wzorowany na `attachment_quota_reservations` (rezerwacja przy presign, zatwierdzenie przy complete, zwolnienie przy abort/expiry).
 - **Jednostka quota = organizacja (D15, D112), nie tenant.** Limit tenanta `attachments` (env `OM_ATTACHMENT_TENANT_QUOTA_MB` przez `resolveAttachmentTenantQuotaBytes()`) nie dotyczy plików projektów: leżą w osobnym buckecie (R6), poza `attachments`, i nie trafiają do `reconcileTenantS3Objects`. Zużycie tenanta z wieloma organizacjami = suma ledgerów organizacji (tylko raport, bez osobnego limitu w MVP). Quota liczy rewizje do potwierdzonego purge (§5.8), także po soft delete (D126). Quota liczy wszystkie wersje obiektu do potwierdzonego purge (D117); wersje niebieżące (B2, OVHcloud z wersjonowaniem) nie istnieją w normalnym przebiegu, bo klucze są losowe i zapisywane raz; po purge ledger zmniejsza się dopiero po potwierdzeniu, że nie została żadna wersja (§5.12 pkt 3 i 5).
 - Sprawdzenie przy rezerwacji (pod advisory lockiem per organizacja): `used + reserved + sizeBytes` względem `storage.quota_bytes` (limit miękki, D118):
-  - do 110% limitu → OK. Przekroczenie 80% i 100% → event `project_delivery.storage.quota_threshold_reached` (raz na przejście progu, ID organizacji i próg) i ostrzeżenie dla administratora organizacji; ewentualna opłata za zużycie ponad 100% to parametr planu cenowego bez wartości;
+  - do 110% limitu → OK. Zużycie ponad 100% jest płatne: dopłata za nadwyżkę rozliczana w okresie rozliczeniowym (D118, D112; stawka `storage.overage_rate`, parametr cennika bez wartości);
   - powyżej 110% limitu (`> 1,1 × storage.quota_bytes`) → **413** `STORAGE_QUOTA_EXCEEDED` z `usedBytes`, `limitBytes`, `requestedBytes`; bez URL, bez obiektu w S3. Odczyt, pobieranie, podgląd i dokumenty-linki działają dalej; nic nie jest usuwane automatycznie.
+- **Alerty 80% i 100% (D118):** próg liczony od `used` = suma `size_bytes` rewizji do potwierdzonego purge (zużycie zatwierdzone, bez rezerwacji `reserved`, bo rezerwacja może zostać zwolniona). Sprawdzenie przy każdym zatwierdzeniu zużycia (`uploads.complete`, rewizja z importu, kopia oryginału ZIP) pod tym samym advisory lockiem: dla progu p ∈ {80%, 100%} event `project_delivery.storage.quota_threshold_reached` (ID organizacji i próg) i ostrzeżenie dla administratora organizacji powstają, gdy `used_przed < p × storage.quota_bytes ≤ used_po`. Jedno zatwierdzenie przez oba progi → dwa eventy. Ponowne uzbrojenie: gdy `used` spadnie poniżej progu (tylko po potwierdzonym purge, D122), kolejne przejście w górę daje nowy event. Bez osobnego stanu „alert wysłany”.
+- **Dopłata za nadwyżkę (D118):** moduł zapisuje szczytowe `used` organizacji w okresie rozliczeniowym (`pd_storage_usage_periods`: organizacja, okres, `peak_used_bytes`, `quota_bytes`; aktualizacja przy zatwierdzeniu pod tym samym lockiem). Nadwyżka okresu = `max(0, peak_used_bytes − quota_bytes)`; stawka i okres to parametry cennika bez wartości; fakturowanie jest poza modułem. Kopia B2 (v1, D117) nie wchodzi do `used`.
 - `storage.quota_bytes` nieustawiony (brak wartości z cennika) → upload zablokowany (fail-closed) z 422 `STORAGE_QUOTA_NOT_CONFIGURED` i komunikatem dla administratora. Linki i metadane działają.
-- Widok zużycia: ustawienia organizacji (zajęte/limit/rezerwacje, top projekty).
+- Widok zużycia: ustawienia organizacji (zajęte/limit/rezerwacje, top projekty, nadwyżka bieżącego okresu); oryginały ZIP przetargów (`pd_imports.original_revision_id`, D119) wliczają się do quota bez wyjątków i są pokazane osobno jako pozycja „archiwum dowodowe”.
 
 ### 5.6 Import dokumentacji przetargowej — e-Zamówienia i ZIP (D106, D110)
 
@@ -472,7 +482,7 @@ Serwer nie widzi bajtów pliku. Moduł ma **własne trasy i własne feature'y** 
 **Strumień (pamięć ograniczona, bez dysku):**
 1. Pobranie pliku z e-Zamówień: `fetch` → `ReadableStream` → `Upload` z `@aws-sdk/lib-storage` (multipart, `partSize` i `queueSize` ograniczone parametrami; pamięć ≈ `partSize × queueSize`) do `staging/{importId}/…`. Bez `Buffer.concat`, bez pliku tymczasowego. Fallback bez nowej zależności: ręczny multipart komendami `client-s3` z tym samym ograniczeniem.
 2. Plik nie-ZIP → `CopyObject`/`UploadPartCopy` (po stronie S3, bez transferu przez worker) albo bezpośrednio docelowy klucz → `documents.add_revision` w folderze `00 Przetarg`.
-3. ZIP (najpierw w całości w `staging/`, bo katalog centralny jest na końcu pliku — uzasadnienie i alternatywa strumieniowa: §5.12 pkt 1) → oryginał ZIP kopiowany po stronie S3 (`CopyObject`/`UploadPartCopy`) jako niemutowalna rewizja dokumentu w folderze `00 Przetarg` (dowód; quota, retencja, purge tylko administrator; brak miejsca na oryginał → import `failed` z powodem `quota`, bez rozpakowania — D119) → czytanie katalogu centralnego i wpisów **zakresami** (`GetObject` z `Range`) przez `yauzl.fromRandomAccessReader` (losowy dostęp bez pobierania całości). Każdy wpis: `openReadStream` → sha256 w locie → `Upload` (multipart) do klucza docelowego → komenda `add_revision` z zachowaniem ścieżki katalogów jako folderów (zagnieżdżone foldery tworzone komendą). Odczyt zakresami, sha256 w locie: D124.
+3. ZIP (najpierw w całości w `staging/`, bo katalog centralny jest na końcu pliku — uzasadnienie i alternatywa strumieniowa: §5.12 pkt 1) → oryginał ZIP kopiowany po stronie S3 (`CopyObject`/`UploadPartCopy`) jako niemutowalna rewizja dokumentu w folderze `00 Przetarg` (dowód; liczy się do quota bez wyjątków, w widoku zużycia jako „archiwum dowodowe”; retencja; purge tylko administrator — D119). Przed kopią: rezerwacja quota na rozmiar ZIP; gdy `used + reserved + rozmiar ZIP > 1,1 × storage.quota_bytes` (próg blokady 110%, D118) → import `failed` z powodem `quota`, bez kopii i bez rozpakowania. sha256 oryginału liczy worker importu w locie, zgodnie z D124: dla `ezamowienia` przy pobieraniu do `staging/` (pkt 1), dla `zip_upload` jednym strumieniowym `GetObject` ze `staging/` przed kopią. Rewizja oryginału z identycznym sha256 w `00 Przetarg` już istnieje → kopia pominięta (raport „pominięte: duplikat”, D123), rozpakowanie idzie dalej → czytanie katalogu centralnego i wpisów **zakresami** (`GetObject` z `Range`) przez `yauzl.fromRandomAccessReader` (losowy dostęp bez pobierania całości). Każdy wpis: `openReadStream` → sha256 w locie → `Upload` (multipart) do klucza docelowego → komenda `add_revision` z zachowaniem ścieżki katalogów jako folderów (zagnieżdżone foldery tworzone komendą). Odczyt zakresami, sha256 w locie: D124.
 4. Ochrony ZIP (parametry): maksymalna liczba wpisów, maksymalny łączny rozmiar po rozpakowaniu, maksymalny współczynnik kompresji (zip bomb), odrzucenie ścieżek `..`/absolutnych/symlinków, normalizacja nazw (UTF-8 i CP852/CP437 w polskich archiwach), zagnieżdżony ZIP zapisany jako plik (bez rozpakowywania), wpisy szyfrowane pominięte z powodem w raporcie.
 5. Quota: przed każdym wpisem rezerwacja (§5.5). Przekroczenie progu blokady (D118) → wpis pominięty z powodem `quota`, import kończy się statusem `partial`. Brak cichego przekroczenia.
 6. Po zakończeniu: usunięcie obiektów `staging/{importId}/` strzeżoną funkcją, na buckecie wersjonowanym ze wszystkimi wersjami (to nie są dokumenty; oryginał ZIP jest już zachowany jako dokument wg pkt 3; zakres usuwania: §5.12 pkt 1, D121, D119), raport w `pd_imports.report`, event `import.completed`. Anulowanie → abort multipartów, sprzątanie stagingu, rewizje już utworzone zostają.
@@ -602,7 +612,7 @@ Rozstrzygnięcia runnera z rev 3 (wtedy bez nowych D). W rev 5 (odbiór Cezara 2
 | 3 | B2 wersjonuje, `DeleteObject` tylko ukrywa — co to „fizyczne usunięcie”, czy quota liczy ukryte wersje? | Fizyczne usunięcie = usunięcie każdej wersji (z `VersionId`) i każdego markera, potwierdzone pustym `ListObjectVersions`. Dopiero wtedy rewizja wychodzi z quota. Quota liczy rewizję do potwierdzonego purge, czyli także czas, w którym u dostawcy byłaby wersją ukrytą. Innych ukrytych wersji nie ma, bo klucze są losowe i zapisywane raz. OVHcloud ma wersjonowanie włączone (D117), więc procedura obowiązuje tak samo jak na B2. | §5.8, §5.5, §5.10, R21; D122, D117 |
 | 4 | Obiekty osierocone (przerwany upload) bez `DeleteObject` | `AbortMultipartUpload` (sweeper i jawne `abort`) jest dozwolony: nie usuwa żadnego obiektu, a jedynie niedokończone części, więc nie jest usunięciem dokumentu. Reguła cyklu życia dla niedokończonych multipartów jest dozwolona jako zapas (§5.1). **Obiekt osierocony** to obiekt z zakończonym `PUT`/`Complete`, dla którego sesja nie doszła do `complete`, więc nie ma rewizji. Nie jest dokumentem i sweeper może go usunąć `DeleteObject` tylko wtedy, gdy: sesja jest `expired` (przejście ze stanu `reserved` pod advisory lockiem; `complete` wymaga `reserved`, więc później już się nie uda), żadna rewizja nie wskazuje tego klucza (sprawdzenie w tej samej transakcji) i klucz pasuje do `storage_key` sesji. Każde takie usunięcie trafia do logu sweepera. Obiekt z `UPLOAD_SIZE_MISMATCH` jest traktowany tak samo. | §5.3 pkt 4, §2.2, R20; D121, D125, D129 |
 | 5 | Quota `attachments` per tenant vs D112 per organizacja | Jednostka = organizacja (D15, D112), własny ledger. `OM_ATTACHMENT_TENANT_QUOTA_MB` nie dotyczy plików projektów (osobny bucket, R6). Zużycie tenanta = suma organizacji, tylko raport. | §5.5, KA-1 pkt 7; D126 |
-| 6 | Unikalny klucz projektu przy pustej inwestycji (NULL) | O1 zamknięte przez D116: projekt może nie mieć oferty ani inwestycji, więc kolumny są nullable. Główna unikalność per deal; per inwestycja indeks częściowy `… AND investment_id IS NOT NULL`, bez `NULLS NOT DISTINCT`; bez indeksu per wersja oferty. | §2.2 `pd_projects`; D116 |
+| 6 | Unikalny klucz projektu przy pustej inwestycji (NULL) | O1 zamknięte przez D116: projekt może nie mieć oferty ani inwestycji, więc kolumny są nullable. Jedyna unikalność: jeden projekt na wygrany deal; per inwestycja bez unikalności (inwestycja może mieć wiele projektów, każdy z własną fazą harmonogramu, D131), bez `NULLS NOT DISTINCT`; bez indeksu per wersja oferty. | §2.2 `pd_projects`; D116 |
 | 7 | Kto liczy sha256, skoro plik nie przechodzi przez aplikację? | Worker `checksum` strumieniem `GetObject` po `complete` (pamięć stała). Przy imporcie liczy go w locie worker importu. Przeglądarka nie liczy w MVP. Zamyka O7. | §5.3 pkt 5, §2.2; D124 |
 | 8 | Trasa `signed-url` w `storage_s3` wymaga `storage_providers.manage` | Moduł ma własne trasy z własnymi feature'ami (`documents.upload`, `view` + ACL folderu) i sam podpisuje URL. Trasa `storage_s3` nie jest używana. | §5.3, §5.9, §6, §7; D127 |
 | 9 | Podpowiedź retencji w MVP, encja gwarancji dopiero w v2 | W MVP daty końca gwarancji i rękojmi wpisuje ręcznie użytkownik z `projects.manage`. Bez dat nie ma podpowiedzi („retencja nieustalona”). Od v2 dane z `pd_warranty_terms`. | §2.2, §5.8, KA-3; D128 |
@@ -671,7 +681,7 @@ GET/POST  /templates                                  (templates.manage)
 — v1: /share-links, /share/:token (publiczny, 302), /transmittals, /correspondence, /protocols, /approval-tiers
 ```
 
-Kody błędów (propozycje, do review): `MODULE_DISABLED`, `DEAL_NOT_WON`, `OFFER_NOT_PRIMARY`, `PROJECT_EXISTS` (409), `REVISION_IMMUTABLE` (409), `NEWER_REVISION_RELEASED` (409), `STORAGE_NOT_CONFIGURED`, `STORAGE_QUOTA_NOT_CONFIGURED`, `STORAGE_QUOTA_EXCEEDED` (413), `STORAGE_VARIANT_NOT_AVAILABLE`, `UPLOAD_SIZE_MISMATCH`, `FILE_TOO_LARGE` (413), `PURGE_CONFIRMATION_REQUIRED`, `SHARE_LINK_EXPIRY_REQUIRED` (v1).
+Kody błędów (propozycje, do review): `MODULE_DISABLED`, `DEAL_NOT_WON`, `OFFER_NOT_PRIMARY`, `SEGMENT_REQUIRED` (422), `PROJECT_EXISTS` (409, per deal), `OFFER_ALREADY_LINKED` (409), `REVISION_IMMUTABLE` (409), `NEWER_REVISION_RELEASED` (409), `STORAGE_NOT_CONFIGURED`, `STORAGE_QUOTA_NOT_CONFIGURED`, `STORAGE_QUOTA_EXCEEDED` (413), `STORAGE_VARIANT_NOT_AVAILABLE`, `UPLOAD_SIZE_MISMATCH`, `FILE_TOO_LARGE` (413), `PURGE_CONFIRMATION_REQUIRED`, `SHARE_LINK_EXPIRY_REQUIRED` (v1).
 
 ---
 
@@ -683,7 +693,8 @@ Kody błędów (propozycje, do review): `MODULE_DISABLED`, `DEAL_NOT_WON`, `OFFE
 | `storage.variant` | `'A' \| 'B'` | `'A'` | MVP przyjmuje tylko `A` (D112) |
 | `storage.b_target` | `'gdrive' \| 'client_bucket' \| 'sharepoint' \| 'onedrive' \| 'nextcloud'` | — | v1/v2 |
 | `storage.quota_bytes` | int | **brak wartości** (cennik) | limit miękki: ostrzeżenia 80% i 100%, blokada powyżej 110% (D118); brak → upload zablokowany (§5.5) |
-| `storage.backup_copy` | bool | **brak wartości** (plan) | v1: nocna kopia obiektów do B2 (D117) |
+| `storage.overage_rate` | decimal | **brak wartości** (cennik) | stawka dopłaty za nadwyżkę ponad 100% w okresie rozliczeniowym (D118) |
+| `storage.backup_copy` | bool | **brak wartości** (plan) | v1: nocna kopia obiektów do B2 (D117); nie liczy się do quota klienta |
 | `docs.max_file_bytes`, `docs.multipart_threshold_bytes`, `docs.multipart_part_bytes` | int | parametry techniczne (env/instancja) | bez wartości w specu |
 | `docs.presign_ttl_seconds` | int | parametr | krótki TTL |
 | `import.zip_max_entries`, `import.zip_max_uncompressed_bytes`, `import.zip_max_ratio` | int | parametry | ochrona ZIP |
@@ -717,10 +728,10 @@ Kryteria są wymaganiem speki. Przypadki testowe pisze plan testów (PR C), bez 
 
 ### KA-1 — przekroczenie quota (D102, D112, D118, D126)
 1. Gdy `used + reserved + sizeBytes > 1,1 × storage.quota_bytes` (powyżej 110% limitu, D118), `POST /uploads` zwraca 413 `STORAGE_QUOTA_EXCEEDED` z `usedBytes`, `limitBytes` i `requestedBytes`. Nie powstaje URL, sesja ani obiekt w S3. UI pokazuje komunikat z zajętością i informacją dla administratora.
-2. Do 110% limitu upload przechodzi. Przy przejściu przez 80% i przez 100% powstaje dokładnie jeden event `project_delivery.storage.quota_threshold_reached` (ID organizacji i próg) i powiadomienie administratora organizacji (D118). Odczyt, pobieranie i podgląd działają także powyżej 110%; nic nie jest usuwane automatycznie.
+2. Do 110% limitu upload przechodzi. Przy przejściu `used` (zużycie zatwierdzone, bez rezerwacji) przez 80% i przez 100% powstaje dokładnie jeden event `project_delivery.storage.quota_threshold_reached` (ID organizacji i próg) i powiadomienie administratora organizacji; po spadku `used` poniżej progu (purge) kolejne przejście daje nowy event (D118). Zużycie ponad 100% trafia do nadwyżki okresu rozliczeniowego (`pd_storage_usage_periods`). Odczyt, pobieranie i podgląd działają także powyżej 110%; nic nie jest usuwane automatycznie.
 3. Dwie równoległe rezerwacje, które razem przekraczają próg blokady (110%): przechodzi najwyżej tyle, ile mieści próg (advisory lock per organizacja). Nigdy nie dochodzi do cichego przekroczenia.
 4. Abort, wygaśnięcie sesji i `UPLOAD_SIZE_MISMATCH` zwalniają rezerwację. Zużycie po operacji jest równe zużyciu przed nią.
-5. Import ZIP przy braku miejsca pomija wpisy ponad limit z powodem `quota` w raporcie i kończy się statusem `partial`. Rewizje utworzone przed przekroczeniem zostają.
+5. Import ZIP przy braku miejsca pomija wpisy ponad próg blokady (110%, D118) z powodem `quota` w raporcie i kończy się statusem `partial`. Rewizje utworzone przed przekroczeniem zostają.
 6. Brak `storage.quota_bytes` → 422 `STORAGE_QUOTA_NOT_CONFIGURED`. Linki i metadane działają.
 7. Quota liczona per **organizacja**. Pliki projektów nie wpływają na quota `attachments` tenanta.
 
@@ -778,7 +789,7 @@ Kryteria są wymaganiem speki. Przypadki testowe pisze plan testów (PR C), bez 
 - Upload presigned + multipart, pobranie i podgląd PDF przez presigned GET (D110).
 - Dokumenty-linki (ręczne).
 - Import e-Zamówień (pliki publiczne; linki zewnętrzne tylko jako link) i ZIP z uploadu. TED: metadane i link BT-15.
-- Quota per organizacja (wariant A) jako limit miękki: ostrzeżenia 80% i 100%, blokada nowych plików powyżej 110% (D118); wersjonowanie bucketu OVHcloud i kopia bazy (D117); oryginał ZIP przetargu jako dokument (D119); ustawienia wariantu (tylko A), retencja: ustawienie + data na projekcie (D112, D113), purge tylko administrator.
+- Quota per organizacja (wariant A) jako limit miękki: ostrzeżenia 80% i 100%, dopłata za nadwyżkę ponad 100% w okresie rozliczeniowym, blokada nowych plików powyżej 110% (D118); wersjonowanie bucketu OVHcloud i kopia bazy (D117); oryginał ZIP przetargu jako dokument (D119); ustawienia wariantu (tylko A), retencja: ustawienie + data na projekcie (D112, D113), purge tylko administrator.
 - Encje: `pd_projects`, `pd_project_templates`, `pd_project_template_items`, `pd_project_stages`, `pd_tasks`, `pd_milestones`, `pd_milestone_calc_links`, `pd_project_members`, `pd_folders`, `pd_folder_acl`, `pd_documents`, `pd_document_revisions`, `pd_upload_sessions`, `pd_imports`, `pd_document_sequences`.
 
 ### v1 (D107)
@@ -786,9 +797,9 @@ Kryteria są wymaganiem speki. Przypadki testowe pisze plan testów (PR C), bez 
 - Akceptacje (§9), transmittale, korespondencja/RFI, protokoły odbioru z usterkami.
 - Linki udostępniania z obowiązkową datą wygaśnięcia (D104).
 - Google Drive w trybie linku (D105, wariant B).
-- Nocna kopia obiektów do B2 (`storage.backup_copy`, D117).
+- Nocna kopia obiektów do B2 (`storage.backup_copy`, D117), poza quota klienta.
 - Billing % kamieni i odbiory częściowe (D101).
-- Link/uruchomienie harmonogramu wykonawczego przez `executionScheduleRegistry` (D100), gdy schedule jest używany.
+- Link/uruchomienie harmonogramu wykonawczego przez `executionScheduleRegistry` (D100), gdy schedule jest używany; faza projektu w harmonogramie inwestycji (D131).
 - Encje: `pd_approval_tiers`, `pd_approval_reviews`, `pd_share_links`, `pd_transmittals`, `pd_transmittal_items`, `pd_correspondence`, `pd_protocols`, `pd_protocol_defects`, `pd_external_drive_links`.
 
 ### v2 (D108)
@@ -859,12 +870,12 @@ Pytania biznesowe (a), (b), (c) są zamknięte przez D111, D112, D113. O5 zamkni
 
 - Plan testów musi zawierać scenariusz **dużego pliku** (upload multipart z przeglądarki i pobranie) oraz **dużego ZIP** (import w workerze), w którym pamięć procesu aplikacji i workera **nie rośnie proporcjonalnie do rozmiaru pliku**. Pomiar szczytowego RSS przy dwóch różnych rozmiarach plików, ten sam limit ze stałego bufora; brak plików tymczasowych na dysku.
 - Scenariusze dla KA-1 do KA-7 (§10): przekroczenie quota (ostrzeżenia 80% i 100%, blokada powyżej 110%, wyścig, zwolnienie rezerwacji, import `partial`), wybór wariantu A/B, retencja i data na projekcie, brak usunięcia bez administratora (w tym brak `DeleteObject` z workerów).
-- Kontrakty DI między trzema modułami: costing bez delivery i schedule; delivery bez schedule (zakładka ukryta, brak błędów); delivery + schedule (link, `ensureExecution` idempotentne).
+- Kontrakty DI między trzema modułami: costing bez delivery i schedule; delivery bez schedule (zakładka ukryta, brak błędów); delivery + schedule (link, `ensureExecution` idempotentne per projekt i faza; dwa projekty jednej inwestycji = dwie fazy w jednym harmonogramie, D131).
 - PoC u wybranego dostawcy (R2, R7, R8; §5.11) jako warunek przed kodem: presigned PUT z `If-None-Match: *`, multipart z przeglądarki (presigned `UploadPart`), `ListParts` i abort, CORS z `ETag`, presigned GET z `response-content-disposition`. Ten sam zestaw na fallbacku B2 z adapterem (bez `If-None-Match`).
 - Pomiar RAM workera na wersji testowej (KA-6, D115) jako kryterium etapu kodu: dwa parametry (przyrost RSS workera, minimalna wolna pamięć hosta), progi z D120 (w tym OOM, restarty i przyrost swapu); brak plików tymczasowych na dysku; współbieżność 1 tylko dla kolejek `project_delivery`.
 - PoC zgodności OVHcloud (KA-7, R22): warunkowy PUT, presigned PUT/GET, multipart i wznowienie; przy porażce ścieżka B2 z adapterem.
 - Rozstrzygnięcia z §5.12 (uwagi PR C, pkt 1–12) do pokrycia scenariuszami: strażnik `DeleteObject` (tylko `staging/` i osierocone sesje `expired` bez rewizji, R20), wyścig `complete` ↔ sweeper, purge przez wszystkie wersje z potwierdzeniem pustym `ListObjectVersions` (R21, także na B2 w PoC), lifecycle tylko dla `staging/` i niedokończonych multipartów, import `partial` bez usuwania rewizji, daty gwarancji i rękojmi z ręcznego wpisu, własne trasy presign bez `storage_providers.manage`.
-- Pokrycie decyzji D98–D130 w planie testów — do dopisania (dziś brak, zgodnie z planem); D116–D130 są samodzielne w rejestrze, więc scenariusze pisze się z `decisions.md`.
+- Pokrycie decyzji D98–D131 w planie testów — do dopisania (dziś brak, zgodnie z planem); D116–D131 są samodzielne w rejestrze, więc scenariusze pisze się z `decisions.md`.
 
 ---
 
@@ -920,7 +931,7 @@ apps/mercato/src/modules/project_delivery/
 | 2 | Zależność jednokierunkowa; provider w rejestrze DI bazy (p1) | ✅ §0.2 (`executionScheduleRegistry` w costingu; delivery i schedule bez wzajemnych importów) |
 | 3 | Brak zapisów do cudzych tabel (p2) | ✅ jedyny zapis cudzej encji: komenda schedule `create-execution` przez providera (v1) |
 | 4 | Zero hardkodowanych UUID (p2) | ✅ szablony po kodzie |
-| 5 | Partial unique, zmiana w jednej transakcji (p2) | ✅ §2.2 (`pd_projects_*`), §3 |
+| 5 | Partial unique, zmiana w jednej transakcji (p2) | ✅ §2.2 (`pd_projects_one_per_deal`, CHECK `pd_projects_offer_all_or_none`), §3 |
 | 6 | Jedno pojęcie na byt; zakładka przez `detail:customers.deal:tabs` (p11) | ✅ inwestycja = `pc_investments` (D63); harmonogram = schedule (D100) |
 | 7 | RBAC tylko w `acl.ts`; role admin/employee (p4) | ✅ §6 |
 | 8 | Ustawienia nie dublują RBAC (p4) | ✅ §8 |
@@ -983,7 +994,7 @@ Brak punktów ⚠️. Ryzyka rezydualne: §12 (R1 do czasu pomiaru, R3, R11–R1
 | **D93** | §9, R14 | `workflows` dopiero jako kandydat v2 |
 | **D98** | §0.1, §0.2, §11 „Zakres zbiorczy” | trzy moduły, kierunek zależności, rejestr w costingu |
 | **D99** (zastąpiona przez D116) | §3, §0.3 | komenda „wygrany przetarg → realizacja” |
-| **D100** | §4.1, §0.2 | brak własnego Gantta; link/uruchomienie przez registry (v1) |
+| **D100** | TLDR, §4.1, §0.2 | brak własnego Gantta; link/uruchomienie przez registry (v1), faza per projekt (D131) |
 | **D101** | §4.2, §2.2 | kamienie ↔ sekcje/pozycje oferty; billing % v1 |
 | **D102** | §5.1, §5.3, §5.5 | metadane w OM, pliki w S3, presigned, quota per organizacja |
 | **D103** | §2.2, §6, §9 | niemutowalna rewizja; najnowsza zatwierdzona do produkcji |
@@ -999,10 +1010,10 @@ Brak punktów ⚠️. Ryzyka rezydualne: §12 (R1 do czasu pomiaru, R3, R11–R1
 | **D113** | §5.8, §5.11, §5.12, §8, KA-3, KA-4, R10, R12, R20, R21 | retencja; archiwum = eksport albo zimna klasa u wybranego dostawcy; brak usuwania bez administratora |
 | **D114** | §9, §11 v1, R14 | akceptacje v1: `pd_approval_tiers`, `pd_approval_reviews` za `ApprovalEngine`; `workflows` w v2 |
 | **D115** | §1.2, §5.6, KA-5, KA-6, R1, R19, O13 (zamknięte przez D120), §14 | worker na istniejącej kolejce OM w kontenerze aplikacji; bez nowego kontenera do pomiaru |
-| **D116** | TLDR, §0.2, §0.3, §2.2, §3, §5.12 pkt 6, §7, §11 MVP | deal bez kalkulacji → projekt bez oferty; podpięcie później; jeden projekt na deal (D99 — zastąpiona przez D116; zamyka O1) |
-| **D117** | TLDR, §5.1, §5.2, §5.5, §5.8, §5.11, §5.12 pkt 3, §8, §11, R21, R22, KA-7 | wersjonowanie OVHcloud + kopia bazy (MVP), kopia do B2 (v1); usuwanie wszystkich wersji (zamyka O14) |
-| **D118** | TLDR, §5.2, §5.5, §5.6 pkt 5, §8, §11, KA-1, §14 | quota jako limit miękki: 80/100% ostrzeżenia, >110% blokada (zamyka O11) |
-| **D119** | §5.6 pkt 3 i 6, §11 MVP | oryginał ZIP przetargu jako dokument w `00 Przetarg` |
+| **D116** | TLDR, §0.2, §0.3, §2.2, §3, §4.1, §5.12 pkt 6, §7, §11 MVP | deal bez kalkulacji → projekt bez oferty; podpięcie później; jeden projekt na wygrany deal, inwestycja może mieć wiele projektów (D99 — zastąpiona przez D116; zamyka O1) |
+| **D117** | TLDR, §5.1, §5.2, §5.5 (kopia B2 poza quota), §5.8, §5.11, §5.12 pkt 3, §8, §11, R21, R22, KA-7 | wersjonowanie OVHcloud + kopia bazy (MVP), kopia do B2 (v1); usuwanie wszystkich wersji (zamyka O14) |
+| **D118** | TLDR, §0.4, §5.2, §5.5, §5.6 pkt 3 i 5, §8, §11, KA-1, §14 | quota jako limit miękki: 80/100% ostrzeżenia od `used`, nadwyżka ponad 100% płatna w okresie rozliczeniowym, >110% blokada 413 bez eventu (zamyka O11) |
+| **D119** | §2.2 `pd_imports`, §5.5, §5.6 pkt 3 i 6, §11 MVP | oryginał ZIP przetargu jako dokument w `00 Przetarg`; w quota bez wyjątków, osobno jako „archiwum dowodowe” |
 | **D120** | §5.6, KA-6, R3, R19, §14 | progi KA-6 dla ZIP 250 MB; 250 MB niepotwierdzone (zamyka O13) |
 | **D121** | §5.1, §5.3 pkt 4, §5.6 pkt 6, §5.8, §5.12 pkt 1 i 4, KA-4, R20 | strzeżona funkcja `DeleteObject` (staging, osierocone) |
 | **D122** | §5.8, §5.12 pkt 3, KA-4, R21 | purge po potwierdzeniu administratora, wszystkie wersje |
@@ -1014,6 +1025,7 @@ Brak punktów ⚠️. Ryzyka rezydualne: §12 (R1 do czasu pomiaru, R3, R11–R1
 | **D128** | §5.8, §5.12 pkt 9, KA-3 | daty gwarancji i rękojmi w MVP ręcznie |
 | **D129** | §5.1, §5.12 pkt 4, KA-4 | dozwolone reguły cyklu życia bucketu |
 | **D130** | §5.2, §5.12 pkt 11, §8, §13 O10 | poświadczenia bucketu klienta i brak sekretów w ustawieniach |
+| **D131** | §0.2, §4.1, §11 v1, §14 | faza projektu (zadanie-podsumowanie WBS) w harmonogramie inwestycji; `ensureExecution` idempotentne per projekt i faza |
 
 ---
 
@@ -1027,3 +1039,4 @@ Brak punktów ⚠️. Ryzyka rezydualne: §12 (R1 do czasu pomiaru, R3, R11–R1
 | 2026-10-23 | **rev 4** — odbiór #18 (Cezar): D115 i spec — bufor wyłącznie w RAM ograniczony do `partSize × queueSize` (parametry bez wartości), zero plików tymczasowych na dysku VPS (spójnie z D110, dopisane też w D110); współbieżność 1 na instancję tylko dla kolejek importu i multipartu `project_delivery`, inne kolejki `queue worker --all` bez zmian; KA-6: dwa parametry presji RAM (szczytowy przyrost RSS workera, minimalna wolna pamięć hosta) bez wartości, progi w O13 (Koordynator z Dawidem przed pomiarem; bez nich brak werdyktu); R22 + KA-7: PoC zgodności OVHcloud na etapie kodu, przy porażce B2 z adapterem; O14: kopia zapasowa przy regionie One Zone — do decyzji. |
 | 2026-10-23 | **rev 4a** — odbiór #18 (Cezar): D110 — „nie przechodzą przez RAM aplikacji” zamienione na „nie przechodzą przez proces serwera HTTP aplikacji” oraz dopisane zdanie: bufor RAM istnieje tylko w procesie workera (proces potomny `queue worker --all` w kontenerze `app`), jest ograniczony do `partSize × queueSize` i dzieli limit pamięci kontenera `app`. Spójnie w TLDR, §1.2 pkt 2 i w macierzy śledzenia. |
 | 2026-10-23 | **rev 5** — PR D (tylko dokumentacja): decyzje Koordynatora D116 (projekt bez kalkulacji, podpięcie `link_winning_offer`, jeden projekt na deal; D99 — zastąpiona przez D116; zamyka O1), D117 (wersjonowanie OVHcloud + kopia bazy w MVP, kopia do B2 w v1; zamyka O14), D118 (quota jako limit miękki 80/100/110%; zamyka O11; usunięte `overage_allowed`, `hard_cap_bytes`, `alert_thresholds_pct`), D119 (oryginał ZIP jako dokument), D120 (progi KA-6; zamyka O13; 250 MB niepotwierdzone). Twarde reguły §5.12, §5.6 pkt 6–8, R20 i R21 przeniesione do rejestru jako D121–D130 (bez nowych treści) z odwołaniami w specu. §5.6: odwołanie R9 → R3 (błąd), lista ponumerowana po kolei; R19: współbieżność 1 tylko dla kolejek `project_delivery`; jedno brzmienie poświadczeń bucketu klienta (§5.2, §5.12 pkt 11, §8, O10); §11 v2: encje. |
+| 2026-10-23 | **rev 5a** — odbiór #20 (Cezar) i dopisek Koordynatora: §0.4 `quota_threshold_reached` w MVP (D118), `quota_exceeded` usunięty (blokada > 110% = tylko 413); D118: alert od `used`, raz na przejście progu z ponownym uzbrojeniem po spadku, nadwyżka ponad 100% płatna w okresie rozliczeniowym (`storage.overage_rate`, `pd_storage_usage_periods`); D116: jedyna unikalność per wygrany deal, inwestycja może mieć wiele projektów (indeks `pd_projects_by_investment` bez UNIQUE), CHECK `pd_projects_offer_all_or_none` w SQL, kody 422 `SEGMENT_REQUIRED` i 409 `OFFER_ALREADY_LINKED`; D131: faza projektu w harmonogramie inwestycji, `findProjectPhase`, `ensureExecution` per projekt i faza; D119: próg 110%, sha256 oryginału w locie (D124), dedup oryginału (D123), „archiwum dowodowe” w widoku zużycia (`pd_imports.original_revision_id`); D117: kopia B2 poza quota klienta; KA-1 pkt 2 i 5. |
