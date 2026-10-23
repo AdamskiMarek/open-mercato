@@ -3,9 +3,9 @@
 **Dokument**: SPEC ONLY (plan testów niezależny od specyfikacji modułu, brak kodu)
 **Docelowa ścieżka w repo**: `.ai/specs/2026-10-23-project-delivery-docs-test-plan.md`
 **Data**: 2026-10-23
-**Autor**: Grok Bot (runner planu testów; specyfikacji modułu nie czytał); rev 4–6a — niezależna sesja testerska, wyłącznie na podstawie `.ai/decisions.md` (rev 4: commit 865714e, rev 5: b0e097f, rev 5a: a75dc9f, rev 6: 932fac6, rev 6a: 35b305a) i plików recenzji, bez dostępu do spek
-**Rewizja**: rev 6a (2026-10-23) — poprawki odbioru PR #26 i dopasowanie do rejestru z commita 35b305a (po merge #25): dostęp U-A w TC-PD-PRJ-008, `Content-Length` w TC-PD-WRK-009, flaga tagu stagingu i status `degraded` w TC-PD-STOR-010; poprzednio rev 6 (2026-10-23) — dopasowanie do D159–D165 i zmienionych D121, D129, D144, D158 (rejestr z commita 932fac6): role projektu i prawa folderu, rola `manager`, automatyczne zdjęcie flagi deala, usuwanie folderu i projektu, niemutowalność rewizji, limit pliku, granty pracownika, klucze i staging z segmentem tenanta, lifecycle wariant (c); poprzednio rev 5a (2026-10-23) — limit paczki ZIP wg D158 (rejestr z commita a75dc9f, po merge #22): wartość domyślna, zmiana przez administratora, komunikat z dwiema drogami; poprzednio rev 5 (2026-10-23) — dopasowanie do D133–D157 (rejestr z commita b0e097f, po merge #19 i #21): kody błędów zamiast „albo”, macierz feature'ów, flaga ponownego otwarcia deala na projekcie, MIME z zawartości, rekoncyliacja wersji spoza aplikacji, limity ZIP, kody linków i akceptacji, wariant D154 (warunkowy); poprzednio rev 4a (2026-10-23) — poprawki odbioru rundy 3 (`STORAGE_NOT_CONFIGURED`, jednoznaczne kody, warunkowy TC-PD-QUOTA-009); poprzednio rev 4 (2026-10-23) — dopasowanie do D116–D132 (rejestr z commita 865714e, po merge #20): projekt bez oferty i podpięcie oferty, jeden projekt na deal i na inwestycję, limit miękki quota z alertami 80/100% i blokadą od 110%, oryginał ZIP jako dowód, strzeżona funkcja usuwania i purge po potwierdzeniu, wpis atomowy importu, worker checksum, progi pomiaru RAM, faza projektu w harmonogramie; postępowania z częściami — warunkowo; poprzednio rev 3 — rejestr z commita 4f83bd4: bufor tylko w RAM (partSize × queueSize), zero plików tymczasowych także w workerze, współbieżność 1 tylko dla kolejki modułu, dwa parametry presji RAM; PoC dostawcy domyślnego jako kryterium akceptacji etapu kodu z fallbackiem na B2; poprzednio rev 2 — rejestr finalny (akceptacje, worker, linki, dostawca storage, warianty, retencja)
-**Podstawa**: rejestr decyzji (`.ai/decisions.md` z commita 35b305a, sekcja modułu `project_delivery` D98–D165 oraz decyzje kontekstowe), research `om-project-docs-research.md`, `odoo-project-docs.md`, `om-overlap-audit.md`, dokumentacja Backblaze B2 S3-Compatible API (stan na X 2026; dotyczy dostawcy zapasowego). Numery decyzji występują w załączniku pokrycia, w changelogu oraz w adnotacjach scenariuszy warunkowych (TC-PD-PRJ-011, TC-PD-PRJ-012, TC-PD-PRJ-013).
+**Autor**: Grok Bot (runner planu testów; specyfikacji modułu nie czytał); rev 4–7 — niezależna sesja testerska, wyłącznie na podstawie `.ai/decisions.md` (rev 4: commit 865714e, rev 5: b0e097f, rev 5a: a75dc9f, rev 6: 932fac6, rev 6a: 35b305a, rev 7: f81c58c) i plików recenzji, bez dostępu do spek
+**Rewizja**: rev 7 (2026-10-23) — dopasowanie do D166–D169 (rejestr z commita f81c58c, po merge #27): dolna granica retencji z polityki, rola `manager` bez `view`, `read` dla `projects.view_all` bez roli, dziedziczenie ACL pod folderem `restricted`; poprzednio rev 6a (2026-10-23) — poprawki odbioru PR #26 i dopasowanie do rejestru z commita 35b305a (po merge #25): dostęp U-A w TC-PD-PRJ-008, `Content-Length` w TC-PD-WRK-009, flaga tagu stagingu i status `degraded` w TC-PD-STOR-010; poprzednio rev 6 (2026-10-23) — dopasowanie do D159–D165 i zmienionych D121, D129, D144, D158 (rejestr z commita 932fac6): role projektu i prawa folderu, rola `manager`, automatyczne zdjęcie flagi deala, usuwanie folderu i projektu, niemutowalność rewizji, limit pliku, granty pracownika, klucze i staging z segmentem tenanta, lifecycle wariant (c); poprzednio rev 5a (2026-10-23) — limit paczki ZIP wg D158 (rejestr z commita a75dc9f, po merge #22): wartość domyślna, zmiana przez administratora, komunikat z dwiema drogami; poprzednio rev 5 (2026-10-23) — dopasowanie do D133–D157 (rejestr z commita b0e097f, po merge #19 i #21): kody błędów zamiast „albo”, macierz feature'ów, flaga ponownego otwarcia deala na projekcie, MIME z zawartości, rekoncyliacja wersji spoza aplikacji, limity ZIP, kody linków i akceptacji, wariant D154 (warunkowy); poprzednio rev 4a (2026-10-23) — poprawki odbioru rundy 3 (`STORAGE_NOT_CONFIGURED`, jednoznaczne kody, warunkowy TC-PD-QUOTA-009); poprzednio rev 4 (2026-10-23) — dopasowanie do D116–D132 (rejestr z commita 865714e, po merge #20): projekt bez oferty i podpięcie oferty, jeden projekt na deal i na inwestycję, limit miękki quota z alertami 80/100% i blokadą od 110%, oryginał ZIP jako dowód, strzeżona funkcja usuwania i purge po potwierdzeniu, wpis atomowy importu, worker checksum, progi pomiaru RAM, faza projektu w harmonogramie; postępowania z częściami — warunkowo; poprzednio rev 3 — rejestr z commita 4f83bd4: bufor tylko w RAM (partSize × queueSize), zero plików tymczasowych także w workerze, współbieżność 1 tylko dla kolejki modułu, dwa parametry presji RAM; PoC dostawcy domyślnego jako kryterium akceptacji etapu kodu z fallbackiem na B2; poprzednio rev 2 — rejestr finalny (akceptacje, worker, linki, dostawca storage, warianty, retencja)
+**Podstawa**: rejestr decyzji (`.ai/decisions.md` z commita f81c58c, sekcja modułu `project_delivery` D98–D169 oraz decyzje kontekstowe), research `om-project-docs-research.md`, `odoo-project-docs.md`, `om-overlap-audit.md`, dokumentacja Backblaze B2 S3-Compatible API (stan na X 2026; dotyczy dostawcy zapasowego). Numery decyzji występują w załączniku pokrycia, w changelogu oraz w adnotacjach scenariuszy warunkowych (TC-PD-PRJ-011, TC-PD-PRJ-012, TC-PD-PRJ-013).
 **Dostawca storage**: „dostawca domyślny” = najtańszy w UE dostawca w pełni kompatybilny z `storage_s3` i multipartem (wg rejestru: OVHcloud Object Storage, region i klasa jako parametry wdrożenia); „dostawca zapasowy” = Backblaze B2 EU Central z adapterem bez `If-None-Match` (wyłącznie unikalne klucze). Scenariusze storage przechodzą dla obu; różnice opisane w scenariuszu.
 
 ---
@@ -89,7 +89,7 @@
 Zasady:
 
 - Konwencje jak w planie testów kalkulacji: jeden `.spec.ts` na scenariusz z ID w nazwie, fixtures przez API (`crmFixtures`, `authFixtures`), sprzątanie w `finally`, asercje DB przez `pg`, kolejki przez `drainIntegrationQueue`, testy zależne od harmonogramu oznaczone w `meta.ts` (`requiredModules`).
-- Role: `superadmin`, `admin`, `employee` i role własne z `createRoleFixture`. Feature'y z macierzy rejestru używane dosłownie (prefiks `project_delivery.`: `view`, `projects.view_all`, `projects.create`, `projects.manage`, `documents.upload`, `documents.approve`, `documents.delete`, `imports.run`, `templates.manage`, `settings.manage`, `storage.purge`, `projects.delete`, v1: `share_links.manage`, `approvals.review` — razem 14). Role projektu (`pd_project_members.role`): `manager`, `member`, `viewer`; prawa folderu: `read`, `write`, `manage` (folder `inherit`: `viewer` → `read`, `member` → `write`, `manager` → `manage`; folder `restricted`: tylko wpisy `pd_folder_acl`).
+- Role: `superadmin`, `admin`, `employee` i role własne z `createRoleFixture`. Feature'y z macierzy rejestru używane dosłownie (prefiks `project_delivery.`: `view`, `projects.view_all`, `projects.create`, `projects.manage`, `documents.upload`, `documents.approve`, `documents.delete`, `imports.run`, `templates.manage`, `settings.manage`, `storage.purge`, `projects.delete`, v1: `share_links.manage`, `approvals.review` — razem 14). Role projektu (`pd_project_members.role`): `manager`, `member`, `viewer`; prawa folderu: `read`, `write`, `manage` (folder `inherit` najwyższego poziomu — rodzicem jest projekt: `viewer` → `read`, `member` → `write`, `manager` → `manage`, `projects.view_all` bez roli → `read`; folder `inherit` z przodkiem `restricted` — wpisy `pd_folder_acl` najbliższego przodka `restricted`, bez poszerzania przez role i `projects.view_all`; folder `restricted`: tylko wpisy `pd_folder_acl`). W scenariuszach ACL każdy folder ma podany poziom (najwyższy albo przodek).
 - Ruch do S3 w testach Integration idzie do emulatora; przeglądarka Playwright wysyła pliki bezpośrednio na adres emulatora. Asercja „bez proxy aplikacji” = brak żądań z treścią pliku do hosta aplikacji (nasłuch `page.on('request')` + liczniki bajtów procesu aplikacji).
 - Proxy logujące S3 (cienki proxy HTTP przed emulatorem, tylko w testach) zapisuje metodę i operację każdego żądania; służy do asercji „zero DeleteObject na kluczach rewizji poza workerem purge po potwierdzeniu admina; każde usunięcie stagingu i obiektu osieroconej sesji zalogowane”, „`If-None-Match: *` przy zapisie u dostawcy domyślnego / brak nagłówka w adapterze B2”, „brak GetObject z procesu serwera HTTP (w workerze wyłącznie checksum i import)”. Proxy rozróżnia proces źródłowy (serwer HTTP, worker checksum, worker importu, worker purge, sweeper). Emulator uruchamiany w dwóch profilach: zgodny (warunkowy zapis obsługiwany, bucket z włączonym wersjonowaniem jak u dostawcy domyślnego) i „B2” (nagłówek odrzucany z 501, bucket wersjonowany).
 - Klucze obiektów i stagingu w fixture zawsze w pełnym formacie: dokument `{prefix}/org_{orgId}/tenant_{tenantId}/proj_{projectId}/{random}`, staging `{prefix}/org_{orgId}/tenant_{tenantId}/staging/{importId}/`; krótkie klucze `staging/…` występują tylko jako przypadki negatywne.
@@ -848,18 +848,24 @@ Zasady:
   - Krok 5 (v1): purge usuwa też wszystkie wersje i markery w kopii B2
 
 
-#### TC-PD-RET-009: Retencja ustawiana przez rolę `manager` — tylko wydłużenie
+#### TC-PD-RET-009: Retencja ustawiana przez rolę `manager` — dolna granica z polityki organizacji
 
 - **Priorytet**: P1 | **Etap**: MVP | **Poziom**: API + Integration + `pg`
-- **Warunki wstępne**: Organizacja O1 z `retention.policy` dającą datę retencji D-min: projekt P1 z datami gwarancji i rękojmi i początkowym `retention_until` = D-min, projekt P2 bez dat (`retention_until` puste); osobna organizacja O2 z polityką `manual`: projekt P3 (`retention_until` puste). U-M z rolą `manager` w P1, P2 i P3 (bez `projects.manage` z RBAC); U-R z `project_delivery.projects.manage` i `project_delivery.projects.view_all` z RBAC w O1 i O2, bez członkostwa
+- **Warunki wstępne**: U-M jest członkiem wszystkich organizacji poniżej i ma rolę `manager` w każdym projekcie (bez `projects.manage` z RBAC); U-R z `project_delivery.projects.manage` i `project_delivery.projects.view_all` z RBAC we wszystkich organizacjach, bez członkostwa. Organizacje i projekty (daty wpisane ręcznie):
+  - O1, `retention.policy` = `later_of_both`: P1 z `warranty_end_date` < `rekojmia_end_date`, granica D-min = `rekojmia_end_date`, początkowe `retention_until` = D-min; P2 bez dat; P4 tylko z `warranty_end_date`
+  - O2, `manual`: P3 (`retention_until` puste)
+  - O3, `warranty_end`: P5 z `warranty_end_date` (granica = ta data); P6 tylko z `rekojmia_end_date`
+  - O4, `rekojmia_end`: P7 z `rekojmia_end_date` (granica = ta data); P8 tylko z `warranty_end_date`
 - **Kroki**:
-  1. U-M ustawia w P1 `retention_until` późniejsze niż D-min; potem wcześniejsze niż D-min
-  2. U-M ustawia datę w P2 i P3 (pierwszy raz); potem próbuje ją skrócić; potem wydłużyć
-  3. U-R skraca `retention_until` w P1 (poniżej D-min) i w P3
+  1. U-M ustawia w P1 `retention_until` późniejsze niż D-min; potem wcześniejsze niż D-min; potem między `warranty_end_date` a D-min
+  2. U-M w P5 i P7: data przed granicą, potem po granicy
+  3. Projekty bez granicy z polityki (P2, P4, P3, P6, P8): U-M ustawia datę pierwszy raz (dowolną); potem próbuje ją skrócić; potem wydłużyć
+  4. U-R skraca `retention_until` w P1 (poniżej D-min) i w P3
 - **Oczekiwane wyniki**:
-  - Krok 1: późniejsze → zapisane; wcześniejsze → 422 `RETENTION_BELOW_COMPANY_MINIMUM`
-  - Krok 2: pierwsze ustawienie przechodzi; skrócenie → 422 `RETENTION_BELOW_COMPANY_MINIMUM`; wydłużenie przechodzi
-  - Krok 3: skrócenie przechodzi (tylko `projects.manage` z RBAC)
+  - Krok 1: późniejsze → zapisane; wcześniejsze i między datami → 422 `RETENTION_BELOW_COMPANY_MINIMUM` (granica = późniejsza z obu dat)
+  - Krok 2: przed granicą → 422 `RETENTION_BELOW_COMPANY_MINIMUM`; po granicy → zapisane
+  - Krok 3: `later_of_both` z jedną datą (P4), brak daty wskazanej przez `warranty_end` (P6) i `rekojmia_end` (P8), brak dat (P2) i `manual` (P3) — granicy z polityki nie ma: pierwsze ustawienie przechodzi; skrócenie → 422 `RETENTION_BELOW_COMPANY_MINIMUM`; wydłużenie przechodzi
+  - Krok 4: skrócenie przechodzi (tylko `projects.manage` z RBAC)
   - Każda zmiana w `audit_logs`
 
 #### TC-PD-RET-010: Soft delete folderu i projektu
@@ -1051,14 +1057,14 @@ Import ZIP i multipart po stronie serwera idą przez istniejącą kolejkę OM (P
   4. Przypadek C (liczba wpisów): import ZIP-a z liczbą wpisów ponad `import.zip_max_entries`; odczytaj status, raport i komunikat
   5. Przypadek D (współczynnik kompresji): import ZIP-a ze współczynnikiem ponad `import.zip_max_ratio`; odczytaj status, raport i komunikat
   6. Droga 2 z komunikatu: dodaj dokument-link do dokumentacji postępowania przez `POST /documents/:id/links` z `https://…`; osobno z `http://…`
-  7. Administrator instancji ustawia `import.zip_max_bytes` powyżej rozmiaru Z1; ponów import Z1; potem ustawia wartość niższą niż Z2 i ponawia import Z2
+  7. Administrator instancji ustawia `import.zip_max_bytes` powyżej rozmiaru Z1; ponów import Z1; potem ustawia wartość niższą niż Z2 i ponawia import Z2 ze źródła w wariancie A1 (z `Content-Length`)
   8. Static/proces: sprawdź, gdzie zapisana jest wartość domyślna; sprawdź, czy zmiana domyślnej ma dowód pomiaru
 - **Oczekiwane wyniki**:
   - Krok 1: wartość efektywna = 250 MB; Z2 importowany; Z1 przerwany
   - Przypadki A–D (kroki 2–5), każdy osobno: status `failed`, powód `zip_limit_exceeded`, dalsze wpisy nie są zapisywane, rewizje sprzed przekroczenia zostają. Komunikat `pl` dla użytkownika (nie samo `failed`) podaje nazwę i wartość przekroczonego limitu oraz wartość zmierzoną: A1 — rozmiar paczki dokładny, źródłem jest `Content-Length`; A2 (bez `Content-Length`) — rozmiar w chwili przerwania jako „co najmniej X”; B — suma po rozpakowaniu, C — liczba wpisów, D — współczynnik kompresji, każda jako „co najmniej X” (wartość w chwili przerwania); raport importu podaje nazwę limitu
   - Każdy komunikat A–D podaje dwie drogi: (1) wgrać pliki ręcznie — pojedynczo albo w kilku mniejszych ZIP-ach; (2) dodać link do dokumentacji jako dokument-link (`kind = link`, `link_provider = generic`, trasa `POST /documents/:id/links`)
   - Krok 6: `https:` → dokument `kind = link`, `link_provider = generic`, serwer nie pobiera treści (brak żądania wychodzącego), brak obiektu w S3; `http:` → 422 (jak TC-PD-DOC-002)
-  - Krok 7: nowa wartość obowiązuje od następnego importu bez zmiany kodu: Z1 importowany; Z2 przerwany z komunikatem A z nową wartością limitu
+  - Krok 7: nowa wartość obowiązuje od następnego importu bez zmiany kodu: Z1 importowany; Z2 przerwany z komunikatem A1 (rozmiar dokładny z `Content-Length`) z nową wartością limitu
   - Krok 8: wartość domyślna 250 MB w jednym miejscu konfiguracji; podniesienie wartości domyślnej tylko z raportem pomiaru RAM dla większej paczki (TC-PD-PERF-003 z progami pomiaru, kryterium KA-6) — bez raportu zmiana jest FAIL w review
   - Asercja „co najmniej X” (A2, B–D): X ≥ wartość limitu i X ≤ wartość rzeczywista paczki testowej (znana z fixture); A1: wartość = `Content-Length`
 
@@ -1116,29 +1122,33 @@ Import ZIP i multipart po stronie serwera idą przez istniejącą kolejkę OM (P
 #### TC-PD-ACL-001: Uprawnienia do dokumentów dziedziczone z projektu — członkostwo i role projektu
 
 - **Priorytet**: P0 | **Etap**: MVP | **Poziom**: API + E2E/UI + `pg`
-- **Warunki wstępne**: Projekt P1 (foldery `inherit`) z członkami U-V (`viewer`), U-B (`member`), U-M (`manager`), U-B0 (`member`); U2 bez członkostwa i bez `projects.view_all`; U-ALL bez członkostwa z `projects.view_all`; wszyscy z `view` w tej samej organizacji; `documents.upload` mają U-V, U-B, U-M i U-ALL, U-B0 go nie ma
+- **Warunki wstępne**: Projekt P1 z folderem F-top `inherit` najwyższego poziomu (rodzicem jest projekt, brak przodka `restricted`) z członkami U-V (`viewer`), U-B (`member`), U-M (`manager`), U-B0 (`member`); U2 bez członkostwa i bez `projects.view_all`; U-ALL bez członkostwa z `projects.view_all`; wszyscy z `view` w tej samej organizacji; `documents.upload` mają U-V, U-B, U-M i U-ALL, U-B0 go nie ma
 - **Kroki**:
   1. U2 otwiera listę dokumentów P1, metadane dokumentu, żąda presigned GET i presigned PUT
-  2. U-V, U-B, U-M, U-ALL to samo; U-B, U-M i U-B0 wgrywają; U-M tworzy podfolder; U-ALL listuje folder `inherit`, pobiera i próbuje wgrać
+  2. W F-top: U-V, U-B, U-M, U-ALL to samo; U-B, U-M i U-B0 wgrywają; U-M tworzy podfolder; U-ALL listuje F-top, pobiera, próbuje wgrać, dodać dokument-link i utworzyć podfolder
   3. Dodaj U-B drugi raz do P1 z inną rolą
 - **Oczekiwane wyniki**:
   - U2: 404 na projekt i dokumenty (bez ujawniania istnienia); brak wydanych URL; dokumentów P1 brak w wyszukiwarce U2
-  - U-V: `read` — lista i pobranie, upload → 403; U-B: `write` — upload, dokument-link i nowa rewizja; U-M: `manage` — dodatkowo podfoldery; U-ALL widzi projekt dzięki `projects.view_all`; jego prawa w folderze `inherit` bez roli projektu — wynik zapisany w raporcie bez asercji (§27 wniosek 44)
+  - U-V: `read` — lista i pobranie, upload → 403; U-B: `write` — upload, dokument-link i nowa rewizja; U-M: `manage` — dodatkowo podfoldery; U-ALL widzi projekt dzięki `projects.view_all` i ma w F-top prawo `read`: lista i pobranie działają; upload, dokument-link i podfolder → 403 (powyżej `read` potrzebna rola albo grant ACL), mimo feature'a `documents.upload`
   - Krok 3: odrzucone (unique `(project_id, user_id)`, jedna rola na użytkownika w projekcie)
   - Role projektu nie zastępują RBAC: U-B0 (`member`, bez `documents.upload`) → 403 na upload mimo prawa `write`
 
-#### TC-PD-ACL-002: ACL folderu `restricted` zawęża i nadpisuje dziedziczenie
+#### TC-PD-ACL-002: ACL folderu `restricted` i dziedziczenie w podfolderach `inherit`
 
 - **Priorytet**: P0 | **Etap**: MVP | **Poziom**: API + E2E/UI
-- **Warunki wstępne**: Projekt P1: U1 i U3 z rolą `member`, U4 z rolą `member`, U5 z rolą `viewer`; wszyscy z `view` i `documents.upload`
+- **Warunki wstępne**: Projekt P1 z folderami najwyższego poziomu (rodzicem jest projekt): „Umowa” (`restricted`) i „Ogólne” (`inherit`). W „Umowa”: „Aneksy” (`inherit`) → „2026” (`inherit`); „Poufne” (`restricted`) → „Sub” (`inherit`). Wpisy `pd_folder_acl` (`principal_type` `user`): „Umowa”: U1 = `read`, U3 = `write`, U-M2 = `read`; „Poufne”: U3 = `read`. Dodatkowo w „Umowa” wpis `principal_type` `project_role`: `viewer` = `read`. Użytkownicy: U1, U3, U4 — rola `member`; U-M — `manager` bez wpisu; U-M2 — `manager` z wpisem; U5 — `viewer`; U-ALL — `projects.view_all` bez roli i bez wpisu. Wszyscy z `view` i `documents.upload`
 - **Kroki**:
-  1. Folder „Umowa” `restricted` z wpisami `pd_folder_acl`: U1 (`principal_type` `user`) — `read`, U3 (`user`) — `write`, rola `viewer` (`principal_type` `project_role`) — `read`; U4 bez wpisu; podfolder bez własnego ACL; podfolder z jawnym nadpisaniem
-  2. U1 próbuje wgrać do „Umowa”; U3 wgrywa; U1 pobiera; U5 pobiera; U4 żąda listy, metadanych i presign
-  3. Przenieś dokument z „Umowa” do folderu ogólnego (`inherit`)
+  1. „Umowa”: każdy listuje, pobiera, wgrywa
+  2. „Aneksy” i „2026”: każdy listuje, pobiera, wgrywa, tworzy podfolder (U1, U3, U4, U-M, U-M2, U-ALL)
+  3. „Sub” pod „Poufne”: U1 i U3 listują i wgrywają
+  4. „Ogólne” (najwyższy poziom): U4 i U-ALL; przenieś dokument z „Umowa” do „Ogólne”
+  5. U5 w „Aneksy”
 - **Oczekiwane wyniki**:
-  - Krok 2: U1 → 403 przy presign PUT (folder widoczny, brak `write`); U3 → 201; U1 i U5 pobierają; U4 → 404 (rola `member` nie daje dostępu do folderu `restricted` bez wpisu; bez ujawniania istnienia)
-  - Podfolder z jawnym nadpisaniem — własne wpisy; podfolder `inherit` pod folderem `restricted` — czy prawa idą z rodzica, czy z roli w projekcie, rejestr nie ustala: wynik w raporcie bez asercji (§27 wniosek 45)
-  - Krok 3: uprawnienia dokumentu po przeniesieniu wynikają z folderu docelowego (`inherit`: U4 jako `member` ma `write`)
+  - Krok 1: U1 — `read`, upload → 403 (folder widoczny bez `write`); U3 → 201; U-M2 — `read`, upload → 403; U5 — `read` (wpis `project_role` w samym folderze `restricted`); U4, U-M, U-ALL → 404 (bez ujawniania istnienia)
+  - Krok 2: oba foldery biorą wpisy najbliższego przodka `restricted` („Umowa”): U1 — `read`; U3 — `write`; U-M2 — tylko `read` (upload → 403, podfolder → 403 — rola `manager` nie poszerza); U4, U-M i U-ALL → 404 (role i `projects.view_all` nie poszerzają; ograniczenie nie wycieka do podfolderów)
+  - Krok 3: „Sub” bierze wpisy „Poufne” (najbliższy przodek `restricted`), nie „Umowa”: U3 — `read`, upload → 403; U1 → 404
+  - Krok 4: w „Ogólne” obowiązuje mapowanie ról: U4 (`member`) — `write`; U-ALL — `read`; przeniesiony dokument ma uprawnienia folderu docelowego
+  - Krok 5: czy wpis `principal_type = project_role` przodka `restricted` działa w podfolderze `inherit`, rejestr nie mówi wprost — wynik w raporcie bez asercji (§27 wniosek 46)
 
 #### TC-PD-ACL-003: Presigned URL wydawany dopiero po sprawdzeniu uprawnień i krótko ważny
 
@@ -1194,19 +1204,23 @@ Import ZIP i multipart po stronie serwera idą przez istniejącą kolejkę OM (P
 #### TC-PD-ACL-007: Prawa `read` / `write` / `manage` i zakres roli `manager`
 
 - **Priorytet**: P0 | **Etap**: MVP | **Poziom**: API + E2E/UI + `pg`
-- **Warunki wstępne**: Projekt P1, folder F (`inherit`); U-V (`viewer`), U-B (`member`), U-M (`manager`) — wszyscy z grantami `employee` (bez `projects.manage`, `documents.approve`, `documents.delete`, `projects.delete`, `storage.purge`, `settings.manage`, `templates.manage`, v1 `share_links.manage`); folder F2 `restricted` z wpisem U-B = `read`
+- **Warunki wstępne**: Projekt P1, folder F (`inherit`, najwyższy poziom — rodzicem jest projekt, mapowanie ról bez zastrzeżeń); U-V (`viewer`), U-B (`member`), U-M (`manager`) — wszyscy z grantami `employee` (bez `projects.manage`, `documents.approve`, `documents.delete`, `projects.delete`, `storage.purge`, `settings.manage`, `templates.manage`, v1 `share_links.manage`); folder F2 `restricted` (najwyższy poziom) z wpisem U-B = `read`, bez wpisu dla U-M; U-M0 z rolą `manager` w P1 bez feature'a `view` (pozostałe granty jak U-M)
 - **Kroki**:
   1. W F: każdy z trzech listuje i pobiera; wgrywa plik, dodaje dokument-link, dodaje nową rewizję; tworzy i zmienia podfolder; ustawia ACL folderu (`folders.set_acl`)
   2. U-B w F2: upload i `folders.set_acl`
   3. U-M w P1: edycja projektu, dodanie i zmiana członka, zamknięcie projektu (`projects.close`, także ze statusem `cancelled`), ręczne zdjęcie flagi `deal_reopened_at` (TC-PD-PRJ-008), wydłużenie retencji (TC-PD-RET-009)
   4. U-M w P1: zatwierdzenie rewizji, soft delete dokumentu, soft delete projektu, purge, ustawienia modułu, szablony; v1: link udostępniania
   5. U-M w projekcie P2, w którym nie jest członkiem: edycja projektu
+  6. U-M w F2: lista i upload
+  7. U-M0: lista projektów, otwarcie P1, lista F, edycja P1
 - **Oczekiwane wyniki**:
   - Krok 1: U-V — `read`: lista i pobranie, pozostałe → 403; U-B — `write`: dodatkowo upload, dokument-link i nowa rewizja, podfoldery i ACL → 403; U-M — `manage`: wszystko, w tym podfoldery i `folders.set_acl`
   - Krok 2: upload → 403 (folder widoczny bez `write`); `folders.set_acl` → 403
   - Krok 3: wszystko przechodzi bez feature'a `projects.manage` (rola `manager` daje jego uprawnienia w obrębie swojego projektu — jedyny wyjątek od zasady „feature AND członkostwo AND ACL”); wpisy w `audit_logs`
   - Krok 4: każda operacja → 403 (wymaga feature'a)
   - Krok 5: 404 (brak członkostwa; rola działa tylko w swoim projekcie)
+  - Krok 6: 404 — rola `manager` nie nadaje grantów `pd_folder_acl`, a `manage` działa tylko w folderach `inherit` bez przodka `restricted`
+  - Krok 7: 403 na każdej operacji — rola `manager` nie zastępuje `view`; bez `view` brak dostępu do modułu i projektu
 ---
 
 ## 14. Scenariusze testowe: Linki udostępniania (TC-PD-SHARE) — 3 TC
@@ -1726,7 +1740,7 @@ Akceptacje v1 (rewizje dokumentów, transmittale, protokoły): własna walidacja
 
 ## 27. Wnioski do specyfikacji (luki i pytania techniczne)
 
-Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza wnioskiem 34 (decyzja biznesowa Marka). Rozstrzygnięcia rev 4 wyłącznie na podstawie rejestru z commita 865714e, rev 5 — z commita b0e097f, rev 5a — z commita a75dc9f, rev 6 — z commita 932fac6, rev 6a — z commita 35b305a.
+Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza wnioskiem 34 (decyzja biznesowa Marka). Rozstrzygnięcia rev 4 wyłącznie na podstawie rejestru z commita 865714e, rev 5 — z commita b0e097f, rev 5a — z commita a75dc9f, rev 6 — z commita 932fac6, rev 6a — z commita 35b305a, rev 7 — z commita f81c58c.
 
 ### Priorytet 1 (przed kodem)
 
@@ -1787,12 +1801,16 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza 
 40. ~~**Limit `import.zip_max_bytes`**~~ — ✅ **ROZSTRZYGNIĘTE (D158)**: domyślnie 250 MB, administrator instancji może ustawić inną wartość, podniesienie domyślnej dopiero po pomiarze RAM (KA-6, progi D120); `zip_limit_exceeded` z komunikatem (rozmiar paczki, limit) i dwiema drogami: ręczny upload albo dokument-link (`kind = link`, D138). Scenariusze: TC-PD-WRK-009, TC-PD-WRK-003, TC-PD-PERF-003.
 41. ~~**Treść komunikatu dla limitów innych niż rozmiar paczki**~~ — ✅ **ROZSTRZYGNIĘTE (D158)**: nazwa i wartość limitu oraz wartość zmierzona; dla B–D „co najmniej X” (import przerywany zaraz po przekroczeniu). Scenariusz: TC-PD-WRK-009.
 
-### Luki rev 6–6a (reguł brak w rejestrze @932fac6 / @35b305a — nie zgadywano)
+### Luki rev 6–6a (rozstrzygnięcia rev 7 z rejestru @f81c58c)
 
-42. **Rola `manager` bez feature'a `view`** (TC-PD-ACL-007): D160 nadaje roli `manager` uprawnienia `projects.manage` w projekcie, ale nie mówi, czy wymaga przy tym `view`. Plan testuje `manager` z grantami pracownika (z `view`).
-43. **Wartości `retention.policy`** (TC-PD-RET-009): D160 odsyła do polityki organizacji (D113) i wymienia `manual`; pozostałych wartości polityki i sposobu wyliczenia dolnej granicy rejestr nie podaje — TC używa fixture z jedną polityką dającą datę i z `manual`.
-44. **Prawa folderu `inherit` przy `projects.view_all` bez roli projektu** (TC-PD-ACL-001): D159 mapuje na prawa tylko role `viewer`/`member`/`manager`; dla użytkownika widzącego projekt wyłącznie przez `projects.view_all` rejestr nie podaje prawa folderu.
-45. **Podfolder `inherit` pod folderem `restricted`** (TC-PD-ACL-002): rejestr nie ustala, czy prawa idą z wpisów ACL rodzica, czy z roli w projekcie.
+42. ~~**Rola `manager` bez feature'a `view`**~~ — ✅ **ROZSTRZYGNIĘTE (D167)**: rola `manager` nie zastępuje `view` (bez niego 403), daje tylko zakres `projects.manage` w swoim projekcie i `manage` w folderach `inherit`; żadnych innych feature'ów ani grantów ACL. Scenariusz: TC-PD-ACL-007.
+43. ~~**Wartości `retention.policy`**~~ — ✅ **ROZSTRZYGNIĘTE (D166)**: `later_of_both` (tylko przy obu datach), `warranty_end`, `rekojmia_end`, `manual`; brak wskazanej daty → brak granicy, wtedy D160 (bez skracania ustawionej). Scenariusz: TC-PD-RET-009.
+44. ~~**Prawa folderu `inherit` przy `projects.view_all` bez roli projektu**~~ — ✅ **ROZSTRZYGNIĘTE (D168)**: `read` w folderach `inherit` bez przodka `restricted`; powyżej `read` — rola albo grant ACL. Scenariusz: TC-PD-ACL-001.
+45. ~~**Podfolder `inherit` pod folderem `restricted`**~~ — ✅ **ROZSTRZYGNIĘTE (D169)**: wpisy `pd_folder_acl` najbliższego przodka `restricted`; role i `projects.view_all` nie poszerzają; folder najwyższego poziomu — mapowanie ról z D159. Scenariusz: TC-PD-ACL-002.
+
+### Luki rev 7 (reguł brak w rejestrze @f81c58c — nie zgadywano)
+
+46. **Wpisy `principal_type = project_role` przodka `restricted` w podfolderze `inherit`** (TC-PD-ACL-002 krok 5): D169 mówi, że podfolder bierze wpisy najbliższego przodka `restricted` i że role nie poszerzają praw, ale nie mówi wprost, czy wpis dla roli projektu (np. `viewer` = `read`) w przodku działa w podfolderze. TC nie zakłada odpowiedzi.
 
 ---
 
@@ -1800,19 +1818,19 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza 
 
 **Dokument**: Niezależny plan testów — spec only
 **Liczba scenariuszy**: 124 (MVP 102, v1 15, v2 7; etap liczony z pierwszej fazy scenariusza — TC-PD-STOR-007 obejmuje MVP, v1 i v2); w tym 2 warunkowe poza werdyktem (TC-PD-PRJ-012, TC-PD-PRJ-013)
-**Liczba wniosków do speki**: 45 (rozstrzygnięte: 1–11, 13–33, 35–41; otwarte: 12, 17; luki rev 6–6a: 42–45; decyzja Marka: 34)
+**Liczba wniosków do speki**: 46 (rozstrzygnięte: 1–11, 13–33, 35–45; otwarte: 12, 17; luka rev 7: 46; decyzja Marka: 34)
 **Status**: SPEC ONLY — bez kodu, bez testów wykonywalnych
 
 **Kolejne kroki**:
 1. Na etapie kodu: PoC dostawcy domyślnego na buckecie wersjonowanym (kryterium akceptacji, fallback B2) i pomiar RAM z progami z TC-PD-PERF-003
 2. Decyzja Marka w sprawie D31 ↔ D132 (zostaje TC-PD-PRJ-012 albo TC-PD-PRJ-013)
-3. Odpowiedzi na luki 42–45 z §27
+3. Odpowiedź na lukę 46 z §27
 
 ---
 
 ## Załącznik: Traceability D → TC (macierz decyzji)
 
-Źródło: `.ai/decisions.md` z commita 35b305a (po merge #19, #21, #22, #23 i #25), sekcja modułu D98–D165: 68 decyzji, 67 aktywnych (D99 zastąpiona przez D116; D132 i D154 aktywne warunkowo — alternatywy zależne od decyzji Marka w sprawie D31). Każda aktywna decyzja ma co najmniej jeden TC. Fazy w kolumnie TC wynikają z pola „Etap” scenariuszy.
+Źródło: `.ai/decisions.md` z commita f81c58c (po merge #19, #21, #22, #23, #25, #26 i #27), sekcja modułu D98–D169: 72 decyzje, 71 aktywnych (D99 zastąpiona przez D116; D132 i D154 aktywne warunkowo — alternatywy zależne od decyzji Marka w sprawie D31). Każda aktywna decyzja ma co najmniej jeden TC. Fazy w kolumnie TC wynikają z pola „Etap” scenariuszy.
 
 | D | Treść skrócona | TC | Uwagi |
 |---|---|---|---|
@@ -1877,13 +1895,17 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza 
 | **D156** | Odrzucenie bez komentarza → 422 `REJECTION_COMMENT_REQUIRED`; komentarz przy akceptacji opcjonalny | TC-PD-APR-002 | v1 |
 | **D157** | Wysłanie transmittala z dokumentami bez wymaganej akceptacji → 409 `APPROVAL_PENDING` z listą; zamknięcia protokołu i jego akceptacji nie blokuje | TC-PD-APR-004 | v1 |
 | **D158** | Limit paczki ZIP: domyślne `import.zip_max_bytes` = 250 MB, administrator instancji może zmienić; podniesienie domyślnej dopiero po pomiarze RAM dla większej paczki (KA-6, progi D120); `zip_limit_exceeded` z komunikatem: nazwa i wartość limitu oraz wartość zmierzona (A: rozmiar paczki z `Content-Length`, bez nagłówka — „co najmniej X”; B–D: „co najmniej X”) i dwie drogi: ręczny upload (pojedynczo albo mniejsze ZIP-y) albo dokument-link (`kind = link`, `link_provider = generic`, `POST /documents/:id/links`, `https:` — D138) | TC-PD-WRK-009, TC-PD-WRK-003, TC-PD-PERF-003, TC-PD-SEC-002 | MVP; wnioski 40, 41 rozstrzygnięte |
-| **D159** | Role projektu `manager`/`member`/`viewer` (`pd_project_members.role`, unique `(project_id, user_id)`); RBAC decyduje co, członkostwo (albo `projects.view_all`) — gdzie, ACL — w którym folderze; `inherit`: `viewer` → `read`, `member` → `write`, `manager` → `manage`; `restricted`: tylko `pd_folder_acl` (`user`/`project_role`) | TC-PD-ACL-001, TC-PD-ACL-002, TC-PD-ACL-006, TC-PD-ACL-007 | MVP; wniosek 36 rozstrzygnięty |
-| **D160** | `read` = lista i pobranie; `write` = + upload, dokument-link, nowa rewizja; `manage` = + podfoldery i `folders.set_acl`; rola `manager` = `projects.manage` w swoim projekcie (edycja, członkowie, `projects.close` także `cancelled`, retencja tylko w górę — `RETENTION_BELOW_COMPANY_MINIMUM`, zdjęcie flagi); poza rolą: akceptacje, usuwanie, purge, ustawienia, szablony, linki; 403/404 wg D147 | TC-PD-ACL-007, TC-PD-RET-009, TC-PD-RET-010, TC-PD-PRJ-008 | MVP; wnioski 36, 42, 43; dostęp RBAC `projects.manage` tylko z członkostwem albo `projects.view_all` (D159, D147) — TC-PD-PRJ-008 |
+| **D159** | Role projektu `manager`/`member`/`viewer` (`pd_project_members.role`, unique `(project_id, user_id)`); RBAC decyduje co, członkostwo (albo `projects.view_all`) — gdzie, ACL — w którym folderze; `inherit`: `viewer` → `read`, `member` → `write`, `manager` → `manage`; `restricted`: tylko `pd_folder_acl` (`user`/`project_role`) | TC-PD-ACL-001, TC-PD-ACL-002, TC-PD-ACL-006, TC-PD-ACL-007 | MVP; wniosek 36 rozstrzygnięty; rev 7: z zastrzeżeniem D169 (folder najwyższego poziomu — mapowanie ról; pod `restricted` — wpisy przodka) |
+| **D160** | `read` = lista i pobranie; `write` = + upload, dokument-link, nowa rewizja; `manage` = + podfoldery i `folders.set_acl`; rola `manager` = `projects.manage` w swoim projekcie (edycja, członkowie, `projects.close` także `cancelled`, retencja tylko w górę — `RETENTION_BELOW_COMPANY_MINIMUM`, zdjęcie flagi); poza rolą: akceptacje, usuwanie, purge, ustawienia, szablony, linki; 403/404 wg D147 | TC-PD-ACL-007, TC-PD-RET-009, TC-PD-RET-010, TC-PD-PRJ-008 | MVP; wnioski 36, 42, 43; dostęp RBAC `projects.manage` tylko z członkostwem albo `projects.view_all` (D159, D147) — TC-PD-PRJ-008; dolna granica retencji doprecyzowana przez D166 (TC-PD-RET-009) |
 | **D161** | `deal_reopened_at` znika sama przy powrocie deala do `won` (`customers.deal.won`, `customers.deal.updated`; persistent, idempotentnie); ręcznie `projects.reopen_flag_clear` — rola `manager` albo `projects.manage`, inni 403; brak powodu → 422 `REASON_REQUIRED`; każde zdjęcie w `audit_logs` (`system`/`deal_won` albo użytkownik/powód) | TC-PD-PRJ-008 | MVP; wniosek 37 rozstrzygnięty |
 | **D162** | `folders.delete`: `documents.delete` + `manage`, niepusty → 409 `FOLDER_NOT_EMPTY`; `projects.delete`: feature `projects.delete` (tylko admin, nie z roli `manager`), kaskadowo w jednej transakcji, undo; pliki w S3 i quota, fizycznie tylko purge; zwykły użytkownik zamyka projekt jako `cancelled` | TC-PD-RET-010, TC-PD-ACL-005, TC-PD-ACL-007 | MVP; wniosek 38 rozstrzygnięty |
 | **D163** | Rewizja niemutowalna w kolumnach treści; zmienne tylko `review_status`, `approved_*`, `deleted_at`; zmiana na poziomie serwisu/komendy → 409 `REVISION_IMMUTABLE`; pola w body → 422 `FIELD_NOT_ALLOWED`; jednorazowy zapis `sha256` i `content_type` przez worker | TC-PD-REV-001, TC-PD-REV-006 | MVP; wniosek 39 rozstrzygnięty |
 | **D164** | `sizeBytes` > `docs.max_file_bytes` → 413 `FILE_TOO_LARGE` bez sesji i rezerwacji; limit pliku przed quota; po `complete` → `UPLOAD_SIZE_MISMATCH`; import → `too_large` w raporcie | TC-PD-STOR-009 | MVP; wniosek 39 rozstrzygnięty |
 | **D165** | Granty `employee`: `view`, `projects.create`, `documents.upload`, `imports.run`, v1 `approvals.review`; bez: `projects.view_all`, `projects.manage`, `projects.delete`, `documents.approve`, `documents.delete`, `templates.manage`, `settings.manage`, `storage.purge`, v1 `share_links.manage`; admin wszystkie | TC-PD-ACL-005, TC-PD-RET-004, TC-PD-RET-010 | MVP; v1; wniosek 20 rozstrzygnięty |
+| **D166** | Dolna granica retencji dla `manager`: `later_of_both` → późniejsza data, tylko gdy obie ustawione; `warranty_end` / `rekojmia_end` → wskazana data; brak wskazanej daty albo `manual` → granicy nie ma, wtedy D160 (bez skracania ustawionej); poniżej granicy → 422 `RETENTION_BELOW_COMPANY_MINIMUM` | TC-PD-RET-009 | MVP; wniosek 43 rozstrzygnięty |
+| **D167** | Rola `manager` nie zastępuje `view` (bez niego brak dostępu → 403); daje tylko zakres `projects.manage` w swoim projekcie i `manage` w folderach `inherit` (z zastrzeżeniem D169); żadnych innych feature'ów ani grantów `pd_folder_acl` | TC-PD-ACL-007, TC-PD-ACL-002 | MVP; wniosek 42 rozstrzygnięty |
+| **D168** | `projects.view_all` bez roli: `read` w folderach `inherit` bez przodka `restricted`; z przodkiem `restricted` — D169; `write`/`manage` tylko z roli albo grantu ACL; brak feature'a → 403 | TC-PD-ACL-001, TC-PD-ACL-002 | MVP; wniosek 44 rozstrzygnięty |
+| **D169** | Folder `inherit` dziedziczy po rodzicu: najwyższy poziom — projekt (mapowanie ról D159); z przodkiem `restricted` — wpisy `pd_folder_acl` najbliższego przodka `restricted`, role i `view_all` nie poszerzają | TC-PD-ACL-002, TC-PD-ACL-007, TC-PD-ACL-001 | MVP; wniosek 45 rozstrzygnięty; wpisy `project_role` przodka w podfolderze — wniosek 46 |
 
 **Decyzje kontekstowe (wcześniejsze, aktywne) użyte w scenariuszach:**
 
@@ -1899,11 +1921,24 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka — poza 
 | **D5** | Jedna oferta `primary` na inwestycję | TC-PD-PRJ-002, TC-PD-PRJ-012 | per część tylko przy D132 |
 | **D63** | Inwestycje zakłada handlowiec (`pc_investments`) | TC-PD-PRJ-012 | |
 
-**Reguły spoza rejestru @35b305a:** brak. `REVISION_IMMUTABLE` → D163, `FILE_TOO_LARGE` → D164 (rev 6); wcześniej przeniesione: `STORAGE_NOT_CONFIGURED` → D143; tylko `https:` → D138; `SHARE_LINK_EXPIRY_REQUIRED` → D142, D152; ścieżki `..`/absolutne/symlinki → D148; wersje spoza aplikacji w quota → D153
+**Reguły spoza rejestru @f81c58c:** brak. `REVISION_IMMUTABLE` → D163, `FILE_TOO_LARGE` → D164 (rev 6); wcześniej przeniesione: `STORAGE_NOT_CONFIGURED` → D143; tylko `https:` → D138; `SHARE_LINK_EXPIRY_REQUIRED` → D142, D152; ścieżki `..`/absolutne/symlinki → D148; wersje spoza aplikacji w quota → D153
 
 ---
 
 ## Changelog
+
+### Rev 7 — 2026-10-23 (rejestr z commita f81c58c, po merge #27)
+
+- **Niezależna sesja testerska**, wyłącznie na podstawie `.ai/decisions.md` z commita f81c58c i plików review od Cezara (`review-pr26-r2.md`, `review-pr27.md`, `plan-r7-nits.md` — propozycje TC tylko jako podpowiedź); **bez dostępu do spek**
+- Decyzje, na których oparto zmiany: D158, D159, D160, D166, D167, D168, D169
+- D166: TC-PD-RET-009 przepisany — polityki `later_of_both` (obie daty / jedna data), `warranty_end` i `rekojmia_end` (z datą / bez wskazanej daty), `manual`; bez granicy z polityki obowiązuje zakaz skracania ustawionej daty (D160)
+- D167: TC-PD-ACL-007 kroki 6–7 — `manager` bez wpisu w folderze `restricted` → 404, `manager` bez `view` → 403
+- D168: TC-PD-ACL-001 — U-ALL (`projects.view_all` bez roli) ma `read` w folderze `inherit` najwyższego poziomu, upload/dokument-link/podfolder → 403 (asercja zamiast luki 44)
+- D169: TC-PD-ACL-002 przepisany — foldery najwyższego poziomu jawnie, podfoldery `inherit` pod `restricted` biorą wpisy najbliższego przodka `restricted` (także przy głębszym zagnieżdżeniu i przy dwóch poziomach `restricted`), `manager` i `view_all` nie poszerzają (asercja zamiast luki 45); wpis `project_role` przodka w podfolderze — bez asercji (luka 46)
+- Foldery najwyższego poziomu (rodzicem jest projekt) jawnie w TC-PD-ACL-001, TC-PD-ACL-002, TC-PD-ACL-007 i w §2
+- Nity: TC-PD-RET-009 — U-M członkiem wszystkich organizacji; TC-PD-WRK-009 krok 7 — wariant A1 (z `Content-Length`)
+- §27: wnioski 42–45 rozstrzygnięte (D166–D169); nowa luka 46; §28; załącznik @f81c58c — wiersze D166–D169, uzupełnione D159, D160
+- Liczba scenariuszy bez zmian: 124
 
 ### Rev 6a — 2026-10-23 (odbiór PR #26; rejestr z commita 35b305a, po merge #25)
 
