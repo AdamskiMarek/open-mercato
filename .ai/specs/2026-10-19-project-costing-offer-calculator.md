@@ -6,13 +6,13 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-19 |
-| **Rewizja** | 2026-10-23 (rev 8e — D83: split inwestycji w v1, nity n8n przy D81 (`bulk-update-owner`, lookup + POST/PUT, `auth: null`, R21); poprzednio rev 8d, rev 8c, rev 8b 2026-10-23, rev 8a 2026-10-20) |
+| **Rewizja** | 2026-10-23 (rev 8f — D84–D94: waluty przez moduł OM `currencies` (dostawca `NBP_A`, kurs ręczny tylko w drafcie, waluta bazowa z `BaseCurrencyService`), stan walut wg logu Koordynatora, błąd daty kursu w core (R23), Q12; poprzednio rev 8e — D83: split inwestycji w v1, nity n8n przy D81 (`bulk-update-owner`, lookup + POST/PUT, `auth: null`, R21); poprzednio rev 8d, rev 8c, rev 8b 2026-10-23, rev 8a 2026-10-20) |
 | **Moduł** | `project_costing` (`apps/mercato/src/modules/project_costing`) |
 | **Nisza v1** | Prefabrykacja żelbetowa |
 | **Docelowo** | Cała branża budowlana (multi-segment) |
-| **Zależności upstream** | `customers`, `dictionaries`, `dashboards`, `currencies`, `attachments`, `notifications`, `directory`, `configs` (ModuleConfigService), `audit_logs`, `query_index`, `progress` (ProgressJob), `feature_toggles` |
+| **Zależności upstream** | `customers`, `dictionaries`, `dashboards`, **`currencies` (wymagany; już w presecie `crm`: `apps/mercato/src/modules.ts` l.92, `packages/create-app/src/lib/starter-presets.ts` l.91 — D84)**, `attachments`, `notifications`, `directory`, `configs` (ModuleConfigService), `audit_logs`, `query_index`, `progress` (ProgressJob), `feature_toggles` |
 | **Moduł powiązany** | `project_schedule` (spec: `.ai/specs/2026-10-19-project-schedule.md`) — **opcjonalny konsument**: zależy od `project_costing` i rejestruje swój provider `ScheduleSource` w DI. `project_costing` = moduł bazowy, nigdy nie importuje `project_schedule` (rev 8a, Kod P0-1) |
-| **Wyłączone upstream** | `sales`, `workflows`, `catalog`, `business_rules` (rev 8b: przeliczniki jednostek `catalog` są per produkt — nie używamy, §2.4) |
+| **Wyłączone upstream** | `sales`, `catalog`, `@dainamite/cpq` (D18, D90), `workflows` (MVP; kandydat w v2 — D93), `sync_excel` (tylko CSV; XLSX na `exceljs` — D91), `business_rules` (rev 8b: przeliczniki jednostek `catalog` są per produkt — nie używamy, §2.4) |
 
 ---
 
@@ -25,6 +25,7 @@
 - **Ukryta marża = ukryty koszt** dla roli bez `project_costing.view_margin`; reguła obowiązuje we wszystkich kanałach (API, query_index, search, audit, eventy, eksport, PDF, compare, analityka, snapshot).
 - **Firma = organizacja OM.** Ustawienia per organizacja przez `ModuleConfigService` (`module_configs`), bez własnej tabeli `pc_settings`.
 - **Inwestycja = jedna encja `pc_investments`** (D63, kanoniczna; MVP minimalnie: ręczne wskazanie z podpowiedzią po kodzie; v1: identyfikatory zewnętrzne, dopasowanie, merge i split — D83). Inwestycje zakłada handlowiec (n8n ich nie tworzy). `klin:project` importujemy po `--dry-run` i akceptacji raportu, potem wyłączamy.
+- **Waluty (D84–D89):** moduł OM `currencies`, bez własnej tabeli walut i kursów. MVP: jedna waluta na kalkulację = waluta deala; v1: waluta per pozycja. Waluta bazowa z `BaseCurrencyService`; kurs z własnego dostawcy `NBP_A` (tabela A, `mid`) pobierany na żądanie przy mark-sent i zamrażany w snapshocie; kurs ręczny tylko w drafcie, nigdy w `exchange_rates` (§3.10).
 - **Zaokrąglenia (D62/D16):** half-up do 2 miejsc per linia; sumy = suma zaokrąglonych linii; konfigurowalne per organizacja (`rounding.*`).
 - **Zakres faz:** §14 — MVP/v1/v2 jako listy funkcji i encji; estymaty w dniach usunięte (P11).
 
@@ -176,7 +177,7 @@ Klucze (rev 8a):
 
 | Klucz | Domyślnie | Uwagi |
 |---|---|---|
-| `default_currency` | `"PLN"` | |
+| `default_currency` | `null` | tylko domyślna waluta kalkulacji **bez deala** (D86); `null` = waluta bazowa organizacji z `BaseCurrencyService.resolveBaseCurrency()`; musi być aktywna w `currencies` (D87). Waluty bazowej nie ustawia się tutaj |
 | `default_overhead_rate` | `0.10` | |
 | `calculation_scope` | `"all"` | MVP: tylko `all`; `own` od v1 (D79, §4.4) |
 | `integrations.n8n_api_key_ids` | `[]` | ID kluczy API integracji n8n (`auth.keyId`), dla których działa interceptor D81 (§10.2); same ID, bez sekretów |
@@ -186,7 +187,7 @@ Klucze (rev 8a):
 | `schedule_source` | `"calculation_embedded"` | §7a.3 |
 | `schedule.enabled` | `false` | włącznik modułu harmonogramu per organizacja (schedule §1.0); `project_schedule` czyta go przez `projectCostingSettings` |
 | `rounding.mode` | `"half_up"` | rev 8b (D62/D16): `half_up` (połówki od zera: 1,005 → 1,01; −1,005 → −1,01) \| `up` (zawsze od zera) \| `down` (obcięcie); per organizacja |
-| `rounding.line_decimals` | `2` | miejsca po przecinku dla wartości linii i sum (0–4); ceny jednostkowe zawsze z 4 miejscami |
+| `rounding.line_decimals` | `null` | miejsca po przecinku dla wartości linii i sum; `null` = `currencies.decimal_places` waluty kwoty (D87; PLN 2, JPY 0), jawna wartość 0–4 = nadpisanie per organizacja (D62/D16); ceny jednostkowe zawsze z 4 miejscami |
 | `investments.trgm_threshold` | `0.5` | v1 — próg podpowiedzi pg_trgm (§3.12) |
 
 **Usunięte klucze** (dublowały RBAC — Kod p4/p7, decyzja Koordynatora (e)): `visibility.costs_visible_features`, `visibility.margin_visible_features`, `visibility.prices_visible_features`, `visibility.margin_visible_by_default`, `visibility.margin_visible_after_deal_close` (→ feature `project_costing.view_margin_after_close`, §9). Zaokrąglenia per organizacja (D16/D62) = klucze `rounding.*` powyżej (rev 8b). Waluty inne niż PLN i zaokrąglenie per waluta (ISO 4217) — pytanie otwarte Q7 (§16).
@@ -236,7 +237,8 @@ Kolumny: id, organization_id, tenant_id, price_source_id, segment_code, cost_cat
 | `valid_from` | `date` NULL | |
 | `valid_to` | `date` NULL | |
 | `priority` | `int` DEFAULT 0 | wyższy = bardziej szczegółowy (item > category > segment > global) |
-| `currency` | `char(3)` NOT NULL DEFAULT `'PLN'` | |
+| `currency` | `char(3)` NOT NULL | bez wartości domyślnej w bazie; serwis ustawia: waluta deala (`deal_snapshot.value_currency`) → `default_currency` → waluta bazowa (D84, D86); kod musi istnieć i być aktywny w `currencies` (D87) |
+| `fx_manual_rates` | `jsonb` NULL | tylko wersja `draft`: kursy ręczne `[{ from, to, rate, reason, set_by, set_at }]` (rate jako string numeric(18,8)); ustawiane komendą `project_costing.calculations.set_manual_rate` (undo, `audit_logs`, powód wymagany); przy mark-sent przepisywane do `snapshot_data.fx` z `provider_source: 'manual'`; **nigdy nie trafiają do `exchange_rates`** (D85) |
 | `created_at` | `timestamptz` | |
 | `updated_at` | `timestamptz` | |
 
@@ -339,6 +341,7 @@ Constraints: `CHECK (status IN ('draft','sent','superseded','accepted','rejected
 | `price_captured_at` | `timestamptz` NULL | |
 | `price_captured_unit_cost` | `numeric(14,4)` NULL | |
 | `price_captured_unit_price` | `numeric(14,4)` NULL | |
+| `currency` | `char(3)` NULL | v1 (D84): waluta pozycji; `NULL` = waluta kalkulacji; kod aktywny w `currencies` (D87); kurs pozycja → kalkulacja zamrażany per para przy mark-sent (D88) |
 | `import_error` | `bool` DEFAULT false | linia zaimportowana z błędem do poprawy (§6.2); blokuje mark-sent (D58) |
 | `import_error_reason` | `text` NULL | kod błędu, np. `unknown_unit`, `formula_without_value` |
 | `created_at` | `timestamptz` | |
@@ -368,7 +371,7 @@ Reguły per typ:
 
 `UNIQUE (calculation_id)` — jeden snapshot per wersja.
 
-Snapshot tworzony przy `mark-sent`. `snapshot_data` zawiera: lines (line_type, label, qty, unit, unit_cost, unit_price, line_cost, line_price, line_margin_pct per item — wartości z `calculate()`), rounding (`rounding.*` użyte przy wyliczeniu), totals (subtotal_cost, overhead_amount, full_cost, subtotal_price, total_margin, margin_rate), price_provenance (catalog_entry_id, price_source_id, price_source_item_code, price_captured_at, price_captured_unit_cost/price per linia), fx (kurs zamrożony przy mark-sent — §3.10, D71; dla PLN kurs = 1). PDF generowany z snapshota (nie z bieżących linii).
+Snapshot tworzony przy `mark-sent`. `snapshot_data` zawiera: lines (line_type, label, qty, unit, unit_cost, unit_price, line_cost, line_price, line_margin_pct per item — wartości z `calculate()`), rounding (`rounding.*` użyte przy wyliczeniu), totals (subtotal_cost, overhead_amount, full_cost, subtotal_price, total_margin, margin_rate), price_provenance (catalog_entry_id, price_source_id, price_source_item_code, price_captured_at, price_captured_unit_cost/price per linia), fx (D88: `{ from, to, rate, rate_type, provider_source, effective_date, table_no }` — `rate` jako string numeric(18,8), `rate_type: 'mid'` dla `NBP_A` albo `'manual'`, `provider_source: 'NBP_A' | 'manual'`, `effective_date` = data znalezionej tabeli; w v1 tablica takich wpisów per para walut; gdy waluta kalkulacji = waluta bazowa: jeden wpis z `rate: "1"`, bez pobierania kursu — §3.10, D71, D85). PDF generowany z snapshota (nie z bieżących linii).
 
 #### ~~`pc_calculation_audit_log`~~ — usunięte w rev 8a
 
@@ -540,9 +543,9 @@ Kolumny: id, organization_id, tenant_id, kind (`calculation:{YYYY}` \| `investme
 
 ### 2.3 Waluta i zaokrąglenia
 
-`numeric(14,2)` dla wartości linii i sum, `numeric(14,4)` dla cen jednostkowych i ilości. Jednowalutowe (§3.10; wiele walut — pytanie Q6, §16, otwarte). Gdy Q6 ≠ (a), liczba miejsc zaokrąglenia kwot w walucie innej niż PLN wynika z kodu waluty ISO 4217 (D70); dla PLN pozostaje 2 (D62).
+`numeric(14,2)` dla wartości linii i sum, `numeric(14,4)` dla cen jednostkowych i ilości. MVP: jedna waluta na kalkulację (§3.10, D84); v1: waluta per pozycja. Liczba miejsc zaokrąglenia kwot = `currencies.decimal_places` waluty kwoty, fallback ISO 4217, gdy moduł nie zwraca wartości (D70, D87); PLN 2 (zgodnie z D62), JPY 0. Jawne `rounding.line_decimals` organizacji nadpisuje tę wartość (D62/D16).
 
-**Zaokrąglenie (D62/D16):** `round(x)` w tej specyfikacji oznacza zaokrąglenie wg ustawień organizacji `rounding.mode` (domyślnie `half_up`, połówki od zera) do `rounding.line_decimals` miejsc (domyślnie 2). Każda wartość linii jest zaokrąglana osobno; **sumy = suma już zaokrąglonych linii** (nigdy zaokrąglona suma surowa). Ceny jednostkowe wyliczane (tryb B/C) zaokrąglamy do 4 miejsc. Arytmetyka na liczbach dziesiętnych (ciągi/liczby całkowite w groszach), nie na `float`; `Math.round` nie jest używany (dla −0,5 daje 0). Zmiana ustawienia działa na wersje `draft`; wersje wysłane zostają w snapshocie z ustawieniem z chwili mark-sent.
+**Zaokrąglenie (D62/D16):** `round(x)` w tej specyfikacji oznacza zaokrąglenie wg ustawień organizacji `rounding.mode` (domyślnie `half_up`, połówki od zera) do liczby miejsc waluty (`currencies.decimal_places`, D87; PLN 2) albo do `rounding.line_decimals`, gdy organizacja ustawi go jawnie. Każda wartość linii jest zaokrąglana osobno; **sumy = suma już zaokrąglonych linii** (nigdy zaokrąglona suma surowa). Ceny jednostkowe wyliczane (tryb B/C) zaokrąglamy do 4 miejsc. Arytmetyka na liczbach dziesiętnych (ciągi/liczby całkowite w groszach), nie na `float`; `Math.round` nie jest używany (dla −0,5 daje 0). Zmiana ustawienia działa na wersje `draft`; wersje wysłane zostają w snapshocie z ustawieniem z chwili mark-sent.
 
 ### 2.4 Jednostki i przeliczniki (D17/D62, rev 8b)
 
@@ -671,7 +674,8 @@ Przy `mark-sent`:
    - **Blokuje** (422 `MARK_SENT_BLOCKED` z listą problemów): linie z `import_error = true`; brak pozycji `item`; ujemna cena (`unit_price < 0` lub `line_price < 0`, także z redystrybucji trybu B przy `R < 0`); **ujemna marża, gdy mark-sent wykonuje osoba bez `view_margin` (D76)** — problem z kodem `APPROVAL_REQUIRED` i komunikatem dokładnie „Oferta wymaga zatwierdzenia przez administratora”, bez znaku i bez kwoty (nie wskazuje też, której pozycji dotyczy); taką ofertę wysyła admin (rola z `view_margin`).
    - **Ostrzega** (422 `MARK_SENT_CONFIRMATION_REQUIRED`; ponowienie z `confirmWarnings: true`): ujemna marża (`total_margin < 0` lub `line_margin < 0` na pozycji) — tylko gdy mark-sent wykonuje osoba z `view_margin` (pozostali: blokada D76 powyżej); pusta sekcja; cena zero (`unit_price = 0` na pozycji `item`; D73).
    - **Nie blokuje:** brak deala (oferta standalone jest dozwolona). Cena zero tylko ostrzega (D73), nie blokuje.
-2. Tworzy `pc_offer_snapshots.snapshot_data` z bieżącymi liniami, sumami i proweniencją.
+1b. **Waluta i kurs (D84–D88, §3.10):** waluta kalkulacji aktywna w `currencies` (inaczej 422 `CURRENCY_NOT_ACTIVE` — kod proponowany, D87); waluta bazowa z `BaseCurrencyService` (brak → 422 `BASE_CURRENCY_MISSING`, D86); gdy waluta ≠ bazowa: kurs ręczny z draftu albo kurs `NBP_A` pobrany na żądanie; brak obu → 422 `FX_RATE_UNAVAILABLE`.
+2. Tworzy `pc_offer_snapshots.snapshot_data` z bieżącymi liniami, sumami, proweniencją i `fx` (D88).
 3. Ustawia `status = 'sent'`, `sent_at = now()`.
 4. Linie `pc_calculation_lines` tej wersji są od tej chwili **immutable** (API nie przyjmuje PATCH).
 5. Generuje PDF z `snapshot_data` (nie z linii bazy) jako ProgressJob w workerze (§5.2).
@@ -691,12 +695,33 @@ PDF klienta generowany **zawsze ze snapshota** — żadne zmiany konfiguracji ce
 
 **„Przelicz z cennika” (D57, MVP):** `POST .../recalc-from-catalog` (komenda `calculations.recalc_from_catalog`, tylko `draft`) odświeża `unit_cost`/`unit_price` i proweniencję (`price_captured_*`) wyłącznie w liniach z `catalog_entry_id` i `price_override = false`; linie z override zostają bez zmian. Wynik: liczba zmienionych i pominiętych linii (z powodem, np. inna jednostka — §2.4).
 
-### 3.10 Waluta kalkulacji
+### 3.10 Waluta kalkulacji i kursy (D84–D89; Q6 zamknięte)
 
-Waluta = `value_currency` z `deal_snapshot` (snapshot przy attach-deal, odświeżany subscriberem) gdy `deal_id != NULL`, else ustawienie `default_currency` (ModuleConfigService). Jednowalutowe. Wiele walut — pytanie Q6 (§16, **otwarte**). Decyzje warunkowe D70 i D71 — obowiązują, gdy Q6 ≠ (a):
-- **D70:** waluty jako kody ISO 4217 (`char(3)`, walidacja względem słownika walut); liczba miejsc zaokrąglenia kwot wg minor unit ISO 4217 danej waluty (PLN = 2, zgodnie z D62).
-- **D71:** kurs do waluty bazowej organizacji (`default_currency`, potrzebny do sum w prognozie i sumy inwestycji) = kurs średni NBP z tabeli A z dnia mark-sent, zamrożony w `snapshot_data.fx` (`currency`, `base_currency`, `rate`, `nbp_table_no`, `effective_date`, `source: 'nbp_a' | 'manual'`). **Pierwszeństwo: kurs ręczny ma pierwszeństwo przed NBP** — gdy wersja `draft` ma kurs ręczny, mark-sent zamraża go (`source: 'manual'`) i nie pobiera kursu NBP; bez kursu ręcznego mark-sent zamraża kurs NBP (`source: 'nbp_a'`). Ręczna korekta kursu (D71): dozwolona **przed** mark-sent (wartość zapisana w wersji `draft`, `source: 'manual'`, metadana komendy w `audit_logs`); **po** mark-sent zablokowana — kurs w snapshocie jest niezmienny, a zmiana wymaga nowej rewizji. Gdy w dniu mark-sent nie ma tabeli (weekend, święto, przed publikacją), używana jest ostatnia opublikowana tabela A, a `effective_date` wskazuje jej datę (D71; A33). `FX_RATE_UNAVAILABLE` (422 przy mark-sent) tylko wtedy, gdy nie jest dostępna żadna tabela A (np. API NBP niedostępne) i nie podano kursu ręcznego (R17).
-- Dla PLN (`currency = default_currency`) kurs = 1, bez wywołania NBP.
+Waluty i kursy realizuje moduł OM `currencies` (D84); `project_costing` nie ma własnej tabeli walut, kursów ani własnego klienta NBP. Odczyty i zapisy kursów idą przez serwisy DI modułu `currencies` (bez HTTP i bez ACL po stronie serwera).
+
+**Stan na produkcji według logu Koordynatora 2026-10-23** (`om-currency-change-2026-10-23.json`; opis stanu, nie czynność tej speki): waluta bazowa organizacji = PLN (wcześniej USD); aktywnych 10 walut (AUD, CAD, CHF, CNH, CNY, EUR, GBP, JPY z `decimal_places` 0, PLN, USD); konfiguracja pobierania dostawcy OM `NBP` włączona (`syncTime` 09:00, bez podpięcia do harmonogramu zadań); pobrano 14 kursów z tabeli C (207/C/NBP/2026, `effectiveDate` 2026-10-23, `source: 'NBP'`, `type` buy/sell); CNY i CNH nie mają kursu w tabeli C; podsumowanie deali nadal zgłasza brak kursu EUR (R23).
+
+**Waluta kalkulacji (MVP, D84):** jedna na kalkulację. Gdy `deal_id != NULL` — `value_currency` z `deal_snapshot` (snapshot przy attach-deal, odświeżany subscriberem); bez deala — `default_currency` z ustawień, a gdy jest pusty — waluta bazowa (D86). **v1:** waluta per pozycja (`pc_calculation_lines.currency`), suma kalkulacji w walucie kalkulacji po kursach pozycja → kalkulacja zamrożonych per para (D88).
+
+**Walidacja waluty (D87):** kod waluty musi istnieć i być aktywny w `currencies`. Waluta deala pochodzi ze słownika `customers` (pełna lista ISO), więc może jej nie być w module — wtedy utworzenie kalkulacji, attach-deal i mark-sent zwracają 422 `CURRENCY_NOT_ACTIVE` (kod proponowany, do potwierdzenia w review) z komunikatem „Waluta {kod} nie jest aktywna w module Waluty — dodaje ją administrator”. Liczba miejsc z `currencies.decimal_places` (fallback ISO 4217; D70, §2.3).
+
+**Waluta bazowa (D86):** `BaseCurrencyService.resolveBaseCurrency()` (flaga `is_base`, per organizacja). Brak waluty bazowej → 422 `BASE_CURRENCY_MISSING` przy mark-sent i przy utworzeniu kalkulacji bez deala z pustym `default_currency`. Kurs do waluty bazowej jest potrzebny do sum w prognozie i sumy inwestycji.
+
+**Brak FX przy walucie bazowej:** gdy waluta kalkulacji = waluta bazowa, `fx` w snapshocie ma `rate: "1"`, `provider_source` nie jest ustawiany przez dostawcę, a serwis nie wywołuje pobierania kursów.
+
+**Dostawca `NBP_A` (D85):** własny `RateProvider` modułu `project_costing` (`name: 'NBP tabela A'`, `source: 'NBP_A'`, `providerBaseCurrency: 'PLN'`), rejestrowany przez `registerCurrencyRateProvider` (`packages/core/src/modules/currencies/services/providers/registry.ts`) z `di.ts` modułu — bez zmian w `packages/core` (D45). **`NBP_A` to tabela A (kurs średni `mid`, `type: null`), nie tabela C** — dostawca OM `NBP` czyta tabelę C (bid/ask, `type` buy/sell) i nie jest źródłem kursu oferty. Dla daty D dostawca zwraca ostatnią opublikowaną tabelę A z datą ≤ D (weekend, święto, przed publikacją; D71), a datę wiersza zapisuje tak, by lookup OM ją znalazł (R23). Tabela A zawiera CNY (zweryfikowano 206/A/NBP/2026), nie zawiera CNH.
+
+**Kurs przy mark-sent (MVP, D85, D89):** na żądanie — `rateFetchingService.fetchRatesForDate(dataMarkSent, scope, { providers: ['NBP_A'] })`, potem odczyt najnowszego wiersza z `exchange_rates` z filtrem `source = 'NBP_A'` dla pary i daty ≤ data mark-sent (`ExchangeRateService.findExactRates` nie filtruje po źródle — `exchangeRateService.ts` l.207–224 — dlatego filtr dodaje nasz odczyt). Zapis do `exchange_rates` wykonuje serwis modułu `currencies`, nie `project_costing`. W v1 kursy `NBP_A` pobiera też job dzienny (D89; §14 v1).
+
+**Kurs ręczny (D71, D85):** tylko w drafcie kalkulacji (`pc_calculations.fx_manual_rates`), ustawiany komendą `project_costing.calculations.set_manual_rate` (undo, `audit_logs`, wymagany powód; feature `project_costing.edit`). Ma pierwszeństwo przed `NBP_A`: mark-sent zamraża go w `snapshot_data.fx` z `provider_source: 'manual'` i nie pobiera kursu. **Nigdy nie jest zapisywany w `exchange_rates`** (kurs ręczny jednej oferty nie zmienia kursów firmy). Po mark-sent zablokowany — zmiana wymaga nowej rewizji.
+
+**Waluta bez kursu (`FX_RATE_UNAVAILABLE`):** gdy waluta ≠ bazowa, draft nie ma kursu ręcznego, a `NBP_A` nie zwraca kursu pary (API NBP niedostępne albo waluta spoza tabeli A, np. CNH), mark-sent zwraca 422 `FX_RATE_UNAVAILABLE` z prośbą o kurs ręczny; draft pozostaje edytowalny, a prognoza i suma inwestycji pokazują kwotę bez przeliczenia z oznaczeniem „brak kursu” (bez zgadywania kursu). Co robić z aktywnymi walutami bez kursu w żadnej tabeli NBP — pytanie otwarte Q12 (§16).
+
+**Kurs krzyżowy:** `NBP_A` daje pary waluta → PLN. Przy walucie bazowej innej niż PLN para kalkulacja → baza nie ma kursu `NBP_A` → kurs ręczny albo `FX_RATE_UNAVAILABLE`; kurs krzyżowy poza MVP (R22).
+
+**Zmiana waluty deala po podpięciu:** wersje wysłane bez zmian (snapshot). MVP: draft z walutą inną niż waluta deala pokazuje ostrzeżenie o niezgodności, apply-to-deal jest nieaktywne do czasu zmiany waluty kalkulacji. v1: komenda zmiany waluty kalkulacji z wyborem „Przelicz po kursie” albo „Zachowaj liczby” (audyt metody i kursu).
+
+**Uprawnienia do listy walut:** wybór waluty w UI korzysta z własnej trasy `GET /api/project-costing/currencies` (feature `project_costing.view`; §8.5, §9), która zwraca aktywne waluty (`code`, `name`, `decimal_places`, `is_base`) z serwisów `currencies` przez DI, bez kursów. Nie nadajemy roli `employee` feature'u `currencies.view` w naszym `setup.ts`: (1) RBAC modułu zostaje w naszym `acl.ts`, a `setup.ts` nie zmienia domyślnych grantów cudzego modułu; (2) `currencies.view` otwiera cały ekran i API `/api/currencies/*`, a nie tylko listę do wyboru; (3) `defaultRoleFeatures` działa przy setupie tenanta, więc istniejący tenant wymagałby synchronizacji ról; (4) trasa zwraca dokładnie to, czego potrzebuje siatka (aktywne, z `decimal_places`).
 
 ### 3.11 Prognoza wartości = wartość × prawdopodobieństwo
 
@@ -1131,6 +1156,10 @@ GET  .../production-forecast?months=6  (MVP: z aktywnego ScheduleSource; metryki
 POST .../import              (MVP: upload + podgląd; commit jako ProgressJob)
 GET  .../pdf-attachments     (MVP)
 GET  .../snapshot            (MVP, z redakcją)
+POST .../set-manual-rate     (MVP, D85: tylko draft; body { from, to, rate, reason }; kurs ręczny w fx_manual_rates, nie w exchange_rates)
+DELETE .../set-manual-rate   (MVP: usuń kurs ręczny pary z draftu)
+
+GET  /api/project-costing/currencies  (MVP: aktywne waluty z modułu currencies przez DI — code, name, decimal_places, is_base; bez kursów; feature project_costing.view; §3.10)
 
 POST .../new-revision        (v1, D57: jedna akcja zamiast unlock + duplicate; body { reason })
 POST .../mark-accepted       (v1: status=accepted)
@@ -1187,7 +1216,7 @@ Wersje z `status != 'draft'`: API odrzuca PATCH/DELETE z 409. Odpowiedzi zawiera
 
 ```typescript
 await commandBus.execute({ commandId: 'customers.deals.update',
-  input: { id: calculation.dealId, valueAmount: calculation.subtotalPrice }, ctx /* użytkownik */ })
+  input: { id: calculation.dealId, valueAmount: calculation.subtotalPrice, valueCurrency: calculation.currency }, ctx /* użytkownik */ })
 ```
 Rozstrzygnięte (D66, dawne Q1): apply-to-deal to jawna komenda `customers.deals.update`, nie enricher.
 
@@ -1253,12 +1282,12 @@ Role OM: `superadmin`, `admin`, `employee` (`packages/core/src/modules/customers
 
 | Feature ID | Opis | Faza | `admin` | `employee` |
 |-----------|------|------|---------|------------|
-| `project_costing.view` | Podgląd kalkulacji | MVP | ✅ | ✅ |
+| `project_costing.view` | Podgląd kalkulacji; lista aktywnych walut `GET /api/project-costing/currencies` (zamiast `currencies.view` dla `employee` — §3.10) | MVP | ✅ | ✅ |
 | `project_costing.view_prices` | Ceny sprzedaży | MVP | ✅ | ✅ |
 | `project_costing.view_costs` | Koszty (efektywnie tylko z `view_margin` albo bez `view_prices`, §4.2) | MVP | ✅ | ❌ |
 | `project_costing.view_margin` | Marża (i koszt przy widocznych cenach) | MVP | ✅ | ❌ |
 | `project_costing.view_margin_after_close` | Marża i koszt wersji aktywnej po zamknięciu deala (`closure_outcome` won albo lost — D49); faza v1 (D75), w MVP marża tylko z `view_margin` | v1 | ✅ | ❌ |
-| `project_costing.edit` | Edycja kalkulacji i linii (tylko pól widocznych) | MVP | ✅ | ✅ |
+| `project_costing.edit` | Edycja kalkulacji i linii (tylko pól widocznych); kurs ręczny w drafcie (D85) | MVP | ✅ | ✅ |
 | `project_costing.edit_markup` | Edycja narzutów i trybu ceny | MVP | ✅ | ❌ |
 | `project_costing.lock` | Mark-sent (snapshot), generowanie PDF; oferta z ujemną marżą wymaga osoby z `view_margin` (D76) | MVP | ✅ | ✅ |
 | `project_costing.apply_to_deal` | Zastosuj wartość do deala (§8.7) | MVP | ✅ | ❌ |
@@ -1408,7 +1437,8 @@ Rev 8b (P11): estymaty w dniach usunięte ze specyfikacji. Fazy opisujemy wyłą
 11. Minimalne inwestycje (D50, D63): `pc_investments` (kod `INV-…`, nazwa, lokalizacja), ręczne wskazanie z podpowiedzią po kodzie/nazwie, strona inwestycji z sumą.
 12. Role ofert (D50/D51/D65): `pc_deal_offer_roles`, assign (pierwsza oferta = primary), set-primary w jednej transakcji z komunikatem „Istnieje już oferta dla innego wykonawcy — wskaż, która jest główna”, widget + enricher na dealu.
 13. Importy wdrożeniowe CLI (D63/D64): `import-klin-projects` i `import-offer-roles` — idempotentne, z `--dry-run` i raportem.
-14. Partie produkcji: ręczne (`calculation_embedded`) i import harmonogramu XLSX (`xlsx_import`, zastąpienie po potwierdzeniu, odrzucenie błędnych wierszy z raportem — D56); `ScheduleSource` + rejestr DI; prognoza 6 mies. (LRM, nieważona i ważona).
+14. Waluty (D84–D88): waluta kalkulacji = waluta deala, walidacja w `currencies` (D87), waluta bazowa z `BaseCurrencyService` (D86), dostawca `NBP_A` z pobraniem na żądanie przy mark-sent i zapisem daty zgodnym z lookupem (R23), kurs ręczny w drafcie, `snapshot_data.fx` (D88), trasa `GET /api/project-costing/currencies`.
+15. Partie produkcji: ręczne (`calculation_embedded`) i import harmonogramu XLSX (`xlsx_import`, zastąpienie po potwierdzeniu, odrzucenie błędnych wierszy z raportem — D56); `ScheduleSource` + rejestr DI; prognoza 6 mies. (LRM, nieważona i ważona).
 
 **Encje MVP:** `pc_cost_categories`, `pc_element_types`, `pc_price_sources` (seed), `pc_price_catalog`, `pc_calculations`, `pc_calculation_lines` (sub-resource), `pc_offer_snapshots`, `pc_calculation_pdf_attachments`, `pc_import_column_mappings`, `pc_production_batches`, `pc_investments` (minimalnie), `pc_deal_offer_roles`, `pc_document_sequences` (systemowa).
 
@@ -1431,6 +1461,9 @@ Rev 8b (P11): estymaty w dniach usunięte ze specyfikacji. Fazy opisujemy wyłą
 12. Import/eksport cennika CSV/XLSX.
 13. Przeliczniki jednostek (`pc_unit_conversions`, §2.4).
 14. Zakres „tylko własne deale”: `calculation_scope = own` (D79, §4.4).
+15. Wiele walut w kalkulacji (D84): `pc_calculation_lines.currency`, kursy per para w `snapshot_data.fx` (D88).
+16. Zadanie `currencies:fetch-rates` (D89, D94): dzienne pobieranie kursów `NBP_A` — przez `@open-mercato/scheduler` (opcjonalny, D94) albo własny worker; dziś `syncTime` w `currency_fetch_configs` niczego nie uruchamia (brak schedulera i workera w forku).
+17. `perspectives` — zapisane widoki listy kalkulacji (opcjonalnie, D94).
 
 **Encje v1:** `pc_segments`, `pc_price_list_rules`, `pc_calculation_templates`, `pc_calculation_template_lines`, `pc_investment_identifiers`, `pc_cost_entries`, `pc_unit_conversions`; rozszerzenie `pc_investments` (`investment_key` + indeks trgm, `merged_into_id`).
 
@@ -1440,7 +1473,7 @@ Rev 8b (P11): estymaty w dniach usunięte ze specyfikacji. Fazy opisujemy wyłą
 2. Adapter Sekocenbud/Intercenbud XLSX + KNR `mapExternalCode`.
 3. Import kosztów rzeczywistych z faktur + integracje (ERP, plik).
 4. Biblioteka szablonów KNR (seed).
-5. Wiele walut i konwersja (`currencies`) — po decyzji Q6 (otwarte); zasady D70 (ISO 4217) i D71 (NBP tabela A, kurs zamrożony przy mark-sent, ręczna korekta tylko przed mark-sent) już rozstrzygnięte warunkowo (§3.10).
+5. Ścieżka akceptacji oferty z ujemną marżą w `workflows` — kandydat (D93); opcjonalnie tabela C albo kursy banku dla zakupów (audyt §3.5).
 6. AI-tool: generowanie linii kalkulacji z opisu.
 
 ### Narzut OM (wymagania w każdej fazie, bez estymaty)
@@ -1475,11 +1508,13 @@ Każda encja i trasa z fazy przechodzi przez konwencje repo: migracja i snapshot
 | R14 | Import `klin:project` tworzy duplikaty inwestycji | Migracja | Średnia | `--dry-run` + akceptacja raportu (D63), idempotencja po `legacy_klin_project_id`, raport konfliktów | Niskie |
 | R15 | Zakres niedoszacowany (konwencje OM, bety zależności) | Plan | Średnia | Narzut OM opisany jako wymagania w każdej fazie (§14); zależności rozstrzygnięte (D74, §18a), instalowane dopiero przy implementacji fazy; przegląd zakresu po MVP | Średnie |
 | R16 | Zależność od wersji beta (`react-data-grid` v7) lub dużej rodziny pakietów (`@svar-ui`) | Zależności | Średnia | Najpierw `packages/ui`; `@svar-ui` tylko PoC w v1 schedule, potem osobna decyzja (D74, D82); bez SVAR PRO (D21) | Niskie |
-| R17 | Brak tabeli A NBP z dnia mark-sent (weekend, święto, przed publikacją) albo niedostępne API NBP (gdy Q6 ≠ (a)) | Waluty | Średnia | Kurs ręczny ma pierwszeństwo przed NBP; bez niego ostatnia opublikowana tabela A z `effective_date` w snapshocie; ręczna korekta kursu przed mark-sent (D71; po mark-sent zablokowana); przy braku kursu mark-sent zwraca 422 `FX_RATE_UNAVAILABLE` z prośbą o ręczny kurs | Niskie |
+| R17 | Brak tabeli A NBP z dnia mark-sent (weekend, święto, przed publikacją), niedostępne API NBP albo waluta spoza tabeli A (np. CNH) | Waluty | Średnia | Kurs ręczny z draftu ma pierwszeństwo przed `NBP_A` (D85); bez niego ostatnia opublikowana tabela A z `effective_date` w snapshocie; ręczna korekta kursu przed mark-sent (D71; po mark-sent zablokowana); przy braku kursu mark-sent zwraca 422 `FX_RATE_UNAVAILABLE` z prośbą o ręczny kurs; waluty bez kursu w żadnej tabeli — Q12 | Niskie |
 | R18 | Deal ponownie otwarty po wygranej, a harmonogram wykonawczy wygląda na obowiązujący | Dane / harmonogram | Niska | Flaga „deal ponownie otwarty” (`reopened_at`) i badge w UI, bez usuwania danych (D72); ponowne `won` czyści flagę | Niskie |
 | R19 | `action_logs.command_payload` albo tabela pre-image/post-image (`pc_command_undo_payloads`) staje się kanałem wycieku kosztu i marży | Bezpieczeństwo / audyt | Średnia | `redoInput`, `payload`, snapshoty i `changes` zredagowane w `buildLog` (§0.3 pkt 1); tabela bez trasy API, indeksu, wyszukiwania i eventów; odczyt tylko w `undo()`/`redo()` po `authorizeReplay`, z filtrem org/tenant; twarde usuwanie przy mark-sent, usunięciu kalkulacji i braku wpisu `action_logs` (§0.3 pkt 6). Testy integracyjne: po każdej komendzie z polem wrażliwym `action_logs.command_payload`, `snapshot_before`, `snapshot_after` i `changes_json` nie zawierają wartości kosztu, narzutu ani marży; użytkownik bez `view_margin` nie cofnie ani nie ponowi zmiany kosztu (403) | Niskie |
 | R20 | Push n8n nadpisuje wartość deala ustawioną przez apply-to-deal (D31, D40) | Integracja n8n | Średnia | D81: interceptor `project_costing` (bez `features`) na `customers.deals.create`/`update` rozpoznaje n8n po `isApiKey` i `keyId` z `integrations.n8n_api_key_ids`; usuwa `valueAmount`/`valueCurrency` przez `undefined`, reszta inputu (w tym `cf_*`, D64) przechodzi; audyt w `logContext`; `auth: null` (workery bulk `bulk-update-stage`, `bulk-update-owner`) = nie n8n, przepuszczane bez błędu; test integracyjny create/update/lookup + POST/PUT/trasa zbiorcza oraz przypadek `auth: null` (§10.2) | Niskie |
 | R21 | Kontrakt Enki/n8n nie zostanie zmieniony (n8n dalej wysyła wartość deala) albo n8n zapisze deal z pominięciem `commandBus` lub kluczem spoza listy | Integracja n8n / zależność zewnętrzna | Średnia | D81 wymaga zmiany kontraktu po stronie Enki (poza tymi specami); do tego czasu interceptor jest jedyną ochroną; lista `integrations.n8n_api_key_ids` utrzymywana przy rotacji kluczy (checklista wdrożenia); test kontraktowy z Enką przed włączeniem apply-to-deal; zmiana kontraktu n8n i klucz API n8n czekają na wdrożenie modułu i migrację (Q2/D64), klucz API generuje Marek (zadanie ClickUp 869fm3281) | Średnie — zależy od zmiany po stronie n8n |
+| R22 | Waluta bazowa organizacji inna niż PLN (na produkcji do 2026-10-23 była USD) albo wiele źródeł kursu dla tej samej pary i daty | Waluty | Średnia | Stan wg logu Koordynatora 2026-10-23: baza = PLN; brak waluty bazowej → 422 `BASE_CURRENCY_MISSING` (D86); przy bazie ≠ PLN para bez kursu `NBP_A` → kurs ręczny albo `FX_RATE_UNAVAILABLE`, kurs krzyżowy poza MVP; odczyt kursu oferty zawsze z filtrem `source = 'NBP_A'` (D85). **Warunek operacyjny:** przed jakimkolwiek cofnięciem (undo) zmiany waluty bazowej trzeba pobrać z upstream poprawkę c46ad643 (jedna waluta bazowa przy undo/redo) — fork jej nie ma | Niskie |
+| R23 | Błąd daty kursu w core: dostawca OM `NBP` zapisuje kurs na północ czasu warszawskiego (`packages/core/src/modules/currencies/services/providers/nbp.ts` l.76–80, `fromZonedTime(..., 'Europe/Warsaw')` → 22:00 UTC dnia poprzedniego), a lookup normalizuje datę do północy UTC (`exchangeRateService.ts` l.246–249, `setUTCHours(0, 0, 0, 0)`); dokładne dopasowanie daty nigdy nie trafia, więc podsumowanie deali nie znajduje kursu EUR (log Koordynatora 2026-10-23). Błąd jest też w upstream `main` | Waluty / core | Wysoka (występuje dziś) | **Opcja preferowana:** nasz dostawca `NBP_A` zapisuje datę tabeli jako północ UTC tej daty (`${effectiveDate}T00:00:00Z`), czyli tak, jak normalizuje lookup — bez zmian w `packages/core` (D45), niezależnie od terminu upstream; lookup bez filtra źródła (l.207–224) znajdzie wtedy też kurs `NBP_A` dla podsumowania deali. **Uzupełniająco:** zgłoszenie poprawki do upstream (spójna strefa w `nbp.ts` i `normalizeDate`) — tylko za zgodą Marka. Test: kurs zapisany dla daty D znajdowany przez lookup dla D, także w sumach deali w EUR | Niskie po wdrożeniu `NBP_A`; dostawca OM `NBP` (tabela C) pozostaje z błędem do poprawki upstream |
 
 (R10 z rev 7 — sekwencja dwóch komend `cf_offer_role` — usunięte: rola oferty zmieniana jedną komendą w jednej transakcji, §3.12.)
 
@@ -1487,7 +1522,7 @@ Każda encja i trasa z fazy przechodzi przez konwencje repo: migracja i snapshot
 
 ## 16. Pytania otwarte do Marka (rev 8b)
 
-**Zamknięte** (`.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`): D1–D82; D83 — `.ai/decisions.md`@3f00542, gałąź `develop_OM_CRM`):
+**Zamknięte** (`.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`): D1–D82; D83 — `.ai/decisions.md`@3f00542, gałąź `develop_OM_CRM`; D84–D94 — `.ai/decisions.md` z tego PR, Koordynator 2026-10-23, audyt om-overlap-audit §3–4):
 
 | # | Temat | Rozstrzygnięcie |
 |---|---|---|
@@ -1499,8 +1534,9 @@ Każda encja i trasa z fazy przechodzi przez konwencje repo: migracja i snapshot
 | — | Ustawienia per organizacja | D69: klucz `org:{id}:settings` jako świadome obejście (R12) |
 | — | Formuły | MVP bez formuł; v1 `quantity_expr` z bezpiecznym parserem (D30) |
 | — | Gantt | własny, bez SVAR PRO (D21; schedule §3.2); wybór SVAR MIT nieprzesądzony — PoC w v1 (D82) |
-| Q7 | Zaokrąglenie per waluta | D70 (warunkowe, Q6 ≠ (a)): kody walut ISO 4217 (§2.3, §3.10) |
-| Q8 | Źródło kursów i zamrożenie kursu | D71 (warunkowe, Q6 ≠ (a)): NBP tabela A z dnia mark-sent, zamrożony w snapshocie; brak tabeli → ostatnia opublikowana; ręczna korekta przed mark-sent, po mark-sent zablokowana (§3.8, §3.10, R17, A33) |
+| Q6 | Wiele walut | **Zamknięte** przez D84–D88: moduł OM `currencies`; MVP jedna waluta = waluta deala, v1 waluta per pozycja; `NBP_A` (tabela A), kurs ręczny w drafcie, waluta bazowa z `BaseCurrencyService`, `snapshot_data.fx` z `provider_source` (§3.10) |
+| Q7 | Zaokrąglenie per waluta | D70, realizacja D87: `currencies.decimal_places`, fallback ISO 4217 (§2.3, §3.10) |
+| Q8 | Źródło kursów i zamrożenie kursu | D71, realizacja D85/D88/D89 (`NBP_A`, bez własnego fetchera): NBP tabela A z dnia mark-sent, zamrożony w snapshocie; brak tabeli → ostatnia opublikowana; ręczna korekta przed mark-sent, po mark-sent zablokowana (§3.8, §3.10, R17, A33) |
 | Q9 | Harmonogram wykonawczy po ponownym otwarciu deala | D72: flaga „deal ponownie otwarty”, bez usuwania danych (§0.6; schedule §2.2, R15) |
 | Q10 | Cena zero na pozycji | D73: ostrzeżenie przy mark-sent, nie blokuje (lista ostrzeżeń D58, §3.8) |
 | Q11 | Nowe zależności | D74: `exceljs` tak; siatka najpierw `packages/ui`; `@svar-ui` tylko PoC w v1 schedule, potem osobna decyzja (D82; bez SVAR PRO — D21); `xml2js` w v2; na etapie speki nic nie instalujemy (§18a) |
@@ -1518,7 +1554,7 @@ Każda encja i trasa z fazy przechodzi przez konwencje repo: migracja i snapshot
 
 | # | Pytanie | Opcje | Propozycja |
 |---|---|---|---|
-| Q6 | Czy kalkulacja może być w walucie innej niż PLN (wiele walut)? | (a) tylko PLN; (b) waluta deala, jedna na kalkulację; (c) waluty per linia | (b) — waluta deala, bez mieszania walut w kalkulacji. Pytanie biznesowe do Marka; od odpowiedzi zależy, czy wchodzą w życie D70/D71 |
+| Q12 | Co z aktywnymi walutami bez kursu w żadnej tabeli NBP (dziś CNH; CNY nie ma w tabeli C, jest w tabeli A — raport Koordynatora §5 pkt 2)? | (a) dezaktywować w `currencies`; (b) zostawić aktywne, kalkulacja tylko z kursem ręcznym (`FX_RATE_UNAVAILABLE` bez niego); (c) dodatkowy dostawca kursu | (b) do czasu decyzji — tak działa §3.10 bez zmian w danych; decyzja biznesowa Marka, nie rozstrzygana w tej specyfikacji |
 
 ---
 
@@ -1530,7 +1566,7 @@ Każda encja i trasa z fazy przechodzi przez konwencje repo: migracja i snapshot
 | A2 | Tryby A/B/C + dziedziczenie markup_pct: jednolita redystrybucja §3.6; margin_rate z rzeczywistych sum | Spójność; markup per item/sekcja nie zastępuje trybów B/C, ale współdziała |
 | A3 | **Rev 8a (poprawione):** `project_costing` = moduł bazowy; `project_schedule` (opcjonalny) zależy od costing i rejestruje provider `ScheduleSource` w DI; costing nigdy nie importuje schedule | Kod P0-1 |
 | A4 | deal_id nullable ✅ (Marek potwierdził); ownership standalone = created_by (rev 8a: project_id usunięte) | Odpowiedź Marka na pytanie C |
-| A5 | Waluta = waluta deala (jednowalutowe; wiele walut — Q6) | Eliminuje konwersje |
+| A5 | MVP: waluta kalkulacji = waluta deala (jedna na kalkulację); v1: waluta per pozycja (D84) | Konwersja tylko do waluty bazowej, gdy waluta ≠ bazowa |
 | A6 | Import XLSX/CSV: 10 MB, 100 MB po rozpakowaniu, 10 000 wierszy, 200 kolumn (§6.4; to samo w schedule) | Jeden limit dla obu modułów |
 | A7 | Auto-save: debounce 800 ms | Minimalizuje requesty |
 | A8 | exceljs v4.4.0 (MIT) — zaakceptowany (D74) | xlsx npm nieaktualizowane |
@@ -1557,14 +1593,14 @@ Każda encja i trasa z fazy przechodzi przez konwencje repo: migracja i snapshot
 | A29 | Jednostki: słownik `dictionaries` + własne przeliczniki `pc_unit_conversions` (v1); bez przeliczników `catalog` | `dictionary_entries` bez pola współczynnika (zweryfikowane) |
 | A30 | Numeracja `K/{YYYY}/{NNN}` i `INV-{YYYY}-{NNNNNN}` z sekwencji PG per organizacja (`pc_document_sequences`); luki dopuszczalne | Kod p18; wzór `SalesDocumentNumberGenerator` |
 | A31 | Pola pochodne linii liczone przez `calculate()`, nieprzechowywane; zamrażane w snapshocie | Kod p8; minimalny zapis |
-| A33 | Kurs ręczny w wersji `draft` ma pierwszeństwo przed NBP; bez niego: brak tabeli A NBP w dniu mark-sent → ostatnia opublikowana tabela A (`effective_date` = jej data); `FX_RATE_UNAVAILABLE` tylko, gdy nie jest dostępna żadna tabela A i nie ma kursu ręcznego (R17) | D71 (warunkowe, Q6) |
+| A33 | Kurs ręczny w wersji `draft` ma pierwszeństwo przed NBP; bez niego: brak tabeli A NBP w dniu mark-sent → ostatnia opublikowana tabela A (`effective_date` = jej data); `FX_RATE_UNAVAILABLE` tylko, gdy nie jest dostępna żadna tabela A i nie ma kursu ręcznego (R17) | D71, D85 |
 | A32 | Partie: `pc_production_batches` (costing) i `ps_production_batches` (schedule); prognoza czyta tylko aktywne źródło; kopia `pc_` → `ps_` jednorazowa, po potwierdzeniu | Jedno źródło prawdy (§2.2, schedule §1.4) |
 
 ---
 
 ## 18. Migracje i backward compatibility
 
-Nowe tabele `pc_*` only. Zero zmian w `packages/core`. Wszystkie encje domenowe z `deleted_at`. Ustawienia w `module_configs` (bez własnej tabeli). Kolejność MVP: pc_document_sequences → pc_cost_categories → pc_element_types → pc_price_sources (seed) → pc_price_catalog → pc_investments → pc_calculations → pc_calculation_lines → pc_offer_snapshots → pc_calculation_pdf_attachments → pc_import_column_mappings → pc_production_batches → pc_deal_offer_roles. v1: pc_segments → pc_price_list_rules → pc_calculation_templates + pc_calculation_template_lines → pc_investment_identifiers → pc_unit_conversions → pc_cost_entries; `pc_investments` + `investment_key`, `merged_into_id`, `CREATE EXTENSION pg_trgm` i indeks trgm. (Rev 8a: usunięte `pc_settings` i `pc_calculation_audit_log`.) Importy wdrożeniowe `klin:project` i `cf_offer_role` to komendy CLI (`--dry-run`, idempotentne), nie migracje; kolejność: najpierw `import-klin-projects`, potem `import-offer-roles`.
+Nowe tabele `pc_*` only. Zero zmian w `packages/core`. Waluty (D84–D88): `pc_calculations.currency` bez wartości domyślnej w bazie, nowa kolumna `pc_calculations.fx_manual_rates jsonb NULL` (MVP), `pc_calculation_lines.currency char(3) NULL` (v1, addytywnie); `exchange_rates` i `currencies` należą do modułu `currencies` — bez migracji z naszej strony. Wszystkie encje domenowe z `deleted_at`. Ustawienia w `module_configs` (bez własnej tabeli). Kolejność MVP: pc_document_sequences → pc_cost_categories → pc_element_types → pc_price_sources (seed) → pc_price_catalog → pc_investments → pc_calculations → pc_calculation_lines → pc_offer_snapshots → pc_calculation_pdf_attachments → pc_import_column_mappings → pc_production_batches → pc_deal_offer_roles. v1: pc_segments → pc_price_list_rules → pc_calculation_templates + pc_calculation_template_lines → pc_investment_identifiers → pc_unit_conversions → pc_cost_entries; `pc_investments` + `investment_key`, `merged_into_id`, `CREATE EXTENSION pg_trgm` i indeks trgm. (Rev 8a: usunięte `pc_settings` i `pc_calculation_audit_log`.) Importy wdrożeniowe `klin:project` i `cf_offer_role` to komendy CLI (`--dry-run`, idempotentne), nie migracje; kolejność: najpierw `import-klin-projects`, potem `import-offer-roles`.
 
 ## 18a. Nowe zależności — rozstrzygnięte (rev 8c, Kod p10, D74, D82)
 
@@ -1576,7 +1612,19 @@ D74 (dawne Q11): rekomendacja przyjęta. D82: ta sekcja nie przesądza wyboru SV
 | `react-data-grid` | v7 tylko beta, MIT | costing MVP (siatka), tylko gdy PoC na `packages/ui` nie wystarczy | `packages/ui` `DataTable` + `InlineEditors` | **najpierw `packages/ui`**; `react-data-grid` tylko, gdy PoC na `packages/ui` nie wystarczy (wtedy osobna akceptacja) |
 | `@svar-ui/*` (`react-gantt` 2.8.1 i ok. 17 pakietów w drzewie zależności) | MIT | schedule v1 | brak Gantta w repo | **tylko PoC w v1 schedule**, potem osobna decyzja (D74, D82); bez SVAR PRO (D21) |
 | `xml2js` | MIT | schedule v2 (MS Project XML) | — | **v2** |
-| `pdf-lib` | już w `packages/core` | costing MVP (PDF) | — | bez nowej zależności |
+| `pdf-lib` | już w `packages/core` | costing MVP (PDF) | wzorzec `packages/core/src/modules/forms/services/pdf-snapshot-service.ts`, plik w `attachments` | bez nowej zależności (D92) |
+
+**XLSX (D91):** zostaje `exceljs`; moduł `sync_excel` parsuje tylko CSV, więc nie jest używany. **PDF (D92):** `pdf-lib` na wzorcu `forms/services/pdf-snapshot-service.ts`, plik w `attachments`. **Istniejące moduły OM (bez instalacji):** `currencies` — wymagany, już w presecie `crm` (`apps/mercato/src/modules.ts` l.92; D84); `perspectives` i `@open-mercato/scheduler` — opcjonalne w v1 (D94); `sales`, `catalog`, `@dainamite/cpq` — nie włączamy (D90); `workflows` — kandydat w v2 (D93).
+
+### 18b. Warunki wstępne etapu kodu — waluty (dane, nie czynności tej speki)
+
+**Stan według logu Koordynatora 2026-10-23** (`om-currency-change-2026-10-23.json`): waluta bazowa na produkcji = PLN (wcześniej USD); kursy z tabeli C NBP (dostawca OM `NBP`) pobrane na 2026-10-23 — 14 wierszy; CNY i CNH bez kursu; podsumowanie deali bez kursu EUR (R23).
+
+**Warunki (każdy tylko za zgodą Marka):**
+1. Włączenie pobierania kursów `NBP_A` (dostawca z §3.10; konfiguracja pobierania dla `NBP_A`).
+2. Pobranie z upstream poprawki c46ad643 (jedna waluta bazowa przy undo/redo).
+
+**Warunek operacyjny:** przed jakimkolwiek cofnięciem zmiany waluty bazowej trzeba pobrać c46ad643 (R22).
 
 ---
 
@@ -1602,7 +1650,8 @@ apps/mercato/src/modules/project_costing/
 │   ├── calculation-lines/ + batch/
 │   ├── cost-entries/ + import/ | deals/:dealId/budget-vs-actual/
 │   ├── investments/[id]/{identifiers,merge,split,match-candidates,offer-roles}/
-│   └── import-column-mappings/
+│   ├── import-column-mappings/
+│   └── currencies/               # GET aktywne waluty przez DI (project_costing.view, §3.10)
 ├── backend/project-costing/
 │   ├── settings/, segments/, templates/, price-sources/, price-catalog/
 │   ├── price-list-rules/, calculations/, deals/[dealId]/actual-costs/
@@ -1634,6 +1683,8 @@ apps/mercato/src/modules/project_costing/
     ├── investment.service.ts     # match candidates, merge, split (v1, D83)
     ├── offer-roles.service.ts    # assign (D65), set-primary w jednej transakcji (MVP)
     ├── settings.ts               # projectCostingSettings: merge org → tenant → defaults
+    ├── fx.service.ts             # D84–D88: waluta kalkulacji, baza (BaseCurrencyService), kurs ręczny/NBP_A, snapshot fx
+    ├── nbp-a.provider.ts         # D85: RateProvider source 'NBP_A' (tabela A, mid), data jak lookup (R23); registerCurrencyRateProvider w di.ts
     └── schedule-source/
         ├── schedule-source.interface.ts
         ├── schedule-source.registry.ts
@@ -1697,15 +1748,17 @@ apps/mercato/src/modules/project_costing/
 | 30 | MVP pocięty po wartości (p15) | ✅ §14, TLDR |
 | 31 | Forma speki: TLDR, Architecture, Risks, FCR (p20) | ✅ |
 
-Brak punktów ⚠️. Ryzyka rezydualne: §15 (R1, R2, R15, R16).
+| 32 | Najpierw to, co jest w repo: waluty i kursy z modułu `currencies` (p10, p1) | ✅ §3.10 — bez własnej tabeli kursów i fetchera (D84, D85); dostawca `NBP_A` rejestrowany przez rejestr DI `currencies`; zapisy do `exchange_rates` tylko przez serwis `currencies`; lista walut dla `employee` przez własną trasę i nasz `acl.ts`, bez grantu `currencies.view` w `setup.ts` |
+
+Brak punktów ⚠️. Ryzyka rezydualne: §15 (R1, R2, R15, R16, R23).
 
 ---
 
-## 22. Decision traceability (D1–D83)
+## 22. Decision traceability (D1–D94)
 
-Źródło: `.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`, merge PR #13) dla D1–D82; D83 — `.ai/decisions.md`@3f00542 (gałąź `develop_OM_CRM`, merge PR #14; Koordynator 2026-10-23). D49 jest aktywna w fazie v1 (D75). Zakres D1–D83: 74 aktywnych i 9 zastąpionych. D70 i D71 są warunkowe — obowiązują, gdy Q6 ≠ (a) (Q6 otwarte, §16). Tabela obejmuje wszystkie aktywne decyzje; w kolumnach wskazane są sekcje, które je realizują, w obu specach (schedule ma skrót w schedule §21). Decyzje zastąpione nie są cytowane w tekście spec: D3 superseded by D4; D7 superseded by D63; D8 superseded by D10; D13 superseded by D48, D49; D27 superseded by D60; D28 superseded by D29; D29 superseded by D50; D39 superseded by D64 (z okresem przejściowym do migracji); D43 superseded by D63.
+Źródło: `.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`, merge PR #13) dla D1–D82; D83 — `.ai/decisions.md`@3f00542 (gałąź `develop_OM_CRM`, merge PR #14; Koordynator 2026-10-23). D49 jest aktywna w fazie v1 (D75). D84–D94 — `.ai/decisions.md` z tego PR (Rozstrzygnięte przez Koordynatora 2026-10-23, audyt om-overlap-audit §3–4). Zakres D1–D94: 85 aktywnych i 9 zastąpionych. D70 i D71 nie są już warunkowe (Q6 zamknięte przez D84–D88; realizacja: D87, D85). Tabela obejmuje wszystkie aktywne decyzje; w kolumnach wskazane są sekcje, które je realizują, w obu specach (schedule ma skrót w schedule §21). Decyzje zastąpione nie są cytowane w tekście spec: D3 superseded by D4; D7 superseded by D63; D8 superseded by D10; D13 superseded by D48, D49; D27 superseded by D60; D28 superseded by D29; D29 superseded by D50; D39 superseded by D64 (z okresem przejściowym do migracji); D43 superseded by D63.
 
-Bilans: 74 aktywnych, z czego 63 realizowanych w specach i 11 N/A (D4, D31, D32, D34, D35, D36, D37, D38, D41, D44, D46). N/A to kontrakt n8n → `customers` albo Enka: specy go nie zmieniają, moduły tylko czytają dane deala.
+Bilans: 85 aktywnych, z czego 74 realizowanych w specach i 11 N/A (D4, D31, D32, D34, D35, D36, D37, D38, D41, D44, D46). N/A to kontrakt n8n → `customers` albo Enka: specy go nie zmieniają, moduły tylko czytają dane deala.
 
 | D | Decyzja (skrót) | costing | schedule |
 |---|---|---|---|
@@ -1769,8 +1822,8 @@ Bilans: 74 aktywnych, z czego 63 realizowanych w specach i 11 N/A (D4, D31, D32,
 | **D67** | Wyłączenie modułu: dane ukryte | §2.2 (partie), §16 (Q4) | §1.0, §2.2 |
 | **D68** | `employee` bez kosztów i marży | §4.2, §9 | §9 |
 | **D69** | Ustawienia: klucz `org:{id}:settings` | §0.5, §8.1, §15 (R12) | — |
-| **D70** | Kody walut ISO 4217 (warunkowe — obowiązuje, gdy Q6 ≠ (a)) | §2.3, §3.10, §14 v2 | — |
-| **D71** | Kurs NBP tabela A z dnia mark-sent, zamrożony w snapshocie; kurs ręczny ma pierwszeństwo przed NBP; brak tabeli z tego dnia → ostatnia opublikowana; ręczna korekta kursu przed mark-sent, po mark-sent zablokowana (warunkowe — Q6 ≠ (a)) | §2.2 (`snapshot_data.fx`), §3.8, §3.10, §15 (R17), §17 (A33) | — |
+| **D70** | Liczba miejsc per waluta (realizacja: D87 — `currencies.decimal_places`, fallback ISO 4217) | §2.2 (`rounding.line_decimals`), §2.3, §3.10 | — |
+| **D71** | Kurs NBP tabela A z dnia mark-sent, zamrożony w snapshocie; kurs ręczny ma pierwszeństwo przed NBP; brak tabeli z tego dnia → ostatnia opublikowana; ręczna korekta kursu przed mark-sent, po mark-sent zablokowana (realizacja: D85) | §2.2 (`snapshot_data.fx`, `fx_manual_rates`), §3.8, §3.10, §15 (R17), §17 (A33) | — |
 | **D72** | Flaga „deal ponownie otwarty”, bez usuwania danych | §0.6, §15 (R18) | §1.2, §2.2 (`reopened_at`, `execution_deal_id` — także rekord inwestycji), §6.1, §14 (R15) |
 | **D73** | Cena zero = ostrzeżenie przy mark-sent (lista D58), bez blokady | §3.2, §3.8 | — |
 | **D74** | Zależności: `exceljs` tak; siatka najpierw `packages/ui`; `@svar-ui` tylko PoC w v1, potem osobna decyzja; `xml2js` w v2; nic nie instalujemy na etapie speki | §6.1, §12.2, §15 (R16), §18a | §3.2, §8.2, §12, §14 (R13) |
@@ -1783,8 +1836,19 @@ Bilans: 74 aktywnych, z czego 63 realizowanych w specach i 11 N/A (D4, D31, D32,
 | **D81** | Wartość z apply-to-deal wygrywa; n8n aktualizuje tylko pola przetargowe i nie nadpisuje wartości deala z powiązaną kalkulacją | §8.7, §10.2, §15 (R20, R21), §19 (`commands/interceptors.ts`) | — |
 | **D82** | §18a nie przesądza SVAR; `@svar-ui` zostaje PoC w v1 | §15 (R16), §18a | §3.2, §14 (R13) |
 | **D83** | Split inwestycji w v1; ofertę główną wskazuje użytkownik w kroku podziału (domyślnie oryginał); jedna `primary` na inwestycję i komunikat D51 (D65) | §2.2 (`pc_investments`, split), §3.12, §8 (trasa `split`), §9 (`admin`), §14 v1, §19 | N/A — komenda costingu; rekord harmonogramu inwestycji (D77) zostaje przy inwestycji źródłowej (schedule §21) |
+| **D84** | Waluty przez moduł OM `currencies`; MVP waluta deala, v1 waluta per pozycja | nagłówek (Zależności upstream), §2.2 (`currency`), §2.3, §3.10, §14 MVP/v1, §16 (Q6) | N/A — schedule nie liczy kwot ani kursów (schedule §21) |
+| **D85** | Dostawca `NBP_A` (tabela A, `mid`), `fetchRatesForDate` z `providers: ['NBP_A']`, odczyt z filtrem źródła; kurs ręczny tylko w drafcie | §2.2 (`fx_manual_rates`), §3.8, §3.10, §8.5 (`set-manual-rate`), §15 (R17, R23), §19 | N/A — schedule nie liczy kwot ani kursów (schedule §21) |
+| **D86** | Waluta bazowa z `BaseCurrencyService`; `default_currency` tylko bez deala; 422 `BASE_CURRENCY_MISSING` | §2.2 (ustawienia), §3.8, §3.10, §15 (R22) | N/A — schedule nie liczy kwot ani kursów (schedule §21) |
+| **D87** | `decimal_places` z `currencies`, fallback ISO 4217; waluta aktywna w `currencies` | §2.2, §2.3, §3.8, §3.10 | N/A — schedule nie liczy kwot ani kursów (schedule §21) |
+| **D88** | `snapshot_data.fx`: `rate_type`, `provider_source`, para `from`/`to`; v1 tablica per para | §2.2 (`pc_offer_snapshots`, `pc_calculation_lines.currency`), §3.8, §3.10 | N/A — schedule nie liczy kwot ani kursów (schedule §21) |
+| **D89** | Dzienny job `NBP_A` w v1; MVP na żądanie przy mark-sent | §3.10, §14 v1 (`currencies:fetch-rates`) | N/A — schedule nie liczy kwot ani kursów (schedule §21) |
+| **D90** | Bez `sales`, `catalog`, `@dainamite/cpq` (potwierdzenie D18) | nagłówek (Wyłączone upstream), §0.1, §18a | N/A — schedule nie korzysta z ofert `sales` (schedule §21) |
+| **D91** | XLSX na `exceljs`; `sync_excel` (tylko CSV) nieużywany | nagłówek, §6.1, §18a | §8.1 |
+| **D92** | PDF: `pdf-lib` na wzorcu `forms/services/pdf-snapshot-service.ts`, plik w `attachments` | §5.2, §18a | N/A — schedule nie generuje PDF (schedule §21) |
+| **D93** | Akceptacja ujemnej marży bez `workflows` w MVP; `workflows` kandydat v2 | nagłówek, §3.8 (D76), §14 v2, §18a | N/A — dotyczy mark-sent kalkulacji (schedule §21) |
+| **D94** | `perspectives` i `@open-mercato/scheduler` opcjonalne w v1 | §14 v1, §18a | N/A — dotyczy listy kalkulacji i joba kursów (schedule §21) |
 
-Pytanie otwarte: Q6 (wiele walut, §16). Pozostałe pytania Q1–Q11 mają numery D (§16).
+Pytanie otwarte: Q12 (aktywne waluty bez kursu w żadnej tabeli NBP, §16) — bez numeru D. Q6 zamknięte przez D84–D88; Q1–Q11 mają numery D (§16).
 
 ---
 
@@ -1792,6 +1856,7 @@ Pytanie otwarte: Q6 (wiele walut, §16). Pozostałe pytania Q1–Q11 mają numer
 
 | Data | Zmiana |
 |------|--------|
+| 2026-10-23 | **rev 8f** — **D84–D94** (`.ai/decisions.md`, ten PR; Koordynator 2026-10-23, audyt om-overlap-audit §3–4). **Waluty przez moduł OM `currencies`** (D84): bez własnej tabeli kursów i własnego klienta NBP; MVP waluta = waluta deala, v1 waluta per pozycja (`pc_calculation_lines.currency`). **D85:** dostawca `NBP_A` (tabela A, `mid`, nie tabela C), pobranie na żądanie przy mark-sent, odczyt z filtrem źródła; kurs ręczny tylko w drafcie (`fx_manual_rates`, komenda `set_manual_rate` z audytem), do snapshotu z `provider_source: 'manual'`, nigdy do `exchange_rates`. **D86:** waluta bazowa z `BaseCurrencyService`, `default_currency` tylko bez deala, 422 `BASE_CURRENCY_MISSING`. **D87:** `decimal_places` z `currencies` (`rounding.line_decimals` domyślnie `null`), waluta aktywna, 422 `CURRENCY_NOT_ACTIVE` (propozycja). **D88:** `snapshot_data.fx` z `rate_type`, `provider_source`, parą `from`/`to`. **D89/D94:** zadanie `currencies:fetch-rates` w v1 (scheduler opcjonalny). **D90–D93:** nagłówek, §18a (`exceljs`, `pdf-lib`, bez `sales`/`catalog`/`@dainamite/cpq`, `workflows` w v2). Lista walut dla `employee` przez własną trasę `GET /api/project-costing/currencies` zamiast grantu `currencies.view` (§3.10, §8.5, §9). Stan walut wg logu Koordynatora 2026-10-23 (baza PLN, kursy tabeli C na 2026-10-23, CNY/CNH bez kursu) i warunki etapu kodu (§18b). Nowe ryzyka R22 (baza ≠ PLN, undo zmiany bazy wymaga c46ad643) i R23 (błąd daty kursu w core, opcja preferowana: data w `NBP_A` zgodna z lookupem). §16: Q6 zamknięte, nowe Q12. Traceability D1–D94 (§22). |
 | 2026-10-23 | **rev 8e** — **D83** (`.ai/decisions.md`, ten PR): split inwestycji przeniesiony z v2 do v1 — komenda `project_costing.investments.split`, trasa `POST .../split`, ofertę główną wskazuje użytkownik w kroku podziału (domyślnie oferta oryginalna), jedna `primary` na inwestycję i komunikat D51 (D65), undo z kontrolą konfliktu (§2.2, §3.12, §8, §9, §14, §19); traceability D1–D83 (§22, §16). **Nity n8n (D81):** worker `bulk-update-owner` obok `bulk-update-stage`; „upsert po identyfikatorze przetargu” → lookup + POST/PUT po stronie n8n przez `makeCrudRoute`/`commandBus` (§10.2); interceptor przepuszcza `auth: null` (workery bulk) bez błędu, z testem (§8.7, §10.2, R20); R21: zmiana kontraktu n8n i klucz API czekają na wdrożenie i migrację (Q2/D64), klucz generuje Marek (ClickUp 869fm3281). |
 | 2026-10-23 | **rev 8d** — odbiór 8324f29. **Wyciek:** komendy z polami wrażliwymi ustawiają `redoInput` na projekcję zredagowaną (bez tego szyna zapisuje surowy input w `action_logs.command_payload`); post-image `fields_after` w `pc_command_undo_payloads` dla `redo()`; komenda bez post-image = `replayable: false` (§0.3, §4.3, R19 z testem `command_payload`). **Retencja:** mark-sent, usunięcie kalkulacji, brak wpisu `action_logs` / redo; indeks `calculation_id`; lookup z filtrem org/tenant; jawny wyjątek od `deleted_at` (tabela techniczna, twarde usuwanie). **D81:** interceptor bez `features`, n8n = `isApiKey` + `keyId` z `integrations.n8n_api_key_ids`, pola przez `undefined` (merge płytki), audyt w `logContext`, `cf_*` przechodzą (D64), create/update/upsert/trasy zbiorcze, `commands/interceptors.ts` w §19, nowe R21 (kontrakt Enki). **D71:** kurs ręczny ma pierwszeństwo przed NBP (§3.10, A33, R17). Źródło decyzji: `.ai/decisions.md`@b544719 (`develop_OM_CRM`), D1–D82 (§16, §22). |
 | 2026-10-23 | **rev 8c** — decyzje D70–D74 (`.ai/decisions.md` 72a63c9) i D75–D82 (Koordynator 2026-10-23); traceability D1–D82 (§22). **D71:** ręczna korekta kursu przed mark-sent, po mark-sent zablokowana; brak tabeli → ostatnia opublikowana (A33), `FX_RATE_UNAVAILABLE` i R17 bez zmian. **D76:** blokada mark-sent z ujemną marżą dla osoby bez `view_margin` z komunikatem bez znaku i kwoty (§3.8, §4.3, §9). **Undo** pól bez wartości w audycie: pre-image w `pc_command_undo_payloads` (§0.3, §4.3, R19). **D81:** pierwszeństwo apply-to-deal przed push n8n (§8.7, §10.2, R20). **D75/D79:** marża po zamknięciu i „tylko własne” w v1 (§4.2–§4.4, §9, §14). **D78:** tylko automatyczne sumy sekcji. **D82:** §18a bez przesądzenia SVAR (§18a, R16). Spec-check: D60 → `module_configs` `pdf.*` (§2.2), `deleted_at` w `pc_production_batches`, usunięty martwy link do kontraktu n8n (§22). |
