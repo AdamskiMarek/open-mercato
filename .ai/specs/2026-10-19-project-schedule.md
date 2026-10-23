@@ -6,7 +6,7 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-19 |
-| **Rewizja** | 2026-10-23 (rev 8b — spójność, review P1/P2, decyzje D53–D56, D67 i P11, wnioski z planu testów; poprzednio rev 8a 2026-10-20) |
+| **Rewizja** | 2026-10-23 (rev 8c — decyzje D72, D74, D77, D80, D82, wykrywanie ponownego otwarcia deala, poprawki spec-check; poprzednio rev 8b 2026-10-23, rev 8a 2026-10-20) |
 | **Moduł** | `project_schedule` (`apps/mercato/src/modules/project_schedule`) |
 | **Zależności upstream** | **`project_costing` (moduł bazowy)**, `customers`, `dictionaries`, `dashboards`, `attachments`, `notifications`, `configs`, `feature_toggles`, `audit_logs`, `query_index`, `progress` |
 | **Powiązany spec** | `.ai/specs/2026-10-19-project-costing-offer-calculator.md` |
@@ -18,10 +18,10 @@
 
 - **Co:** opcjonalny moduł aplikacji `project_schedule`: harmonogram produkcji z Ganttem (WBS, milestone'y, zależności FS/SS/FF/SF + lag, auto-przesuwanie z przypinaniem, baseline), partie produkcji i prognoza 6 mies. Jeden Gantt na inwestycję jako osobny rekord (D23, D53).
 - **Faza:** cały moduł poza MVP — **v1**, integracje zewnętrzne i CPM w **v2** (§12, §13: listy funkcji; estymaty w dniach usunięte — P11). MVP kalkulatora działa bez niego (partie ręczne i import harmonogramu XLSX w kalkulacji — costing §6.5, D50).
-- **Daty (D55):** koniec włącznie; FS = dzień po końcu poprzednika + lag; kamień milowy 0 dni; dni kalendarzowe. **Auto-przesuwanie (D54):** tylko w przód, od najpóźniejszego poprzednika; kolizja z przypiętym zadaniem → ostrzeżenie i propozycja odpięcia.
+- **Daty (D55):** koniec włącznie; FS = dzień po końcu poprzednika + lag; kamień milowy ma zerową długość, a jego następnik FS startuje tego samego dnia (D80); dni kalendarzowe. **Auto-przesuwanie (D54):** tylko w przód, od najpóźniejszego poprzednika; kolizja z przypiętym zadaniem → ostrzeżenie i propozycja odpięcia.
 - **Architektura:** `project_schedule` **zależy od** `project_costing` (moduł bazowy) i rejestruje `InternalScheduleSource` w `scheduleSourceRegistry` (DI). Costing nigdy nie importuje schedule. Zero HTTP między modułami: typy elementów przez `elementTypeService`, kalkulacje przez `calculationLookupService`, sumy w costingu przez komendę `refresh_schedule_totals`.
 - **Włączanie per organizacja:** `schedule.enabled` w ModuleConfigService (`module_configs`) + feature'y ACL + blokady w menu, zakładce deala i API; `feature_toggles` wyłącznie jako globalny kill-switch per tenant (§1.0).
-- **Gantt:** SVAR React Gantt MIT core + własny auto-scheduling, CPM, baseline, undo i linia „dziś”; **bez SVAR PRO** (D21).
+- **Gantt:** kandydat SVAR React Gantt MIT core (tylko PoC w v1, potem osobna decyzja — D74, D82) + własny auto-scheduling, CPM, baseline, undo i linia „dziś”; **bez SVAR PRO** (D21).
 
 ---
 
@@ -29,12 +29,12 @@
 
 Moduł `project_schedule` dostarcza interaktywny harmonogram produkcji z widokiem Gantt (WBS + drag & drop; cały moduł w v1). Kluczowe cechy (stan rev 8b):
 - **Dwa typy harmonogramów**: `offer` (szacunki na etapie ofertowania) i `execution` (harmonogram realizacji).
-- **WBS z hierarchią** (`parent_task_id`) i **milestones** (0 dni, D55).
+- **WBS z hierarchią** (`parent_task_id`) i **milestones** (zerowa długość, D55).
 - **Zależności zadań**: FS / SS / FF / SF + lag (dni, może być ujemny); walidacja cykli.
 - **Baseline**: zrzut harmonogramu ofertowego przy przejściu do realizacji; wariancja.
 - **ProductionBatch** powiązany z zadaniem WBS i opcjonalnie z linią kalkulacji (`calculation_line_id` = opaque UUID).
 - **Prognoza 6 miesięcy** (tygodnie i miesiące), nieważona i ważona prawdopodobieństwem deala (costing §3.11).
-- **Harmonogram inwestycji** (D53): osobny rekord `ps_schedules` o zakresie `investment`, obok harmonogramów deali.
+- **Harmonogram inwestycji** (D53, D77): jeden rekord `ps_schedules` o zakresie `investment` na inwestycję, z fazą (najpierw ofertowa, potem wykonawcza), obok harmonogramów deali.
 
 > **Moduł opcjonalny**: `project_schedule` jest opcjonalny per firma (organizację) — §1.0. `project_costing` działa poprawnie bez tego modułu dzięki abstrakcji `ScheduleSource` (patrz `project_costing` §7a). Gdy moduł jest wyłączony, costing korzysta z `calculation_embedded` lub `xlsx_import` source.
 
@@ -112,8 +112,8 @@ Mechanizm (potwierdzony przez Koordynatora 2026-10-20): **włącznik per organiz
 - Baseline capture (offer → execution transition).
 - **Auto-scheduling server-side** (FS/SS/FF/SF + lag propagacja; `is_pinned` manual override; `auto_scheduling_enabled` per harmonogram).
 - Trigger `offer → execution` gdy deal WON (subscriber `customers.deal.won`; idempotent).
-- **Deal ponownie otwarty (Q9 (c)):** subscriber `customers.deal.updated` (persistent, no-op przy wyłączonym module) — gdy `closure_outcome` wraca do NULL, ustawia `ps_schedules.reopened_at = now()` na harmonogramie `execution` tego deala. Nic nie jest usuwane ani archiwizowane; UI pokazuje badge „deal ponownie otwarty” w zakładce deala i w Gantcie inwestycji. Ponowne `customers.deal.won` czyści `reopened_at`, a `create-execution` zwraca istniejący harmonogram (partial unique, §2.2).
-- **Harmonogram inwestycji** (D53): osobny rekord per inwestycja + widok zbiorczy harmonogramów deali tej inwestycji.
+- **Deal ponownie otwarty (D72):** subscriber `customers.deal.updated` (persistent, no-op przy wyłączonym module). Wykrywanie przejścia (rev 8c): payload eventu niesie tylko ID, a subscriber nie polega na „starej wartości” z payloadu. Czyta bieżący `closure_outcome` deala (query engine / serwis DI `customers`, bez HTTP) i porównuje z własnym stanem modułu: przejście „zamknięty → otwarty” zachodzi, gdy bieżący `closure_outcome IS NULL`, a dla deala istnieje harmonogram `execution` (powstał z `customers.deal.won`) z `reopened_at IS NULL`. Powtórzony albo spóźniony event jest no-opem (flaga już ustawiona albo deal ponownie zamknięty). Wtedy ustawia `ps_schedules.reopened_at = now()` na harmonogramie `execution` tego deala. Nic nie jest usuwane ani archiwizowane; UI pokazuje badge „deal ponownie otwarty” w zakładce deala i w Gantcie inwestycji. Ponowne `customers.deal.won` czyści `reopened_at`, a `create-execution` zwraca istniejący harmonogram (partial unique, §2.2).
+- **Harmonogram inwestycji** (D53, D77): jeden rekord per inwestycja z fazą `offer` → `execution` (zmiana fazy na tym samym rekordzie, bez kopii) + widok zbiorczy harmonogramów deali tej inwestycji.
 - Odświeżanie sum w `project_costing` przez komendę `refresh_schedule_totals` (DI) z subscribera tego modułu.
 
 ### 1.3 Faza v2 — Integracje zewnętrzne i krytyczna ścieżka
@@ -157,16 +157,16 @@ Mechanizm (potwierdzony przez Koordynatora 2026-10-20): **włącznik per organiz
 | `id` | `uuid` PK | |
 | `organization_id` | `uuid` NOT NULL | |
 | `tenant_id` | `uuid` NOT NULL | |
-| `schedule_scope` | `text` NOT NULL DEFAULT `'deal'` | rev 8b (D53): `deal` (harmonogram deala/kalkulacji) \| `investment` (osobny rekord harmonogramu inwestycji) |
+| `schedule_scope` | `text` NOT NULL DEFAULT `'deal'` | rev 8b (D53): `deal` (harmonogram deala/kalkulacji) \| `investment` (jeden rekord harmonogramu na inwestycję — D77) |
 | `investment_id` | `uuid` NULL | FK-id → `pc_investments.id` (bez constraintu DB); wymagane dla `schedule_scope = 'investment'` |
 | `deal_id` | `uuid` NULL | FK-id → customer_deals; NULL = harmonogram bez deala (kalkulacja standalone) albo harmonogram inwestycji |
 | `calculation_id` | `uuid` NULL | FK-id → pc_calculations (bez constraintu DB; rev 8a: przy `project_costing.calculation.deleted` subscriber tego modułu ustawia NULL) |
-| `schedule_type` | `text` NOT NULL DEFAULT `'offer'` | `offer` \| `execution` |
+| `schedule_type` | `text` NOT NULL DEFAULT `'offer'` | `offer` \| `execution`; dla `schedule_scope = 'investment'` to faza jedynego rekordu inwestycji (D77): najpierw `offer`, potem zmiana na `execution` na tym samym rekordzie |
 | `offer_schedule_id` | `uuid` NULL | FK → ps_schedules.id — referencja do harmonogramu ofertowego dla `execution` |
 | `label` | `text` NOT NULL | |
 | `status` | `text` DEFAULT `'draft'` | `draft` \| `active` \| `locked` \| `archived` |
 | `baseline_captured_at` | `timestamptz` NULL | moment przechwycenia baseline |
-| `reopened_at` | `timestamptz` NULL | flaga „deal ponownie otwarty” dla `execution` (Q9 (c), rozstrzygnięcie Koordynatora 2026-10-23): ustawiana, gdy `closure_outcome` deala wraca do NULL; dane harmonogramu bez zmian i bez usuwania; czyszczona przy ponownym `customers.deal.won` (§1.2) |
+| `reopened_at` | `timestamptz` NULL | flaga „deal ponownie otwarty” dla `execution` (D72): ustawiana, gdy `closure_outcome` deala wraca do NULL; dane harmonogramu bez zmian i bez usuwania; czyszczona przy ponownym `customers.deal.won` (§1.2) |
 | `auto_scheduling_enabled` | `bool` NOT NULL DEFAULT true | gdy true: przesunięcie zadania propaguje daty successor-ów wg zależności (serwis); gdy false: daty ręczne |
 | `notes` | `text` NULL | |
 | `created_by` | `uuid` NULL | |
@@ -177,11 +177,11 @@ Constraints: `CHECK (schedule_type IN ('offer','execution'))`, `CHECK (schedule_
 
 Indeksy unikalne (rev 8b):
 - **Idempotencja harmonogramu wykonawczego:** `UNIQUE (organization_id, tenant_id, deal_id) WHERE schedule_type = 'execution' AND deal_id IS NOT NULL AND deleted_at IS NULL` — powtórzony `customers.deal.won` albo catch-up po D67 nie tworzy drugiego harmonogramu (komenda `create_execution` przy konflikcie zwraca istniejący).
-- **Harmonogram inwestycji (D53):** `UNIQUE (organization_id, tenant_id, investment_id, schedule_type) WHERE schedule_scope = 'investment' AND deleted_at IS NULL`.
+- **Harmonogram inwestycji (D53, D77):** `UNIQUE (organization_id, tenant_id, investment_id) WHERE schedule_scope = 'investment' AND deleted_at IS NULL` — klucz wymusza jeden główny rekord harmonogramu na inwestycję; `schedule_type` nie wchodzi do klucza, bo jest fazą tego rekordu (`offer` → `execution`). Przejście fazy: komenda `create_execution` wywołana dla rekordu inwestycji przechwytuje baseline (`baseline_start_at/end_at` zadań) i zmienia `schedule_type` na `execution` na tym samym rekordzie (bez kopii i bez `offer_schedule_id`); ponowne wywołanie jest no-opem.
 
 **Lock na nagłówku (rev 8b, Kod p12):** każda zmiana zadań, zależności i partii harmonogramu (w tym propagacja §3a) przyjmuje `updatedAt` nagłówka `ps_schedules` (optimistic locking → 409) i w transakcji robi `SELECT … FOR UPDATE` tylko na wierszu `ps_schedules`; po zapisie podbija `updated_at` nagłówka. Bez `SERIALIZABLE`.
 
-Reguła: `execution` harmonogram jest kopią `offer` z zachowanym `offer_schedule_id`. Baseline rejestruje daty z `offer` w polach `baseline_start_at/end_at` zadań.
+Reguła (harmonogramy deali): `execution` harmonogram jest kopią `offer` z zachowanym `offer_schedule_id`; harmonogram inwestycji zmienia fazę w miejscu (D77). Baseline rejestruje daty z `offer` w polach `baseline_start_at/end_at` zadań.
 
 #### `ps_schedule_tasks` — zadania WBS
 
@@ -194,7 +194,7 @@ Reguła: `execution` harmonogram jest kopią `offer` z zachowanym `offer_schedul
 | `parent_task_id` | `uuid` NULL | FK → ps_schedule_tasks.id (WBS hierarchy) |
 | `wbs_code` | `text` NULL | np. `1.2.3` (auto-generated lub ręcznie) |
 | `label` | `text` NOT NULL | |
-| `is_milestone` | `bool` NOT NULL DEFAULT false | kamień milowy = 0 dni (D55): `planned_start_at = planned_end_at`, `duration_days = 0` |
+| `is_milestone` | `bool` NOT NULL DEFAULT false | kamień milowy o zerowej długości (D55): `planned_start_at = planned_end_at`, `duration_days = 0` |
 | `element_type_code` | `text` NULL | rev 8b: kod typu elementu z `pc_element_types.code` (opaque string, walidowany przez `elementTypeService` w DI; brak FK — A12) |
 | `planned_start_at` | `date` NULL | null dla summary tasks (wyliczone z dzieci) |
 | `planned_end_at` | `date` NULL | koniec **włącznie** (D55) |
@@ -352,7 +352,7 @@ Kolumny: id, organization_id, tenant_id, provider_id, label, inbound_webhook_sec
 - ✅ Grid z edycją w komórce, sort, reorder
 - ✅ Edit form, toolbar, menu kontekstowe, wirtualizacja, RestDataProvider, lokalizacja
 
-**Decyzja (rev 8a, D21, zamknięte pytanie pkt 20): Gantt = własna implementacja na SVAR MIT core, BEZ SVAR PRO.** Uzasadnienie: PRO dla SaaS wymaga licencji Application ($1,899); tańsza Developer ($749) zabrania użycia w SaaS; własny kod daje pełną kontrolę (bez uzależnienia od vendora, licencji per produkt i paywalla przy kolejnych funkcjach). Zakres świadomie przyjęty: własny auto-scheduling (v1), własne elementy UI — etykiety zależności, linia „dziś”, undo przy drag, baseline overlay (v1), CPM i kalendarz dni roboczych (v2); lista w §12–§13.
+**Decyzja (rev 8a, D21, zamknięte pytanie pkt 20): Gantt = własna implementacja, BEZ SVAR PRO.** Rev 8c (D74, D82): SVAR MIT core jest kandydatem — v1 zaczyna od PoC na `@svar-ui`, a wybór biblioteki zapada potem osobną decyzją; poniższe fakty SVAR są wejściem do PoC, nie przesądzeniem. Uzasadnienie: PRO dla SaaS wymaga licencji Application ($1,899); tańsza Developer ($749) zabrania użycia w SaaS; własny kod daje pełną kontrolę (bez uzależnienia od vendora, licencji per produkt i paywalla przy kolejnych funkcjach). Zakres świadomie przyjęty: własny auto-scheduling (v1), własne elementy UI — etykiety zależności, linia „dziś”, undo przy drag, baseline overlay (v1), CPM i kalendarz dni roboczych (v2); lista w §12–§13.
 
 Fakty SVAR wg review Kod (p20): w MIT są summary, **milestone'y**, zależności (wyświetlanie/edycja), hierarchia, drag/resize, edycja w gridzie, szablony pasków (baseline da się narysować samemu), wirtualizacja, import z Excela. `wbs_code` = własna kolumna (kody WBS są w PRO). W MIT **nie ma undo przy drag ani linii „dziś”** (vertical markers) — robimy je sami.
 
@@ -373,7 +373,7 @@ Fakty SVAR wg review Kod (p20): w MIT są summary, **milestone'y**, zależności
 - **Auto-scheduling** (propagacja dat): server-side v1 (§3a); MIT core renderuje wynikowe daty bez auto-scheduling UI.
 - **CPM rendering**: server-side algorytm (v2) → `is_critical_path: bool` na zadaniu → custom CSS class na pasku.
 - **Baseline wizualizacja**: custom overlay/marker na pasku zadania (`baseline_start/end_at`).
-- **Mapowanie dat do SVAR (D55, rev 8b):** w bazie koniec jest włącznie (`planned_end_at`), a SVAR traktuje `end` jako chwilę końca (wyłącznie). Adapter `lib/svar-date-adapter.ts`: `svar.start = planned_start_at 00:00`, `svar.end = (planned_end_at + 1 dzień) 00:00`; kamień milowy: `type: 'milestone'`, `svar.start = svar.end = planned_start_at 00:00`. Przy zapisie z drag/resize: `planned_end_at = svar.end − 1 dzień`. Strefa czasu: daty jako dni kalendarzowe bez czasu (UTC 00:00), bez przesunięć DST. [do potwierdzenia w PoC Gantta na wersji 2.8.1]
+- **Mapowanie dat do SVAR (D55, rev 8b):** w bazie koniec jest włącznie (`planned_end_at`), a SVAR traktuje `end` jako chwilę końca (wyłącznie). Adapter `lib/svar-date-adapter.ts`: `svar.start = planned_start_at 00:00`, `svar.end` = początek (00:00) następnego dnia po `planned_end_at`; kamień milowy: `type: 'milestone'`, `svar.start = svar.end = planned_start_at 00:00`. Przy zapisie z drag/resize: `planned_end_at` = dzień poprzedzający `svar.end`. Strefa czasu: daty jako dni kalendarzowe bez czasu (UTC 00:00), bez przesunięć DST. [do potwierdzenia w PoC Gantta na wersji 2.8.1]
 - **MS Project import/export**: server-side parser (v2, `exceljs`/`xml2js`), nie PRO.
 
 ### 3.3 Wymagania Gantt (rev 8a: v1)
@@ -396,14 +396,15 @@ Fakty SVAR wg review Kod (p20): w MIT są summary, **milestone'y**, zależności
 
 Gdy `ps_schedules.auto_scheduling_enabled = true` i zadanie jest przesuwane (drag&drop lub `POST .../reschedule`), serwis (czysta funkcja `lib/auto-scheduling.ts`, testy unit) przelicza następników forward-passem po DAG w porządku topologicznym.
 
-**Konwencja (D55):** daty są dniami kalendarzowymi; `planned_end_at` jest **włącznie**; czas trwania `dur = end − start + 1`; kamień milowy ma `dur = 0` i `start = end`.
+**Konwencja (D55):** daty są dniami kalendarzowymi; `planned_end_at` jest **włącznie**; czas trwania `dur = end − start + 1`; kamień milowy ma `dur = 0` i `start = end`. **D80:** następnik FS kamienia milowego startuje tego samego dnia co kamień milowy (`P.start + lag`), bo kamień milowy nie zajmuje dnia.
 
 ```
 Dla zadania T z nowym startem S':
   1. E' = S' + (dur_T − 1)      -- zadanie (dur_T ≥ 1)
      E' = S'                    -- kamień milowy (dur_T = 0)
   2. Dla każdego następnika X (porządek topologiczny) i każdej jego zależności (P → X, type, lag):
-       FS: minStart = P.end + 1 + lag           -- dzień po końcu (P kamień milowy: P.start + lag)
+       FS: minStart = P.end + 1 + lag           -- dzień po końcu
+           P kamień milowy: minStart = P.start + lag  -- D80: następnik startuje tego samego dnia
        SS: minStart = P.start + lag
        FF: minEnd   = P.end + lag   →  minStart = minEnd − (dur_X − 1)   (kamień milowy: minStart = minEnd)
        SF: minEnd   = P.start − 1 + lag  →  minStart jw.
@@ -459,12 +460,12 @@ Agregacja tygodniowa: analogicznie z `[W_start, W_end]` (Mon–Sun).
 
 ### 4.2 Zaokrąglenie — Largest Remainder Method (LRM)
 
-**m³ (3 d.p.)**: `SUM(monthly_m3) = B.quantity_m3` dokładnie.
+**m³ (3 miejsca po przecinku)**: `SUM(monthly_m3) = B.quantity_m3` dokładnie.
 1. `floor_m3[M] = floor(raw_m3[M], 3)`.
 2. Reszta = `B.quantity_m3 − SUM(floor_m3[M])`.
 3. Sort malejąco wg `frac = raw_m3[M] − floor_m3[M]`; dodaj `0.001` do top-k miesięcy.
 
-**szt. (0 d.p.)**: analogicznie z `floor(..., 0)` i `+1` per pozycja.
+**szt. (liczby całkowite)**: analogicznie z `floor(..., 0)` i `+1` per pozycja.
 
 **Tygodnie**: ten sam algorytm LRM per tydzień; `SUM(weekly) = B.quantity_m3/pcs` dokładnie.
 
@@ -568,7 +569,7 @@ DELETE    /api/project-schedule/schedules/:id   (tylko draft)
 
 POST .../activate | .../lock | .../duplicate
 POST .../capture-baseline   (offer → copies baseline_start/end do zadań)
-POST .../create-execution   (tworzy execution schedule z offer jako kopię; idempotentne — partial unique per deal, §2.2)
+POST .../create-execution   (deal: tworzy execution schedule z offer jako kopię; idempotentne — partial unique per deal; inwestycja: zmiana fazy na tym samym rekordzie — D77, §2.2)
 POST .../copy-calculation-batches   (jednorazowa kopia pc_ → ps_ po potwierdzeniu, §1.4)
 
 GET .../summary
@@ -577,7 +578,7 @@ GET .../export?format=xlsx|csv
 POST .../import
 ```
 
-**Harmonogram inwestycji (D53)**: osobny rekord `ps_schedules` z `schedule_scope = 'investment'` (tworzony przez `POST /schedules` z `investmentId`; własne zadania, zależności i partie). Widok zbiorczy: `GET /api/project-schedule/investment-schedules?investmentId=` zwraca rekord inwestycji + harmonogramy deali powiązanych z inwestycją (tylko do odczytu; jedna encja inwestycji `pc_investments`). Zwraca tasks z `dealId` i `calculationId` per każde zadanie. API zawsze filtruje po stronie serwera (organizacja, ACL). UI: `/project-schedule/investments/:investmentId/gantt`.
+**Harmonogram inwestycji (D53, D77)**: jeden rekord `ps_schedules` z `schedule_scope = 'investment'` na inwestycję (tworzony przez `POST /schedules` z `investmentId`; drugi → 409 z ID istniejącego; własne zadania, zależności i partie; faza `offer` → `execution` przez `create-execution`). Widok zbiorczy: `GET /api/project-schedule/investment-schedules?investmentId=` zwraca rekord inwestycji + harmonogramy deali powiązanych z inwestycją (tylko do odczytu; jedna encja inwestycji `pc_investments`). Zwraca tasks z `dealId` i `calculationId` per każde zadanie. API zawsze filtruje po stronie serwera (organizacja, ACL). UI: `/project-schedule/investments/:investmentId/gantt`.
 
 ### 6.3 Zadania WBS
 
@@ -663,7 +664,7 @@ Drag&drop callback → `POST /api/project-schedule/tasks/:id/reschedule` (daty p
 
 ### 7.3 Gantt inwestycji (D53)
 
-Strona `/project-schedule/investments/:investmentId/gantt`: edytowalny harmonogram inwestycji (osobny rekord, `schedule_scope = 'investment'`) oraz zbiorczy widok Gantt zadań ze wszystkich harmonogramów powiązanych z daną inwestycją. Rev 8a (bez joinu do tabel costingu): `calculationLookupService.listByInvestment(investmentId)` (DI, costing) zwraca ID kalkulacji, a ten moduł filtruje `ps_schedules WHERE calculation_id IN (...)`. To zależność schedule → costing (dozwolona), nie odwrotnie. Zadania kolorowane per deal. Umożliwia planowanie zasobów produkcyjnych dla całej inwestycji.
+Strona `/project-schedule/investments/:investmentId/gantt`: edytowalny harmonogram inwestycji (jeden rekord z fazą, `schedule_scope = 'investment'` — D77) oraz zbiorczy widok Gantt zadań ze wszystkich harmonogramów powiązanych z daną inwestycją. Rev 8a (bez joinu do tabel costingu): `calculationLookupService.listByInvestment(investmentId)` (DI, costing) zwraca ID kalkulacji, a ten moduł filtruje `ps_schedules WHERE calculation_id IN (...)`. To zależność schedule → costing (dozwolona), nie odwrotnie. Zadania kolorowane per deal. Umożliwia planowanie zasobów produkcyjnych dla całej inwestycji.
 
 Breadcrumb: Inwestycja → Deale → Harmonogramy. Filtry: status harmonogramu, typ (offer/execution), deal.
 
@@ -673,7 +674,7 @@ Breadcrumb: Inwestycja → Deale → Harmonogramy. Filtry: status harmonogramu, 
 
 ### 8.1 Formaty XLSX/CSV (`exceljs`)
 
-Kolumny harmonogramu XLSX: `wbs_code`, `label`, `parent_wbs_code`, `is_milestone`, `element_type_code`, `planned_start` (YYYY-MM-DD), `planned_end` (włącznie, D55), `duration_days` (dni kalendarzowe), `predecessors` (wbs_code csv, default FS; format: `1.2FS+2` dla FS z lagiem 2 dni), `status`, `notes`.
+Kolumny harmonogramu XLSX: `wbs_code`, `label`, `parent_wbs_code`, `is_milestone`, `element_type_code`, `planned_start` (YYYY-MM-DD), `planned_end` (włącznie, D55), `duration_days` (dni kalendarzowe), `predecessors` (wbs_code csv, default FS; format: `1.2FS+2` dla FS z lagiem +2), `status`, `notes`.
 
 Batche: opcjonalny drugi arkusz.
 
@@ -685,7 +686,7 @@ MS Project CSV export compatibility: kolumny `Name`, `Duration`, `Start`, `Finis
 
 ### 8.2 MS Project XML (v2)
 
-Parser `xml2js` (nowa zależność — dopiero w v2 wg Q11, costing §18a); elementy `<Task><WBS>`, `<Start>`, `<Finish>`, `<Predecessors>`. Złożony format — v2 po potwierdzeniu z Markiem.
+Parser `xml2js` (nowa zależność — dopiero w v2 wg D74, costing §18a); elementy `<Task><WBS>`, `<Start>`, `<Finish>`, `<Predecessors>`. Złożony format — v2 po potwierdzeniu z Markiem.
 
 ### 8.3 Limity i bezpieczeństwo
 
@@ -699,7 +700,7 @@ Te same wartości co w costing §6.4: plik 10 MB, 100 MB po rozpakowaniu (sprawd
 |---------|------|
 | `project_schedule.view` | Podgląd |
 | `project_schedule.edit` | Edycja zadań, drag & drop, batchów, zależności |
-| `project_schedule.admin` | Ustawienia, element types, integracje zewnętrzne |
+| `project_schedule.admin` | Ustawienia, integracje zewnętrzne (typy elementów należą do costingu — `project_costing.admin`) |
 | `project_schedule.import` | Import XLSX/CSV |
 | `project_schedule.export` | Eksport XLSX/CSV |
 | `project_schedule.manage_investment_schedule` | Tworzenie i edycja harmonogramu inwestycji (D53) |
@@ -791,9 +792,9 @@ Moduł poza MVP (Kod p15). MVP kalkulatora: partie ręczne i import harmonogramu
 1. Szkielet modułu, gating per organizacja (§1.0: guard API, menu, widget; D67 — dane ukryte po wyłączeniu, catch-up po ponownym włączeniu), rejestracja `InternalScheduleSource` w DI, subscribery `calculationActivated`/`calculationDeleted`.
 2. Logika domenowa: harmonogramy offer/execution, WBS (summary z dzieci), zależności z walidacją (cykle, summary, rodzic–dziecko), partie, lock na nagłówku.
 3. Własny silnik auto-scheduling (D54/D55: tylko w przód, najpóźniejszy poprzednik, kamień milowy 0, koniec włącznie, `pinned_conflict` + propozycja odpięcia, `schedule.rescheduled`) — zamiast SVAR PRO.
-4. Gantt: SVAR MIT core + adapter dat (koniec wyłącznie w SVAR) + własne: etykiety zależności, linia „dziś”, undo przy drag, baseline overlay, `wbs_code`; zakładka deala.
-5. Baseline capture, offer → execution (`customers.deal.won`, persistent, idempotentne przez partial unique), flaga „deal ponownie otwarty” (`reopened_at`, Q9), wariancja.
-6. Harmonogram inwestycji jako osobny rekord (D53) + widok zbiorczy (`calculationLookupService`).
+4. Gantt: PoC na SVAR MIT core, potem osobna decyzja o bibliotece (D74, D82) + adapter dat (koniec wyłącznie w SVAR) + własne: etykiety zależności, linia „dziś”, undo przy drag, baseline overlay, `wbs_code`; zakładka deala.
+5. Baseline capture, offer → execution (`customers.deal.won`, persistent, idempotentne przez partial unique), flaga „deal ponownie otwarty” (`reopened_at`, D72), wariancja.
+6. Harmonogram inwestycji jako jeden rekord z fazą (D53, D77) + widok zbiorczy (`calculationLookupService`).
 7. Import/eksport XLSX harmonogramu (ProgressJob + worker; D56: zastąpienie po potwierdzeniu, raport odrzuconych wierszy).
 8. Prognoza z harmonogramu (LRM, nieważona i ważona) + odświeżanie sum costingu (komenda DI, kolejka, debounce); jednorazowa kopia partii `pc_` → `ps_`.
 
@@ -804,7 +805,7 @@ Moduł poza MVP (Kod p15). MVP kalkulatora: partie ręczne i import harmonogramu
 1. `ps_external_integrations` + provider interface + registry.
 2. Inbound webhook (Standard Webhooks HMAC, idempotentność).
 3. Outbound webhook (zmiana dat, retry przez kolejkę).
-4. Import MS Project XML (D25: od v2; `xml2js` w v2 — Q11).
+4. Import MS Project XML (D25: od v2; `xml2js` w v2 — D74).
 5. Własny CPM (forward/backward pass, float, `is_critical_path`) — zamiast SVAR PRO.
 6. Kalendarz dni roboczych w auto-schedulingu i wariancji — zamiast SVAR PRO.
 
@@ -840,28 +841,28 @@ Tabela identyczna jak w costing §14 „Zakres zbiorczy”.
 | R7 | Wiele wersji formatu MS Project XML | Import (v2) | Niska | v2; v1 = XLSX/CSV | Niskie |
 | R8 | Kolizja zakładek deala (costing + schedule) | UI | Niska | Różne `groupId`, priorytet | Niskie |
 | R9 | Nieskończona propagacja przy cyklu | Algorytmy | Wysoka | Walidacja cykli przy zapisie (422 `DEPENDENCY_CYCLE`) + limit głębokości | Niskie |
-| R10 | `customers.deal.won` dostarczony więcej niż raz | Integracja | Niska | Partial unique `(org, tenant, deal_id) WHERE schedule_type = 'execution'` + `create-execution` zwraca istniejący; subscriber persistent | Niskie |
+| R10 | `customers.deal.won` dostarczony więcej niż raz | Integracja | Niska | Partial unique `(org, tenant, deal_id) WHERE schedule_type = 'execution'` + `create-execution` zwraca istniejący; harmonogram inwestycji: klucz `(org, tenant, investment_id)` i zmiana fazy no-op (D77); subscriber persistent | Niskie |
 | R11 | Organizacja wyłącza moduł, a dane/subscribery dalej działają | Konfiguracja | Średnia | Guard API + no-op subscriberów + `isAvailable() = false` (§1.0); test integracyjny wyłączenia | Niskie |
 | R12 | Kill-switch tenanta wyłączony przez pomyłkę ukrywa harmonogramy wszystkich organizacji | Konfiguracja | Średnia | Toggle domyślnie włączony; dane nieusuwane | Niskie |
-| R13 | Zakres własnego Gantta większy niż zakładany (elementy, których nie ma w SVAR MIT) | Plan | Średnia | PoC Gantta na SVAR MIT przed budową widoku (§12 v1 pkt 4), w tym adapter dat; `@svar-ui` tylko jako PoC w v1, Gantt to nasza implementacja bez SVAR PRO (Q11, D21); lista własnych elementów zamknięta w §3.2 | Średnie (świadoma decyzja D21) |
+| R13 | Zakres własnego Gantta większy niż zakładany (elementy, których nie ma w SVAR MIT) | Plan | Średnia | PoC Gantta na SVAR MIT przed budową widoku (§12 v1 pkt 4), w tym adapter dat; `@svar-ui` tylko jako PoC w v1, potem osobna decyzja (D74, D82); bez SVAR PRO (D21); lista własnych elementów zamknięta w §3.2 | Średnie (świadoma decyzja D21) |
 | R14 | Dwa źródła partii (`pc_` i `ps_`) dają różne liczby | Dane | Średnia | Prognoza czyta tylko aktywne źródło (costing §7a.3); kopia `pc_` → `ps_` jednorazowa po potwierdzeniu; UI oznacza nieaktywne partie | Niskie |
-| R15 | Deal ponownie otwarty po wygranej, a harmonogram wykonawczy wygląda na obowiązujący | Dane / UI | Niska | Flaga `reopened_at` + badge „deal ponownie otwarty”; dane bez usuwania (Q9 (c)); ponowne `won` czyści flagę; test integracyjny won → reopen → won | Niskie |
+| R15 | Deal ponownie otwarty po wygranej, a harmonogram wykonawczy wygląda na obowiązujący | Dane / UI | Niska | Flaga `reopened_at` + badge „deal ponownie otwarty”; dane bez usuwania (D72); wykrywanie przez własny stan modułu (§1.2); ponowne `won` czyści flagę; test integracyjny won → reopen → won | Niskie |
 
 ---
 
 ## 15. Pytania otwarte do Marka
 
-*(Rev 8b: Q4 o wyłączaniu modułu zamknięte — D67: dane ukryte do ponownego włączenia. Rozstrzygnięcia Koordynatora 2026-10-23 dotyczące modułu (zamknięte, costing §16): Q9 (c) — flaga „deal ponownie otwarty”, bez usuwania danych (§1.2, §2.2, R15); Q11 — `@svar-ui` tylko PoC w v1, Gantt własny bez SVAR PRO, `xml2js` w v2, nic nie instalujemy na etapie speki. Otwarte pozostaje tylko Q6 (waluty, costing §16), które modułu nie dotyczy.)*
+*(Rev 8b: Q4 o wyłączaniu modułu zamknięte — D67: dane ukryte do ponownego włączenia. Decyzje dotyczące modułu (zamknięte, costing §16): D72 (dawne Q9) — flaga „deal ponownie otwarty”, bez usuwania danych (§1.2, §2.2, R15); D74 (dawne Q11) — `@svar-ui` tylko PoC w v1, potem osobna decyzja (D82), bez SVAR PRO, `xml2js` w v2, nic nie instalujemy na etapie speki; D77 — jeden rekord harmonogramu na inwestycję z fazą (§2.2); D80 — następnik kamienia milowego startuje tego samego dnia (§3a.1). Otwarte pozostaje tylko Q6 (waluty, costing §16), które modułu nie dotyczy.)*
 
 | Pytanie | Odpowiedź Marka | Implementacja |
 |---------|-----------------|---------------|
 | Rescheduling automatyczny? | TAK — auto-scheduling server-side, manual override per-task (`is_pinned`) | §3a, v1 |
-| Cross-deal Gantt? | TAK — osobny rekord harmonogramu per inwestycja (D53) + widok zbiorczy | §6.1, §7.3, v1 |
+| Cross-deal Gantt? | TAK — jeden rekord harmonogramu per inwestycja z fazą (D53, D77) + widok zbiorczy | §6.1, §7.3, v1 |
 | MS Project XML? | v2+ — XLSX/CSV wystarczy na v1 | §6.7, v2 |
 | Offer → Execution trigger? | TAK — event `customers.deal.won`; idempotent | §6.1 `create-execution`, v1 |
-| SVAR PRO? (pkt 20, **zamknięte w rev 8a**) | NIE — własna implementacja na SVAR MIT core (D21) | §3.2 (uzasadnienie: Application $1,899, Developer $749 zabrania SaaS, kontrola nad kodem); zakres w §12 |
-| Harmonogram po ponownym otwarciu deala? (Q9, **zamknięte 2026-10-23**) | (c) — flaga „deal ponownie otwarty”, bez usuwania danych (rozstrzygnięcie Koordynatora) | §1.2, §2.2 `reopened_at`, R15 |
-| Zależności `@svar-ui`, `xml2js`? (Q11, **zamknięte 2026-10-23**) | `@svar-ui` tylko PoC w v1 (Gantt własny, bez SVAR PRO); `xml2js` w v2; `exceljs` tak (rozstrzygnięcie Koordynatora) | costing §18a; §3.2, §8.2 |
+| SVAR PRO? (pkt 20, **zamknięte w rev 8a**) | NIE — własna implementacja bez SVAR PRO (D21); SVAR MIT core tylko PoC w v1 (D82) | §3.2 (uzasadnienie: Application $1,899, Developer $749 zabrania SaaS, kontrola nad kodem); zakres w §12 |
+| Harmonogram po ponownym otwarciu deala? (Q9, **zamknięte — D72**) | flaga „deal ponownie otwarty”, bez usuwania danych | §1.2, §2.2 `reopened_at`, R15 |
+| Zależności `@svar-ui`, `xml2js`? (Q11, **zamknięte — D74, D82**) | `@svar-ui` tylko PoC w v1, potem osobna decyzja (bez SVAR PRO); `xml2js` w v2; `exceljs` tak | costing §18a; §3.2, §8.2 |
 
 ---
 
@@ -875,7 +876,7 @@ Tabela identyczna jak w costing §14 „Zakres zbiorczy”.
 | A4 | Prognoza: endpoint `/forecast` z LRM + probability param | Precyzja LRM; probability = param (nie hardcoded) |
 | A5 | MS Project XML w v2 po potwierdzeniu | Złożony format |
 | A6 | `ps_import_column_mappings` — własna tabela | Niezależność modułów |
-| A7 | LRM rounding m³ (3 d.p.) i szt. (int) per miesiąc i tydzień | `SUM(periodic) = batch_total` dokładnie |
+| A7 | LRM rounding m³ (3 miejsca po przecinku) i szt. (int) per miesiąc i tydzień | `SUM(periodic) = batch_total` dokładnie |
 | A8 | `ps_schedules` bez `currency` | Waluta = własność kalkulacji |
 | A9 | Walidacja zależności: DFS synchroniczny + reguły summary/rodzic–dziecko | Typowe WBS < 200 zadań; wystarczające |
 | A10 | `calculation_line_id` w `ps_production_batches` = FK-id bez constraintu DB | Brak relacji ORM/constraintów między modułami (schedule zależy od costing, ale nie przez FK DB) |
@@ -883,8 +884,8 @@ Tabela identyczna jak w costing §14 „Zakres zbiorczy”.
 | A12 | Typy elementów = `pc_element_types` (project_costing); `ps_schedule_tasks` i `ps_production_batches` trzymają `element_type_code` (string), walidowany przez `elementTypeService` w DI; brak `element_type_id` | project_schedule opcjonalny; costing posiada typy elementów niezależnie |
 | A13 | Auto-scheduling v1 server-side (forward-pass DAG, dni kalendarzowe); v2 = dni robocze | Decyzja Marka rev 7: NIE PRO; własna impl. |
 | A14 | Offer→execution trigger przez event `customers.deal.won` (nie `accepted`); idempotentne `create-execution` (partial unique) | Decyzja Marka rev 7 |
-| A15 | Harmonogram inwestycji: osobny rekord `ps_schedules` (`schedule_scope = 'investment'`) + strona i endpoint `investment-schedules` | D23, D53 |
-| A16 | Daty: koniec włącznie; FS = dzień po końcu + lag; kamień milowy 0 dni; dni kalendarzowe; w SVAR koniec wyłącznie przez adapter | D55 |
+| A15 | Harmonogram inwestycji: jeden rekord `ps_schedules` (`schedule_scope = 'investment'`) na inwestycję z fazą `offer` → `execution` + strona i endpoint `investment-schedules` | D23, D53, D77 |
+| A16 | Daty: koniec włącznie; FS = dzień po końcu + lag; kamień milowy o zerowej długości, jego następnik FS startuje tego samego dnia (`P.start + lag`, decyzja D80); dni kalendarzowe; w SVAR koniec wyłącznie przez adapter | D55, D80 |
 | A17 | Auto-przesuwanie tylko w przód, od najpóźniejszego poprzednika; przypięte zadanie → `pinned_conflict` + propozycja odpięcia; wcześniejszy termin → tylko propozycja | D54 |
 | A18 | Import harmonogramu zastępuje dane po potwierdzeniu; błędne wiersze odrzucane z raportem | D56 |
 | A19 | Wyłączenie modułu w organizacji: dane ukryte do ponownego włączenia; catch-up harmonogramów wykonawczych po włączeniu | D67 |
@@ -930,7 +931,7 @@ apps/mercato/src/modules/project_schedule/
 │   ├── calculationDeleted.ts    # nulluje calculation_id
 │   ├── scheduleChanged.ts       # → komenda costingu refresh_schedule_totals (kolejka, debounce)
 │   ├── dealWon.ts              # trigger offer→execution transition (persistent); czyści reopened_at
-│   └── dealReopened.ts         # customers.deal.updated: closure_outcome → NULL ustawia reopened_at (Q9, persistent)
+│   └── dealReopened.ts         # customers.deal.updated: bieżący closure_outcome NULL + własny execution bez flagi → reopened_at (D72, persistent)
 ├── widgets/DealScheduleTab.tsx
 └── lib/
     ├── schedule.service.ts
@@ -959,7 +960,7 @@ apps/mercato/src/modules/project_schedule/
 | Włączanie modułu zgodne z platformą (build, feature_toggles, module_configs) | `apps/mercato/src/modules.ts`, `feature-flag-check.ts`, `module-config-service.ts` | ✅ §1.0 |
 | Import przez ProgressJob + worker | `packages/core/AGENTS.md` § Operation Progress | ✅ §8 (D56, limity §8.3), §12 v1 pkt 7 |
 | Testy integracyjne każdej trasy | root `AGENTS.md` l.166 | ✅ wymaganie w każdej fazie (§12 „Narzut OM”) |
-| Nowe zależności (`@svar-ui/*`, `exceljs`, `xml2js`) = ask first | root `AGENTS.md` l.26 | ✅ rozstrzygnięte w costing §18a (Q11); na etapie speki nic nie instalujemy |
+| Nowe zależności (`@svar-ui/*`, `exceljs`, `xml2js`) = ask first | root `AGENTS.md` l.26 | ✅ rozstrzygnięte w costing §18a (D74, D82); na etapie speki nic nie instalujemy |
 
 ## 20. Checklist compliance (`om-architecture-checklist.md`, stan 2026-10-23)
 
@@ -978,7 +979,7 @@ apps/mercato/src/modules/project_schedule/
 | Zakres „firmy” (**p7**) | ✅ **spełniony** — firma = organizacja (§1.0) |
 | Statusy deala / `customers.deal.won` persistent (p5) | ✅ subscriber `dealWon` persistent; statusy wg costing §0.6 (`closure_outcome`); idempotencja partial unique (§2.2) |
 | Import przez ProgressJob (p9) | ✅ §8 (D56, błędne wiersze, limity §8.3; przypadki brzegowe jak costing §6.2) |
-| Nowe zależności = ask first (p10) | ✅ costing §18a, Q11 (zamknięte) |
+| Nowe zależności = ask first (p10) | ✅ costing §18a, D74 (zamknięte) |
 | Algorytmy harmonogramu (p12) | ✅ §3a.1 (D54/D55), §2.2 (walidacja zależności, lock na nagłówku), §3.2 (adapter SVAR), §5.3 (`rescheduled`) |
 | Narzut OM w zakresie faz (p16) | ✅ §12 „Narzut OM” (estymaty usunięte — P11) |
 | MVP pocięty po wartości (p15) | ✅ moduł poza MVP |
@@ -987,37 +988,40 @@ apps/mercato/src/modules/project_schedule/
 
 ---
 
-## 21. Decision traceability (rev 8b, `.ai/decisions.md` d818aa2)
+## 21. Decision traceability (rev 8c, D1–D82)
 
-Pełna tabela wszystkich aktywnych decyzji (z N/A i powodami) jest w costing §22. Poniżej decyzje realizowane w tej specyfikacji. Decyzje zastąpione nie są cytowane (lista „superseded by” w costing §22).
+Zakres D1–D82: `.ai/decisions.md` (commit 72a63c9: D1–D74) i rozstrzygnięcia Koordynatora 2026-10-23 D75–D82 (do wpisania w `.ai/decisions.md`). Pełna tabela wszystkich aktywnych decyzji (z N/A i powodami) jest w costing §22. Poniżej decyzje realizowane w tej specyfikacji. Decyzje zastąpione nie są cytowane (lista „superseded by” w costing §22).
 
-| D / Q | Decyzja (skrót) | Sekcje tej specyfikacji |
+| D | Decyzja (skrót) | Sekcje tej specyfikacji |
 |---|---|---|
-| D1 | Klin = agregator przetargów + CRM budowlany na OM | §1 (kontekst) |
-| D9 | Kalkulator jak Excel + import XLSX | §8.1 |
-| D15 | Firma = organizacja | §1.0 |
-| D19 | Harmonogram = osobny moduł, opcjonalny per firma | §1.0, §5.4 |
-| D20 | Kalkulacja i prognoza bez harmonogramu (`ScheduleSource`/Excel) | §5.2 |
-| D21 | Gantt własny, bez SVAR PRO | §3.2, §12 |
-| D22 | Auto-przesuwanie z przypięciem | §3a.1, §3a.2 |
-| D23 | Jeden Gantt na inwestycję | §6.1, §7.3 (doprecyzowane przez D53) |
-| D24 | Oferta → realizacja przy wygranej | §1.2, §6.1 (`create-execution`) |
-| D25 | MS Project w v2 | §8.2, §12 v2 |
-| D26 | Harmonogram wewnętrzny, gotowy na integrację | §11, §12 v2 |
-| D45 | Moduły aplikacji w forku, bez zmian w `packages/core` | nagłówek (Moduł), §18 |
-| D47 | Przełącznik harmonogramu per organizacja (`module_configs`) + kill-switch tenanta | §1.0 |
-| D48 | RBAC marży i kosztu | §9 |
-| D50 | Zakres MVP | §1.1, §12 MVP (moduł poza MVP) |
-| D52 | Inwestycja = jedna encja | §2.2 (`investment_id`) |
-| D53 | Gantt inwestycji = osobny rekord | §1.2, §2.2 (`schedule_scope`, `investment_id`), §6.1, §7.3 |
-| D54 | Przypięte zadania, propagacja tylko w przód | §3a.1, §3a.2, §6.3 |
-| D55 | Konwencja dat (koniec włącznie, FS, kamień milowy, dni kalendarzowe) | §2.2, §3.2 (adapter), §3a.1, §8.1 |
-| D56 | Import zastępuje dane po potwierdzeniu; błędne wiersze odrzucane | §8.1 |
-| D61 | Kalkulacja bez deala poza prognozą ważoną | §4.3 |
-| D67 | Wyłączenie modułu: dane ukryte | §1.0, §2.2 |
-| D68 | `employee` bez kosztów i marży | §9 |
-| Q9 | Flaga „deal ponownie otwarty”, bez usuwania danych — rozstrzygnięcie Koordynatora 2026-10-23 (Q7–Q11) | §1.2, §2.2 (`reopened_at`), §14 (R15) |
-| Q11 | Zależności: `exceljs` tak; siatka najpierw `packages/ui`; `@svar-ui` tylko PoC w v1 schedule (Gantt własny, bez SVAR PRO); `xml2js` w v2; nic nie instalujemy na etapie speki — rozstrzygnięcie Koordynatora 2026-10-23 (Q7–Q11) | §3.2, §8.2, §12, §14 (R13) |
+| **D1** | Klin = agregator przetargów + CRM budowlany na OM | §1 (kontekst) |
+| **D9** | Kalkulator jak Excel + import XLSX | §8.1 |
+| **D15** | Firma = organizacja | §1.0 |
+| **D19** | Harmonogram = osobny moduł, opcjonalny per firma | §1.0, §5.4 |
+| **D20** | Kalkulacja i prognoza bez harmonogramu (`ScheduleSource`/Excel) | §5.2 |
+| **D21** | Gantt własny, bez SVAR PRO | §3.2, §12, §14 (R13) |
+| **D22** | Auto-przesuwanie z przypięciem | §3a.1, §3a.2 |
+| **D23** | Jeden Gantt na inwestycję | §6.1, §7.3 (doprecyzowane przez D53) |
+| **D24** | Oferta → realizacja przy wygranej | §1.2, §6.1 (`create-execution`) |
+| **D25** | MS Project w v2 | §8.2, §12 v2 |
+| **D26** | Harmonogram wewnętrzny, gotowy na integrację | §11, §12 v2 |
+| **D45** | Moduły aplikacji w forku, bez zmian w `packages/core` | nagłówek (Moduł), §18 |
+| **D47** | Przełącznik harmonogramu per organizacja (`module_configs`) + kill-switch tenanta | §1.0 |
+| **D48** | RBAC marży i kosztu | §9 |
+| **D50** | Zakres MVP | §1.1, §12 MVP (moduł poza MVP) |
+| **D52** | Inwestycja = jedna encja | §2.2 (`investment_id`) |
+| **D53** | Gantt inwestycji = osobny rekord (klucz: D77) | §1.2, §2.2 (`schedule_scope`, `investment_id`), §6.1, §7.3 |
+| **D54** | Przypięte zadania, propagacja tylko w przód | §3a.1, §3a.2, §6.3 |
+| **D55** | Konwencja dat (koniec włącznie, FS, kamień milowy, dni kalendarzowe) | §2.2, §3.2 (adapter), §3a.1, §8.1 |
+| **D56** | Import zastępuje dane po potwierdzeniu; błędne wiersze odrzucane | §8.1 |
+| **D61** | Kalkulacja bez deala poza prognozą ważoną | §4.3 |
+| **D67** | Wyłączenie modułu: dane ukryte | §1.0, §2.2 |
+| **D68** | `employee` bez kosztów i marży | §9 |
+| **D72** | Flaga „deal ponownie otwarty”, bez usuwania danych | §1.2, §2.2 (`reopened_at`), §14 (R15) |
+| **D74** | Zależności: `exceljs` tak; siatka najpierw `packages/ui`; `@svar-ui` tylko PoC w v1, potem osobna decyzja; `xml2js` w v2; nic nie instalujemy na etapie speki | §3.2, §8.2, §12, §14 (R13) |
+| **D77** | Jeden rekord harmonogramu na inwestycję z fazą (najpierw ofertowa, potem wykonawcza); klucz wymusza jeden główny rekord na inwestycję | §1.2, §2.2 (indeks unikalny), §6.1, §7.3, §14 (R10) |
+| **D80** | Następnik kamienia milowego (FS) startuje tego samego dnia (`P.start + lag`) | §3a.1, §16 (A16) |
+| **D82** | §18a nie przesądza SVAR; `@svar-ui` zostaje PoC w v1 | §3.2, §14 (R13) |
 
 ---
 
@@ -1025,6 +1029,7 @@ Pełna tabela wszystkich aktywnych decyzji (z N/A i powodami) jest w costing §2
 
 | Data | Zmiana |
 |------|--------|
+| 2026-10-23 | **rev 8c** — decyzje D72, D74 (`.ai/decisions.md` 72a63c9) oraz D77, D80, D82 (Koordynator 2026-10-23); traceability D1–D82 (§21). **D77:** jeden rekord harmonogramu na inwestycję z fazą `offer` → `execution`, klucz `(org, tenant, investment_id)` (§2.2, §6.1, §7.3, R10, A15). **dealReopened:** wykrywanie przez bieżący `closure_outcome` i własny stan modułu, nie przez starą wartość z payloadu (§1.2). **D80:** następnik kamienia milowego tego samego dnia (§3a.1, A16). **D82:** SVAR tylko PoC w v1 (TLDR, §3.2, §12, R13). `project_schedule.admin` bez typów elementów (§9). Sformułowania bez liczby dni (kamień milowy, adapter dat, lag, miejsca po przecinku). |
 | 2026-10-23 | **rev 8b** — spójność, review P1/P2, decyzje (`.ai/decisions.md` d818aa2), wnioski z planu testów. **P11:** usunięte wszystkie estymaty w dniach (§12/§13 jako listy funkcji i encji; D21 bez kosztu w §3.2 i §15; R13 przeformułowane; starsze wiersze changelogu oczyszczone). **D53:** harmonogram inwestycji = osobny rekord (`schedule_scope`, `investment_id`, partial unique). **D54/D55:** §3a.1 przepisany — koniec włącznie, `E' = S' + (dur − 1)`, kamień milowy `E' = S'` (poprawka wzoru z rev 8a), FS = dzień po końcu + lag, start od najpóźniejszego poprzednika, tylko w przód, `pinned_conflict` + odpięcie, `earlier_possible` jako propozycja; `duration_days` = dni kalendarzowe; mapowanie końca do SVAR (koniec wyłącznie) przez adapter; walidacja zależności na podsumowaniach i rodzic–dziecko; lock na nagłówku `ps_schedules`; event `project_schedule.schedule.rescheduled` z listą ID. **D56:** import zastępuje dane po potwierdzeniu, błędne wiersze odrzucane z raportem. **D67:** dane ukryte po wyłączeniu, catch-up po włączeniu. **Spójność z costing:** jedno źródło partii (§1.4, kopia `pc_` → `ps_`), limity importu jak costing §6.4 (10 000 wierszy zamiast wcześniejszego limitu zadań), prognoza nieważona + ważona, idempotencja harmonogramu wykonawczego (partial unique per deal), zależności do akceptacji (costing §18a). **A7/A13:** `element_type_id` usunięte z `ps_schedule_tasks` → `element_type_code`; analytics `elementTypeId` → `elementTypeCode`. Brakujący nagłówek „## 4. Prognoza produkcji” dodany. **Założenia przenumerowane** (stary → nowy): A1–A6 bez zmian; A7 (nieaktualne) usunięte; A8→A7, A9→A8, A10→A9, A11→A10, A12→A11, A13→A12, A14→A13, A15→A14, A16→A15; nowe A16–A19. **Follow-up (spec-check):** §21 Decision traceability (decyzje realizowane w tej specyfikacji; pełna tabela w costing §22); Q9 (c) — flaga „deal ponownie otwarty” (§1.2, §2.2, subscriber `dealReopened`, R15) i Q11 (`@svar-ui` tylko PoC w v1, `xml2js` w v2) — rozstrzygnięcia Koordynatora 2026-10-23. |
 | 2026-10-20 | **rev 8a** — Review Kod (PR #10 rev 7) + decyzje Koordynatora/Marka. **P0-1:** kierunek odwrócony — `project_schedule` zależy od `project_costing` (baza) i rejestruje `InternalScheduleSource` w `scheduleSourceRegistry` (DI); usunięte HTTP (§5.2 `GET /api/project-costing/element-types` → `elementTypeService`; API konsumowane przez costing → kontrakty DI); join `ps_schedules.calculation_id → pc_calculations` opisany poprawnie (`calculationLookupService.listByInvestment`); subscriber `calculationActivated` po stronie tego modułu (konsumenta); odświeżanie sum costingu przez jego komendę `refresh_schedule_totals`; A3 poprawione; nowa §0 Architecture, §1.4, §5.4. **Decyzja (d) + potwierdzenie Koordynatora:** §1.0 — włącznik per organizacja = `schedule.enabled` w ModuleConfigService (`module_configs`) + feature'y ACL + blokady w menu, zakładce deala i API; `feature_toggles` wyłącznie jako globalny kill-switch per tenant (zweryfikowano w `feature-flag-check.ts` i `module-config-service.ts`; ModuleConfigService nie ma natywnego scope organizacji → klucz `org:{id}:settings`). **Pkt 20 zamknięte (D21):** Gantt własny na SVAR MIT, bez PRO (Application $1,899; Developer $749 zabrania SaaS; kontrola nad kodem); fakty SVAR: milestone'y w MIT (usunięte [niezwer.] i plan B), `wbs_code` własna kolumna, brak undo przy drag i linii „dziś” w MIT → własne. **P1-15:** cały moduł przeniesiony z MVP do v1. **P1-16:** wycena od zera z narzutem OM (estymaty usunięte w rev 8b — P11). `projectId` usunięte (jedna encja inwestycji). Role admin/employee (§9). Dodane: TLDR, Risks z ryzykiem rezydualnym, Final Compliance Report, Checklist compliance, `deleted_at`. Poza zakresem rev 8a (zrobione w rev 8b): Kod p12 (szczegóły algorytmu), A7/A13 (`element_type_id` w `ps_schedule_tasks`, `elementTypeId` w analytics), partie pc_/ps_, numeracja założeń. |
 | 2026-10-19 | v1 (rev 3) — inicjalna spec |
