@@ -3,7 +3,7 @@
 **Dokument**: SPEC ONLY (plan testów niezależny od specyfikacji PR #10, brak kodu)
 **Data**: 2026-10-19
 **Autor**: Copilot (plan testów na podstawie wymagań biznesowych Marka Adamskiego)
-**Rewizja**: rev 8 (2026-10-23, runda rev 8g) — TC-CUR-011: wyszukiwanie modułu Waluty o 00:30 czasu warszawskiego daje kurs z dnia poprzedniego, wysłanie oferty liczy datę w Europe/Warsaw, suma deali zaokrąglona do całości, godziny graniczne lato/zima; TC-CUR-001: zamrożony obraz bez źródła kursu; poprzednio rev 7 (runda rev 8f) — waluty przez moduł Waluty platformy (TC-CUR-002..007 przepisane, nowe TC-CUR-008..013), annex do D94; poprzednio rev 6 — zgodność z decyzjami koordynacyjnymi (`.ai/vision.md`, `.ai/decisions.md`, `.ai/om-architecture-checklist.md`) i rozstrzygnięciami Koordynatora z 2026-10-23; mapowanie scenariuszy na decyzje w załączniku „Traceability TC → D”
+**Rewizja**: rev 8 (2026-10-23, runda rev 8h) — waluta bez kursu w żadnej tabeli NBP: TC-CUR-012 przepisany (422 dla waluty oferty, kurs ręczny nie odblokowuje, CNY przechodzi), nowy TC-CUR-014 (v1, 422 dla waluty pozycji), wniosek 26 zamknięty, annex do D97; poprzednio runda rev 8g — TC-CUR-011: wyszukiwanie modułu Waluty o 00:30 czasu warszawskiego daje kurs z dnia poprzedniego, wysłanie oferty liczy datę w Europe/Warsaw, suma deali zaokrąglona do całości, godziny graniczne lato/zima; TC-CUR-001: zamrożony obraz bez źródła kursu; poprzednio rev 7 (runda rev 8f) — waluty przez moduł Waluty platformy (TC-CUR-002..007 przepisane, nowe TC-CUR-008..013), annex do D94; poprzednio rev 6 — zgodność z decyzjami koordynacyjnymi (`.ai/vision.md`, `.ai/decisions.md`, `.ai/om-architecture-checklist.md`) i rozstrzygnięciami Koordynatora z 2026-10-23; mapowanie scenariuszy na decyzje w załączniku „Traceability TC → D”
 
 ---
 
@@ -20,14 +20,14 @@
 | Koszty rzeczywiste (TC-REAL) | 3 |
 | Harmonogram Gantt (TC-GANTT) | 11 |
 | Testy wydajności (TC-PERF) | 3 |
-| Waluty (TC-CUR) | 13 |
+| Waluty (TC-CUR) | 14 |
 | Firmy bez modułu harmonogramu (TC-NOSCHED) | 5 |
 | Prognoza produkcji (TC-FCST) | 6 |
 | Harmonogram ofertowy → wykonawczy (TC-EXEC) | 5 |
 | Bezpieczeństwo plików (TC-SEC) | 6 |
 | Izolacja multi-tenant (TC-TEN) | 7 |
 | Edycja równoległa (TC-CONC) | 5 |
-| **Razem** | **141** |
+| **Razem** | **142** |
 
 ---
 
@@ -46,7 +46,7 @@
 | R7 | Duplikowanie lub gubianie inwestycji (dopasowanie) | Niski | Wysoki | P2 | Powiązania | TC-DEAL-009 do TC-DEAL-016 |
 | R8 | Ataki plikowe (XLSX bomb, formula injection) na VPS | Wysoki | Krytyczny | P0 | Bezpieczeństwo plików | TC-SEC-001 do TC-SEC-006 |
 | R9 | Utrata danych przy równoległej edycji (race condition) | Średni | Krytyczny | P0 | Edycja równoległa | TC-CONC-001 do TC-CONC-005 |
-| R10 | Błędy walutowe (kursy, zamrożenie, zaokrąglenia per waluta) | Średni | Wysoki | P1 | Waluty | TC-CUR-001 do TC-CUR-013 |
+| R10 | Błędy walutowe (kursy, zamrożenie, zaokrąglenia per waluta) | Średni | Wysoki | P1 | Waluty | TC-CUR-001 do TC-CUR-014 |
 | R11 | Nieprawidłowa prognoza produkcji (suma ≠ partie, prob) | Niski | Średni | P2 | Prognoza | TC-FCST-001 do TC-FCST-006 |
 | R12 | Wyciek danych przez eksport / PDF (marża, koszty) | Wysoki | Wysoki | P1 | Uprawnienia, Waluty, Tenant | TC-PERM-007, TC-TEN-004, TC-CUR-005 |
 | R13 | Wartość deala niezgodna z ofertą (automatyczna zmiana, nadpisanie z n8n, wersja nieaktywna) | Średni | Wysoki | P0 | Powiązania, Wersje | TC-DEAL-002, TC-DEAL-016, TC-VER-007, TC-VER-010 |
@@ -1460,7 +1460,7 @@ Konwencja dat: data końca wliczona; czas trwania = koniec − start + 1 w dniac
 
 ---
 
-## 12. Scenariusze testowe: Waluty (TC-CUR) — 13 TC
+## 12. Scenariusze testowe: Waluty (TC-CUR) — 14 TC
 
 Kalkulacja jednowalutowa (MVP) i wielowalutowa (v1), waluta bazowa, kursy wymiany, zaokrąglenie per waluta, zmiana waluty deala.
 
@@ -1641,18 +1641,22 @@ Waluty i kursy pochodzą z modułu Waluty platformy (lista walut aktywnych, walu
   - Krok 7: 00:59:59 → 2026-10-26 (4.3350); 01:00:00 → 2026-10-27 (4.3400); wysłanie o 00:59:59 → kurs z 2026-10-27 (4.3400)
   - Test regresyjny dla opisanego w specyfikacji błędu daty (zapis o północy czasu warszawskiego, wyszukiwanie o północy UTC)
 
-#### TC-CUR-012: Waluta bez kursu w tabeli NBP — `FX_RATE_UNAVAILABLE`
+#### TC-CUR-012: Waluta bez kursu w żadnej tabeli NBP jako waluta oferty — 422
 
 - **Priorytet**: P1 | **Etap**: MVP | **Poziom**: Integration + API
-- **Warunki wstępne**: Waluta bazowa PLN; CNH aktywna w module Waluty; CNH nie występuje w żadnej tabeli NBP (A, B, C); w tabeli kursów brak kursu CNH; kalkulacja robocza w CNH
+- **Warunki wstępne**: Waluta bazowa PLN; CNH i CNY aktywne w module Waluty; CNH nie występuje w żadnej tabeli NBP (A, B, C), CNY występuje w tabeli A; deal D-CNH z walutą CNH; kalkulacja robocza K-CNH w CNH utworzona przed wdrożeniem walidacji (dane przez `pg`)
 - **Kroki**:
-  1. Wyślij wersję bez kursu ręcznego
-  2. Otwórz prognozę i sumę inwestycji z tą kalkulacją
-  3. Ustaw kurs ręczny 0.5400 (kurs przykładowy) z powodem i wyślij
+  1. Utwórz kalkulację bez deala w walucie CNH
+  2. Podepnij nową kalkulację do deala D-CNH
+  3. Ustaw kurs ręczny 0.5400 (kurs przykładowy) w K-CNH i wyślij wersję
+  4. Utwórz kalkulację bez deala w walucie CNY
+  5. Sprawdź listę walut do wyboru w kalkulacji
 - **Oczekiwane wyniki**:
-  - Krok 1: 422 `FX_RATE_UNAVAILABLE` z prośbą o kurs ręczny; brak kursu zgadywanego, brak kursu krzyżowego, brak użycia kursów kupna/sprzedaży z innej tabeli
-  - Krok 2: kwota widoczna w CNH z oznaczeniem „brak kursu”, bez przeliczenia na PLN
-  - Krok 3: wysłanie przechodzi; zamrożony obraz ze źródłem „ręczny”
+  - Kroki 1–3: 422 z kodem błędu waluty bez źródła kursu (kod proponowany) i czytelnym komunikatem: „Waluta CNH nie ma kursu w tabeli A NBP i nie może być walutą oferty ani pozycji — wybierz inną walutę”; nic nie zapisane, K-CNH pozostaje robocza bez zamrożonego obrazu
+  - Krok 3: kurs ręczny nie odblokowuje waluty bez źródła kursu; brak kursu zgadywanego, krzyżowego i kursów kupna/sprzedaży z innej tabeli
+  - Krok 1: błąd waluty bez źródła kursu różni się od błędu nieaktywnej waluty (CNH jest aktywna) i od błędu chwilowego braku kursu
+  - Krok 4: 201 — CNY przechodzi walidację (jest w tabeli A); bez kursu z dnia wysłania i bez kursu ręcznego wysłanie kończy się błędem chwilowego braku kursu, nie błędem waluty bez źródła kursu
+  - Krok 5: CNY i CNH nadal aktywne w module Waluty (nic nie dezaktywowane); CNH oznaczona jako niedostępna w wyborze (propozycja)
 
 #### TC-CUR-013: Waluty per pozycja — suma w walucie kalkulacji
 
@@ -1668,6 +1672,20 @@ Waluty i kursy pochodzą z modułu Waluty platformy (lista walut aktywnych, walu
   - Krok 2: 422 z kodem błędu nieaktywnej waluty
   - Krok 3: zamrożony obraz zawiera osobny wpis kursu dla każdej pary (EUR → PLN, USD → PLN) z rodzajem kursu, źródłem i datą tabeli; pozycje PLN bez kursu
   - Krok 4: zmiana dotyczy tylko nowej rewizji i tylko jednej pary
+
+#### TC-CUR-014: Waluta pozycji bez kursu w żadnej tabeli NBP — 422
+
+- **Priorytet**: P1 | **Etap**: v1 | **Poziom**: Integration + API
+- **Warunki wstępne**: Waluta bazowa PLN; kalkulacja robocza w PLN z pozycją 1000 EUR; CNH aktywna w module Waluty, poza tabelami A, B i C NBP; tabela A z dnia wysłania: EUR 4.2500 (kurs przykładowy)
+- **Kroki**:
+  1. Dodaj pozycję 500 CNH
+  2. Zmień walutę istniejącej pozycji EUR na CNH
+  3. Ustaw kurs ręczny pary CNH → PLN 0.5400 (kurs przykładowy) i powtórz krok 1
+  4. Wyślij wersję
+- **Oczekiwane wyniki**:
+  - Kroki 1–3: 422 z kodem błędu waluty bez źródła kursu (kod proponowany) i czytelnym komunikatem wskazującym CNH i pozycję: „Waluta CNH nie ma kursu w tabeli A NBP i nie może być walutą oferty ani pozycji — wybierz inną walutę”; pozycja nie zapisana albo bez zmian
+  - Krok 2: pozycja zostaje w EUR; suma kalkulacji bez zmian (4250.00 PLN)
+  - Krok 4: wysłanie przechodzi; zamrożony obraz zawiera tylko parę EUR → PLN, brak wpisu dla CNH
 
 ---
 
@@ -2273,7 +2291,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 | **Budżety wydajności** | Import < 10s, Gantt render < 3s, API < 500ms (TC-PERF-*) | TBD |
 | **Budżety bezpieczeństwa plików** | Zip bomb odrzucony < 5s, RAM import < 1 GB, brak SSRF (TC-SEC-001 do TC-SEC-006) | TBD |
 | **Arytmetyka finansowa** | Zaokrąglenia half-up do 2 miejsc (1,005 → 1,01), suma z pozycji zaokrąglonych, ustawienie per organizacja; marża = (cena − koszt) / cena; jednostki ze słownika, w MVP jednostka pozycji = jednostka ceny (TC-COST-*) | TBD |
-| **Poprawność walutowa** | MVP: waluta deala, waluta bazowa bez kursu, kurs z tabeli A NBP zamrożony, liczba miejsc z modułu Waluty, kurs ręczny tylko w wersji roboczej i poza tabelą kursów, błędy braku waluty bazowej, nieaktywnej waluty i braku kursu, kurs znajdowany dla daty zapisu (TC-CUR-001 do TC-CUR-012); v1: waluty per pozycja (TC-CUR-013) | TBD |
+| **Poprawność walutowa** | MVP: waluta deala, waluta bazowa bez kursu, kurs z tabeli A NBP zamrożony, liczba miejsc z modułu Waluty, kurs ręczny tylko w wersji roboczej i poza tabelą kursów, błędy braku waluty bazowej, nieaktywnej waluty i braku kursu, waluta bez kursu w żadnej tabeli odrzucana (TC-CUR-012), kurs znajdowany dla daty zapisu (TC-CUR-001 do TC-CUR-012); v1: waluty per pozycja i waluta pozycji bez kursu odrzucana (TC-CUR-013, TC-CUR-014) | TBD |
 | **Edycja równoległa** | Optimistic locking 409 + brak utraty danych (TC-CONC-001 do TC-CONC-005) | TBD |
 | **Integracja z dealami/inwestycjami** | Wartość deala tylko jawnym przyciskiem z aktywnej wersji, z historią i cofnięciem (TC-VER-007, TC-DEAL-002); wartość z kalkulacji nie jest nadpisywana przez n8n (TC-DEAL-016); oferta główna, pierwsza oferta główna (TC-DEAL-004, TC-DEAL-011) | TBD |
 | **Wysłanie oferty** | Blokady z kodem i komunikatem, ostrzeżenia z potwierdzeniem, brak deala nie blokuje; blokada ujemnej marży dla roli bez wglądu w marżę bez ujawnienia znaku (TC-VER-008, TC-VER-009) | TBD |
@@ -2386,9 +2404,8 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 
 ### Nowe wnioski (rev 7)
 
-26. **Aktywne waluty bez kursu w żadnej tabeli NBP** (TC-CUR-012) — **otwarte** (pytanie do Marka, raport Koordynatora 2026-10-23 §5 pkt 2)
-    - **Otwarte**: Dezaktywować takie waluty (dziś CNH), zostawić je z kursem ręcznym czy dodać inne źródło kursu?
-    - **Do czasu decyzji**: wysłanie bez kursu ręcznego kończy się błędem braku kursu (TC-CUR-012).
+26. **Aktywne waluty bez kursu w żadnej tabeli NBP** (TC-CUR-012, TC-CUR-014) — ✅ **ROZSTRZYGNIĘTE (Koordynator 2026-10-23)**
+    - **Decyzja**: waluty zostają aktywne (CNY i CNH); waluta bez kursu w żadnej tabeli NBP nie może być walutą oferty ani pozycji — 422 z czytelnym komunikatem, kurs ręczny tego nie zmienia; CNY działa po włączeniu pobierania kursów z tabeli A.
 
 27. **Kurs zapisany dla daty nie jest znajdowany dla tej samej daty** (TC-CUR-011) — opisane w specyfikacji kalkulacji (ryzyko daty kursu; konwencja daty wysłania w Europe/Warsaw; wyszukiwanie modułu Waluty o 00:00–02:00 latem i 00:00–01:00 zimą widzi dzień poprzedni); scenariusz regresyjny P0.
 
@@ -2397,7 +2414,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 ## 23. Podsumowanie
 
 **Dokument**: Niezależny plan testów — spec only
-**Liczba scenariuszy**: 141 (rev 7: +6; rev 6: +1; rev 5: +25; rev 2–4: 109; rev 1: 72)
+**Liczba scenariuszy**: 142 (runda rev 8h: +1; rev 7: +6; rev 6: +1; rev 5: +25; rev 2–4: 109; rev 1: 72)
 **Liczba wniosków do speki**: 27 (15 oryginalnych + 5 z rev 2 + 5 z rev 5 + 2 z rev 7)
 **Status**: SPEC ONLY — bez kodu, bez testów wykonywalnych
 
@@ -2410,7 +2427,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 
 ## Załącznik: Traceability TC → D
 
-Źródło: `.ai/decisions.md`@b544719 (develop_OM_CRM) — 73 aktywne decyzje, w tym D75–D82 i poprawiona D71. D83: `.ai/decisions.md`@3f00542 (develop_OM_CRM, merge PR #14), rozstrzygnięte przez Koordynatora 2026-10-23. D84–D94: `.ai/decisions.md` z tego PR (Rozstrzygnięte przez Koordynatora 2026-10-23, audyt om-overlap-audit §3–4); razem 85 aktywnych decyzji w zakresie D1–D94. N/A = decyzja bez zachowania testowanego w tym planie.
+Źródło: `.ai/decisions.md`@b544719 (develop_OM_CRM) — 73 aktywne decyzje, w tym D75–D82 i poprawiona D71. D83: `.ai/decisions.md`@3f00542 (develop_OM_CRM, merge PR #14), rozstrzygnięte przez Koordynatora 2026-10-23. D84–D94: `.ai/decisions.md`@0f0c6aa (develop_OM_CRM, merge PR #16; Rozstrzygnięte przez Koordynatora 2026-10-23, audyt om-overlap-audit §3–4). D95–D97: `.ai/decisions.md` z tego PR (Rozstrzygnięte przez Koordynatora 2026-10-23; obowiązują po „implementujemy” od Marka); razem 88 aktywnych decyzji w zakresie D1–D97. N/A = decyzja bez zachowania testowanego w tym planie.
 
 | D | Treść skrócona | TC | Uwagi |
 |---|---|---|---|
@@ -2488,7 +2505,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 | D81 | Wartość z „Zastosuj do deala” wygrywa; n8n tylko pola przetargowe | TC-DEAL-016 | |
 | D82 | Gantt własny, zewnętrzna biblioteka tylko PoC w v1 | N/A | zależności, nie zachowanie; scenariusze Gantta bez nazwy biblioteki |
 | D83 | Rozdzielenie w v1; wybór oferty głównej, domyślnie oryginał | TC-DEAL-010 | etap v1; źródło: `.ai/decisions.md`@3f00542 (Rozstrzygnięte przez Koordynatora 2026-10-23) |
-| D84 | Waluty z modułu Waluty; MVP waluta deala, v1 waluta per pozycja | TC-CUR-001, TC-CUR-004, TC-CUR-013 | v1: TC-CUR-013 |
+| D84 | Waluty z modułu Waluty; MVP waluta deala, v1 waluta per pozycja | TC-CUR-001, TC-CUR-004, TC-CUR-013, TC-CUR-014 | v1: TC-CUR-013, TC-CUR-014 |
 | D85 | Tabela A na żądanie przy wysłaniu; kurs ręczny tylko w wersji roboczej, poza tabelą kursów | TC-CUR-002, TC-CUR-006, TC-CUR-007, TC-CUR-011, TC-CUR-012 | |
 | D86 | Waluta bazowa organizacji; brak → 422 | TC-CUR-001, TC-CUR-008 | |
 | D87 | Liczba miejsc z modułu Waluty; waluta aktywna | TC-CUR-003, TC-CUR-009, TC-CUR-010 | kod błędu nieaktywnej waluty — propozycja |
@@ -2499,6 +2516,9 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 | D92 | PDF z plikiem w załącznikach | TC-CUR-005, TC-VER-002 | |
 | D93 | Bez obiegu akceptacji w MVP | N/A | kandydat v2, brak zachowania w MVP |
 | D94 | Zapisane widoki i harmonogram zadań opcjonalne w v1 | N/A | opcjonalne komponenty platformy |
+| D95 | Waluta bez kursu w żadnej tabeli NBP nie może być walutą oferty ani pozycji; waluty zostają aktywne | TC-CUR-012, TC-CUR-014 | v1: TC-CUR-014; kod błędu — propozycja |
+| D96 | Jedno źródło kursu w sumie deali (wyłączenie dostawcy tabeli C); błąd daty do upstream jako zgłoszenie | TC-CUR-011 | konfiguracja etapu kodu; suma deali z jednego źródła — TC-CUR-011 |
+| D97 | Poprawka platformy dla jednej waluty bazowej pobrana z pierwszym PR modułu | N/A | zależność etapu kodu, brak zachowania modułu |
 
 **Decyzje zastąpione — nie testujemy:**
 - D3 — zastąpione przez D4
@@ -2513,6 +2533,14 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 ---
 
 ## Changelog
+
+### Rev 8 — 2026-10-23 (runda rev 8h)
+
+- TC-CUR-012 przepisany: waluta bez kursu w żadnej tabeli NBP (CNH) jako waluta oferty — 422 przy utworzeniu, podpięciu do deala i wysłaniu; kurs ręczny nie odblokowuje; CNY przechodzi walidację; waluty zostają aktywne
+- Nowy TC-CUR-014 (v1): waluta pozycji bez kursu w żadnej tabeli NBP — 422 z czytelnym komunikatem
+- Wniosek 26 zamknięty (Koordynator 2026-10-23)
+- Annex: D95–D97 (D95 → TC-CUR-012, TC-CUR-014; D96 → TC-CUR-011; D97 N/A); 88 aktywnych decyzji w zakresie D1–D97
+- Liczba scenariuszy: 141 → 142 (TC-CUR: 13 → 14)
 
 ### Rev 8 — 2026-10-23
 
