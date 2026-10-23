@@ -6,40 +6,41 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-19 |
-| **Rewizja** | 2026-10-20 (rev 8a — P0 architecture, MVP cut, OM sections, honest estimate; poprzednio v7 2026-10-19) |
+| **Rewizja** | 2026-10-23 (rev 8b — spójność, review P1/P2, decyzje D47–D69 i P11, wnioski z planu testów; poprzednio rev 8a 2026-10-20) |
 | **Moduł** | `project_costing` (`apps/mercato/src/modules/project_costing`) |
 | **Nisza v1** | Prefabrykacja żelbetowa |
 | **Docelowo** | Cała branża budowlana (multi-segment) |
 | **Zależności upstream** | `customers`, `dictionaries`, `dashboards`, `currencies`, `attachments`, `notifications`, `directory`, `configs` (ModuleConfigService), `audit_logs`, `query_index`, `progress` (ProgressJob), `feature_toggles` |
 | **Moduł powiązany** | `project_schedule` (spec: `.ai/specs/2026-10-19-project-schedule.md`) — **opcjonalny konsument**: zależy od `project_costing` i rejestruje swój provider `ScheduleSource` w DI. `project_costing` = moduł bazowy, nigdy nie importuje `project_schedule` (rev 8a, Kod P0-1) |
-| **Wyłączone upstream** | `sales`, `workflows`, `catalog` (v1), `business_rules` |
+| **Wyłączone upstream** | `sales`, `workflows`, `catalog`, `business_rules` (rev 8b: przeliczniki jednostek `catalog` są per produkt — nie używamy, §2.4) |
 
 ---
 
 ## TLDR
 
 - **Co:** moduł aplikacji `project_costing` (fork, `apps/mercato/src/modules`, zero zmian w `packages/core`): kalkulator kosztów i ofert „jak Excel” dla firm budowlanych (v1: prefabrykacja żelbetowa). Kalkulacja może istnieć bez deala.
-- **MVP (rev 8a, ~40 d):** siatka kosztów (sekcje → pozycje), import XLSX (ProgressJob + worker), tryby ceny A (suma linii) i C (koszt × (1 + narzut)), prosty cennik firmy, mark-sent ze snapshotem + PDF oferty, apply-to-deal (jawna akcja użytkownika), widoczność przez RBAC (`acl.ts`), partie produkcji w kalkulacji z prognozą 6 mies. **Bez Gantta, bez formuł, bez eksportu XLSX.**
+- **MVP (rev 8b):** siatka kosztów (sekcje → pozycje, linie `note`), import XLSX (ProgressJob + worker), tryby ceny A (suma linii) i C (koszt × (1 + narzut)), prosty cennik firmy z akcją „Przelicz z cennika” (D57), mark-sent ze snapshotem + PDF oferty (pdf-lib) z walidacją D58, apply-to-deal z wersji aktywnej (jawny przycisk, D59/D66), widoczność przez RBAC (`acl.ts`), minimalne `pc_investments` + `pc_deal_offer_roles` (D50/D51/D65), partie produkcji ręczne i z importu XLSX (`xlsx_import`, D50/D56) z prognozą 6 mies. **Bez Gantta, bez formuł, bez eksportu XLSX.** Zakres faz: §14 (listy funkcji i encji, bez estymat — P11).
 - **Architektura:** `project_costing` = moduł bazowy. Posiada interfejs `ScheduleSource` i rejestr w DI (Awilix). Opcjonalny `project_schedule` zależy od costing i rejestruje swój provider. Zero HTTP między modułami; dane przez serwisy DI, eventy (payload = same ID), FK-id + snapshot, widget + enricher. Zapisy przez komendy (undo, `audit_logs`), CRUD przez `makeCrudRoute` + indexer.
 - **Oferta główna/alternatywna:** własna encja-rozszerzenie `pc_deal_offer_roles` (deklaracja w `data/extensions.ts`), partial unique na `primary`, przełączenie jedną komendą w jednej transakcji. Zero zapisów do pól/tabel `customers` (jedyny wyjątek: jawna komenda `customers.deals.update` w apply-to-deal, uruchamiana przez użytkownika).
 - **Ukryta marża = ukryty koszt** dla roli bez `project_costing.view_margin`; reguła obowiązuje we wszystkich kanałach (API, query_index, search, audit, eventy, eksport, PDF, compare, analityka, snapshot).
 - **Firma = organizacja OM.** Ustawienia per organizacja przez `ModuleConfigService` (`module_configs`), bez własnej tabeli `pc_settings`.
-- **Inwestycja = jedna encja `pc_investments`** (v1); `klin:project` wygaszamy przez jednorazowy, opcjonalny import.
-- **Wycena:** costing 101 d (MVP 40 / v1 45 / v2 16), oba moduły 151 d — patrz §14.
+- **Inwestycja = jedna encja `pc_investments`** (D63, kanoniczna; MVP minimalnie: ręczne wskazanie z podpowiedzią po kodzie; v1: identyfikatory zewnętrzne, dopasowanie, merge). Inwestycje zakłada handlowiec (n8n ich nie tworzy). `klin:project` importujemy po `--dry-run` i akceptacji raportu, potem wyłączamy.
+- **Zaokrąglenia (D62/D16):** half-up do 2 miejsc per linia; sumy = suma zaokrąglonych linii; konfigurowalne per organizacja (`rounding.*`).
+- **Zakres faz:** §14 — MVP/v1/v2 jako listy funkcji i encji; estymaty w dniach usunięte (P11).
 
 ---
 
 ## Streszczenie
 
-Moduł `project_costing` dostarcza kalkulator kosztów ofertowych przypiętych do Deali. Kluczowe cechy rev 5:
+Moduł `project_costing` dostarcza kalkulator kosztów ofertowych przypiętych do Deali. Kluczowe cechy (stan rev 8b):
 - **Oferta = zamrożony snapshot** wersji kalkulacji wysłanej klientowi (renderowane linie + sumy + proweniencja cen w momencie wysyłki).
-- **Typy linii**: `section` / `item` / `note` / `subtotal` z hierarchią (section → items) i dziedziczonym narzutem.
-- **Cykl życia wersji**: `draft` → `sent` → `accepted`/`rejected`/`superseded`; numeracja `K/2026/001-R1`.
-- **Layered price list**: wielopoziomowe reguły cennikowe (zakres: global/segment/kategoria/pozycja, baza: koszt/inna lista/fixed).
-- **Koszty rzeczywiste** (`CostEntry`): wpisy kosztu do budżetu vs realizacja per kategoria.
+- **Typy linii**: `section` / `item` / `note` z hierarchią (sekcja → pozycje, jeden poziom) i dziedziczonym narzutem; sumy sekcji renderowane automatycznie (rev 8b: `subtotal` usunięty).
+- **Cykl życia wersji**: `draft` → `sent` → `accepted`/`rejected`/`superseded`; numeracja `K/2026/001-R1` z sekwencji Postgresa per organizacja; „Nowa rewizja” jako jedna akcja (D57).
+- **Layered price list** (v1): wielopoziomowe reguły cennikowe (zakres: global/segment/kategoria/pozycja, baza: koszt/inna lista/fixed).
+- **Koszty rzeczywiste** (`CostEntry`, v1): wpisy kosztu do budżetu vs realizacja per kategoria.
 - **Widoczność marży**: domyślnie UKRYTA; wyłącznie przez feature'y RBAC (`acl.ts`); ukryta marża ⇒ ukryty koszt (rev 8a).
 
-> Rev 8a: zakres MVP/v1/v2 — §14. Pojęcia „projekt” (`klin:project`) i `cf_offer_role` zostały usunięte z modelu (§3.12, §10.4).
+> Zakres MVP/v1/v2 — §14. Pojęcia „projekt” (`klin:project`) i `cf_offer_role` zostały usunięte z modelu (§3.12, §10.4; D63, D64).
 
 ---
 
@@ -77,22 +78,45 @@ Reguły (źródło: `packages/core/AGENTS.md` § Cross-Module Coupling, l.240–
 
 ### 0.3 Komendy (write path)
 
-Wszystkie zapisy domenowe przez komendy (`packages/core/AGENTS.md` l.8–13): audyt w `audit_logs` (`action_logs`), undo, cache, eventy, indeks. Trasy CRUD przez `makeCrudRoute` z `indexer: { entityType, buildUpsertPayload }` i `openApi`; trasy akcji (mark-sent, apply-to-deal, set-primary, recalc) jako własne trasy wywołujące komendy, przez mutation guard. Komendy MVP: `project_costing.calculations.create|update|delete|save_lines|mark_sent|attach_deal|detach_deal|apply_to_deal|refresh_schedule_totals`, `project_costing.price_catalog.*`, `project_costing.cost_categories.*`, `project_costing.element_types.*`, `project_costing.production_batches.*`, `project_costing.import.commit` (z workera). v1: `…offer_roles.assign|set_primary`, `…investments.*`, `…calculations.unlock|duplicate|activate|mark_accepted|mark_rejected`, `…cost_entries.*`. Szczegóły write path (lock na nagłówku, minimalny zapis): rev 8b (Kod p6, p8).
+Wszystkie zapisy domenowe przez komendy (`packages/core/AGENTS.md` l.8–13): audyt w `audit_logs` (`action_logs`), undo, cache, eventy, indeks. Trasy CRUD przez `makeCrudRoute` z `indexer: { entityType, buildUpsertPayload }` i `openApi`; trasy akcji (mark-sent, apply-to-deal, set-primary, recalc) jako własne trasy wywołujące komendy, przez mutation guard. Komendy MVP: `project_costing.calculations.create|update|delete|save_lines|recalc|recalc_from_catalog|mark_sent|activate|attach_deal|detach_deal|attach_investment|detach_investment|apply_to_deal|refresh_schedule_totals`, `project_costing.price_catalog.*`, `project_costing.cost_categories.*`, `project_costing.element_types.*`, `project_costing.production_batches.*`, `project_costing.schedule_import.commit` (z workera), `project_costing.import.commit` (z workera), `project_costing.investments.create|update`, `project_costing.offer_roles.assign|set_primary`. v1: `…investments.merge`, `…investment_identifiers.*`, `…calculations.new_revision|mark_accepted|mark_rejected`, `…cost_entries.*`, `…price_list_rules.*`, `…segments.*`, `…templates.*`.
+
+**Write path (rev 8b, Kod p6/p8):**
+- **Jedna czysta funkcja `calculate(input, settings) → { lines, totals, issues }`** w `lib/calculate.ts`, współdzielona przez klienta (siatka liczy na żywo) i serwer (komendy). Wejście = pola wejściowe linii + nagłówka + ustawienia `rounding.*`; wyjście = pola pochodne linii (`line_cost`, `line_price`, `line_margin`, `line_margin_pct`, `line_full_cost`, w trybie B `unit_price` pozycji bez override), sumy nagłówka i lista problemów (ujemne ceny, ujemna marża, pusta sekcja — §3.8).
+- **Minimalny zapis.** Autosave wysyła tylko zmienione wiersze (pola wejściowe) do `POST .../calculation-lines/batch` → komenda `calculations.save_lines`: w jednej transakcji zapisuje wejścia zmienionych linii, przelicza `calculate()` po stronie serwera i zapisuje **sumy w nagłówku**. Pola pochodne linii nie są przechowywane w wierszach (liczone przy odczycie tą samą funkcją); zamrażane są w `pc_offer_snapshots` przy mark-sent. Tryb B nie przepisuje wszystkich wierszy.
+- **Lock na nagłówku.** Komenda przyjmuje `updatedAt` nagłówka (optimistic locking); konflikt → 409 i odświeżenie siatki. W transakcji `SELECT … FOR UPDATE` tylko na wierszu `pc_calculations`; linie są sub-resource bez osobnego locka. Bez `SERIALIZABLE`.
+- **Jeden event na zapis** (`project_costing.calculation.updated`, payload z ID), indeksowany jest tylko nagłówek (bez kwot, §4.3). Bez eventu i broadcastu per linia.
+- **Audyt (`audit_logs`).** Każda komenda zapisuje: aktora (`user_id`), czas, `command_id`, ID encji i powiązań (kalkulacja, deal, inwestycja), `changed_fields` oraz wartości old/new pól niewrażliwych (ilość, jednostka, etykieta, tryb ceny, status wersji, rola oferty, powiązania). Dla pól kosztu, narzutu i marży (`unit_cost`, `markup_pct`, `markup_rate`, `overhead_rate`, `target_margin_rate`) zapisujemy tylko nazwę pola w `changed_fields`, bez wartości (§4.3); historia ich wartości per wersja jest w `pc_offer_snapshots`. Ceny sprzedaży (`unit_price`) mają old/new.
+- **Benchmark:** `calculate()` i `save_lines` na 10 000 liniach w testach unit/integracyjnych (R1).
 
 ### 0.4 Eventy
 
-`project_costing.*` (§10.1). **Payload = wyłącznie identyfikatory** (`id`, `organizationId`, `tenantId`, `dealId?`, `investmentId?`) — bez kosztów, cen ani marży; `clientBroadcast` tylko z ID (UI dociąga dane przez API z redakcją). Subskrypcje cudzych eventów: `customers.deal.won`, `customers.deal.lost`, `customers.deal.updated`, `customers.deal.deleted` (persistent; szczegóły statusów: rev 8b, Kod p5).
+`project_costing.*` (§10.1). **Payload = wyłącznie identyfikatory** (`id`, `organizationId`, `tenantId`, `dealId?`, `investmentId?`) — bez kosztów, cen ani marży; `clientBroadcast` tylko z ID (UI dociąga dane przez API z redakcją). Subskrypcje cudzych eventów: `customers.deal.won`, `customers.deal.lost`, `customers.deal.updated`, `customers.deal.deleted` (persistent; mapowanie statusów — §0.6).
 
 ### 0.5 Granice i konfiguracja
 
-| Temat | Rozstrzygnięcie rev 8a |
+| Temat | Rozstrzygnięcie (rev 8a/8b) |
 |---|---|
 | Firma | = organizacja OM (D15). Ustawienia i włączniki funkcji per organizacja. |
 | Ustawienia | `ModuleConfigService` (`packages/core/src/modules/configs/lib/module-config-service.ts`), tabela `module_configs`; brak `pc_settings` (§2.2). |
 | Widoczność kosztów/marży | wyłącznie RBAC (`acl.ts`) — §4, §9. Ustawienie „per firma” = domyślne przypisanie feature'ów do ról (`setup.ts` `defaultRoleFeatures` + edycja ról w organizacji). |
 | Włączenie harmonogramu | build (`apps/mercato/src/modules.ts`); włącznik per organizacja = `schedule.enabled` w ModuleConfigService (`module_configs`) + feature'y ACL `project_schedule.*` + blokady w menu, zakładce deala i API; `feature_toggles` wyłącznie jako globalny kill-switch per tenant — schedule §1.0. |
-| Inwestycja | jedna encja `pc_investments` (v1); `klin:project` wygaszany (§10.4). |
-| Oferta główna | `pc_deal_offer_roles` (§2.2, §3.12). |
+| Inwestycja | jedna encja `pc_investments` (D63; minimalna w MVP — D50); `klin:project` importowany i wyłączany (§10.4). |
+| Oferta główna | `pc_deal_offer_roles` (§2.2, §3.12; MVP — D50). |
+| Ustawienia per organizacja | klucz `org:{id}:settings` to świadome obejście (D69), bo `ModuleConfigService` ignoruje `organizationId` przy odczycie (R12). |
+
+### 0.6 Statusy deala w OM (rev 8b, Kod p5)
+
+Zweryfikowano w kodzie (`packages/core/src/modules/customers/data/entities.ts`, `CustomerDeal`): `status` (domyślnie `'open'`), `pipeline_stage`/`pipeline_stage_id`, `probability`, `value_amount`, `value_currency`, `closure_outcome` (text NULL), archiwum = `deleted_at`. Eventy (`customers/events.ts`): `customers.deal.created|updated|deleted|won|lost`.
+
+| Stan w costingu | Źródło w OM | Użycie |
+|---|---|---|
+| otwarty | `closure_outcome IS NULL` i `deleted_at IS NULL` | prognoza ważona (§3.11), suma inwestycji |
+| wygrany | `closure_outcome = 'won'` (event `customers.deal.won`) | prognoza z prawdopodobieństwem 100%; marża po zamknięciu (D49); harmonogram wykonawczy (schedule §5, D24) |
+| przegrany | `closure_outcome = 'lost'` (event `customers.deal.lost`) | poza prognozą i sumą inwestycji; marża po zamknięciu (D49) |
+| usunięty/zarchiwizowany | `deleted_at IS NOT NULL` (event `customers.deal.deleted`) | poza prognozą i sumą; kalkulacja zostaje (FK-id bez constraintu) |
+| ponownie otwarty | `closure_outcome` wraca do NULL (event `customers.deal.updated`) | wraca do prognozy; zachowanie harmonogramu wykonawczego — pytanie otwarte Q9 (§16) |
+
+Subscribery (`persistent: true`) zapisują te pola w `pc_calculations.deal_snapshot`. Etapy lejka (`pipeline_stage`) to 9 etapów z D33: `new`, `result_lead`, `qualify`, `contact`, `offer`, `won`, `lost`, `rejected`, `cancelled`; n8n ustawia etap, ale nie zmienia `closure_outcome` (D42). Costing opiera logikę wyłącznie na `closure_outcome` i `deleted_at`; etap służy tylko do grupowania prognozy (§11).
 
 
 ---
@@ -148,11 +172,14 @@ Klucze (rev 8a):
 | `calculation_scope` | `"all"` | `all` \| `own` (§4.4) |
 | `pdf.validity_days` | `30` | |
 | `pdf.footer_text`, `pdf.contact_email`, `pdf.contact_phone` | `""` | |
-| `pdf.company_address`, `pdf.company_nip`, `pdf.company_bank_account` | — | brak w `Organization` (D27: dane do PDF z profilu firmy) |
+| `pdf.company_address`, `pdf.company_nip`, `pdf.company_bank_account` | — | brak w `Organization` (D60: dane do PDF z profilu firmy) |
 | `schedule_source` | `"calculation_embedded"` | §7a.3 |
 | `schedule.enabled` | `false` | włącznik modułu harmonogramu per organizacja (schedule §1.0); `project_schedule` czyta go przez `projectCostingSettings` |
+| `rounding.mode` | `"half_up"` | rev 8b (D62/D16): `half_up` (połówki od zera: 1,005 → 1,01; −1,005 → −1,01) \| `up` (zawsze od zera) \| `down` (obcięcie); per organizacja |
+| `rounding.line_decimals` | `2` | miejsca po przecinku dla wartości linii i sum (0–4); ceny jednostkowe zawsze z 4 miejscami |
+| `investments.trgm_threshold` | `0.5` | v1 — próg podpowiedzi pg_trgm (§3.12) |
 
-**Usunięte klucze** (dublowały RBAC — Kod p4/p7, decyzja Koordynatora (e)): `visibility.costs_visible_features`, `visibility.margin_visible_features`, `visibility.prices_visible_features`, `visibility.margin_visible_by_default`, `visibility.margin_visible_after_deal_close` (→ feature `project_costing.view_margin_after_close`, §9). Zaokrąglenia per firma (D16) dochodzą w rev 8b jako klucz w tej samej strukturze.
+**Usunięte klucze** (dublowały RBAC — Kod p4/p7, decyzja Koordynatora (e)): `visibility.costs_visible_features`, `visibility.margin_visible_features`, `visibility.prices_visible_features`, `visibility.margin_visible_by_default`, `visibility.margin_visible_after_deal_close` (→ feature `project_costing.view_margin_after_close`, §9). Zaokrąglenia per organizacja (D16/D62) = klucze `rounding.*` powyżej (rev 8b). Waluty inne niż PLN i zaokrąglenie per waluta (ISO 4217) — pytanie otwarte Q7 (§16).
 
 #### `pc_cost_categories` — kategorie kosztów
 
@@ -221,10 +248,7 @@ Analogiczne do kalkulacji: `segment_code`, linie z `line_type`, `parent_line_id`
 | `organization_id` | `uuid` NOT NULL | |
 | `tenant_id` | `uuid` NOT NULL | |
 | `deal_id` | `uuid` NULL | FK-id → `customer_deals.id`; NULL = kalkulacja standalone (wycena wewnętrzna, przetarg przed wyborem GC) |
-| `investment_id` | `uuid` NULL | FK-id → `pc_investments.id`; NULL = nieskojarzono z inwestycją; dołączany przez `attach-investment` lub automatycznie przy match |
-| `investment_name` | `text` NULL | nazwa inwestycji (wolny tekst, zachowany dla fuzzy-match i migracji) |
-| `investment_location` | `text` NULL | lokalizacja inwestycji (wolny tekst) |
-| `investment_key` | `text` NULL | normalizowany klucz: `lower(trim(investment_name)) \|\| '\|' \|\| lower(trim(investment_location))`; aktualizowany przez serwis |
+| `investment_id` | `uuid` NULL | FK → `pc_investments.id`; NULL = brak inwestycji; ustawiany komendą `attach_investment` (MVP: ręczny wybór z podpowiedzią po kodzie/nazwie). Rev 8b: nazwa, lokalizacja i `investment_key` żyją wyłącznie w `pc_investments` |
 | `segment_code` | `text` NULL | |
 | `base_code` | `text` NOT NULL | bazowy numer, np. `K/2026/001` |
 | `revision` | `int` NOT NULL DEFAULT 1 | numer rewizji; display = `base_code-R{revision}` |
@@ -233,27 +257,28 @@ Analogiczne do kalkulacji: `segment_code`, linie z `line_type`, `parent_line_id`
 | `is_active_version` | `bool` NOT NULL DEFAULT false | jedna true per deal (gdy `deal_id != NULL`); dla kalkulacji standalone: informacyjne |
 | `currency` | `char(3)` NOT NULL DEFAULT `'PLN'` | |
 | `price_mode` | `text` NOT NULL DEFAULT `'line_prices'` | `line_prices` \| `target_margin` \| `markup` |
-| `overhead_rate` | `numeric(6,4)` DEFAULT 0 | koszty pośrednie jako % kosztu |
-| `markup_rate` | `numeric(6,4)` NULL | tryb C / narzut na poziomie kalkulacji (dziedziczony przez sekcje/pozycje) |
-| `target_margin_rate` | `numeric(6,4)` NULL | tryb B |
-| `subtotal_cost` | `numeric(14,2)` NULL | SUM(item line_cost) |
+| `overhead_rate` | `numeric(6,4)` DEFAULT 0 | koszty pośrednie jako ułamek kosztu (0.10 = 10%); `CHECK (overhead_rate >= 0)` |
+| `markup_rate` | `numeric(6,4)` NULL | tryb C / narzut na poziomie kalkulacji (dziedziczony przez sekcje/pozycje); ułamek: 0.30 = cena × 1.30; `CHECK (markup_rate > -1)` |
+| `target_margin_rate` | `numeric(6,4)` NULL | tryb B; ułamek (0.25 = 25% marży od ceny); `CHECK (target_margin_rate >= 0 AND target_margin_rate < 1)` |
+| `subtotal_cost` | `numeric(14,2)` NULL | SUM(zaokrąglonych item line_cost); zapisywane przez `save_lines`/`recalc` |
 | `overhead_amount` | `numeric(14,2)` NULL | subtotal_cost × overhead_rate |
 | `full_cost` | `numeric(14,2)` NULL | subtotal_cost + overhead_amount |
 | `subtotal_price` | `numeric(14,2)` NULL | cena oferty |
 | `total_margin` | `numeric(14,2)` NULL | subtotal_price − full_cost |
 | `margin_rate` | `numeric(6,4)` NULL | total_margin / subtotal_price |
-| `total_quantity_m3` | `numeric(14,3)` NULL | z aktywnego `ScheduleSource` (§7a) |
-| `total_quantity_pcs` | `numeric(14,0)` NULL | z aktywnego `ScheduleSource` |
-| `production_start_at` | `date` NULL | z aktywnego `ScheduleSource` |
-| `production_end_at` | `date` NULL | z aktywnego `ScheduleSource` |
+| `total_quantity_m3` | `numeric(14,3)` NULL | cache przez `ScheduleSource` (§7a): komenda `refresh_schedule_totals` z kolejki z debounce (§7a.4) |
+| `total_quantity_pcs` | `numeric(14,0)` NULL | cache przez `ScheduleSource` (§7a), jw. |
+| `production_start_at` | `date` NULL | cache przez `ScheduleSource` (§7a), jw. |
+| `production_end_at` | `date` NULL | cache przez `ScheduleSource` (§7a), jw. |
+| `schedule_source_override` | `text` NULL | §7a.3; NULL = ustawienie organizacji |
 | `notes` | `text` NULL | |
 | `sent_at` | `timestamptz` NULL | |
 | `template_id` | `uuid` NULL | FK → `pc_calculation_templates.id` |
 | `created_by` | `uuid` NULL | |
-| `unlocked_by` | `uuid` NULL | |
-| `unlocked_at` | `timestamptz` NULL | |
-| `unlock_reason` | `text` NULL | (v1) kopia powodu; źródłem audytu jest metadana komendy `unlock` w `audit_logs` |
-| `deal_snapshot` | `jsonb` NULL | rev 8a: snapshot pól deala potrzebnych do odczytu (tytuł, waluta, prawdopodobieństwo, status/closure_outcome); odświeżany subscriberem `customers.deal.*`; bez HTTP |
+| `revision_created_by` | `uuid` NULL | (v1) autor „Nowej rewizji”, która utworzyła tę wersję (D57) |
+| `revision_created_at` | `timestamptz` NULL | (v1) |
+| `revision_reason` | `text` NULL | (v1) powód „Nowej rewizji” (D57); źródłem audytu jest metadana komendy `new_revision` w `audit_logs` |
+| `deal_snapshot` | `jsonb` NULL | snapshot pól deala: `title`, `value_currency`, `probability`, `status`, `closure_outcome`, `pipeline_stage`, `expected_close_at`, `owner_user_id`, `deleted` (§0.6); odświeżany subscriberami `customers.deal.*` (persistent); bez HTTP |
 | `created_at` | `timestamptz` | |
 | `updated_at` | `timestamptz` | |
 | `deleted_at` | `timestamptz` NULL | soft delete |
@@ -267,13 +292,15 @@ CREATE UNIQUE INDEX pc_calculations_active_unique
   WHERE is_active_version = true AND deal_id IS NOT NULL;
 ```
 
-Constraints: `CHECK (status IN ('draft','sent','superseded','accepted','rejected'))`, `CHECK (price_mode IN ('line_prices','target_margin','markup'))`.
+Constraints: `CHECK (status IN ('draft','sent','superseded','accepted','rejected'))`, `CHECK (price_mode IN ('line_prices','target_margin','markup'))`, `CHECK (target_margin_rate IS NULL OR (target_margin_rate >= 0 AND target_margin_rate < 1))`, `CHECK (overhead_rate >= 0)`, `CHECK (markup_rate IS NULL OR markup_rate > -1)`.
 
-**Numeracja**: serwis przypisuje `base_code = K/{YYYY}/{NNN}` (auto-increment per tenant). `revision` startuje od 1 i rośnie przy każdym odlokowaniu/duplikacji. Display code: `base_code-R{revision}` gdy `revision > 1`, sam `base_code` gdy `revision = 1`.
+**Numeracja** (rev 8b, Kod p18): `base_code = K/{YYYY}/{NNN}` z sekwencji Postgresa per (organizacja, tenant, rodzaj) według wzoru `SalesDocumentNumberGenerator` (`packages/core/src/modules/sales/services/salesDocumentNumberGenerator.ts`: rejestr sekwencji w tabeli, `nextval` na sekwencji dedykowanej). Własny rejestr `pc_document_sequences` (`organization_id`, `tenant_id`, `kind`, `sequence_name`); `kind = 'calculation:{YYYY}'` (numeracja od 1 w każdym roku). `NNN` = co najmniej 3 cyfry, bez górnego limitu. Luki w numeracji są dopuszczalne (sekwencje nie są transakcyjne). `revision` startuje od 1 i rośnie przy każdej „Nowej rewizji” (D57). Display code: `base_code-R{revision}` gdy `revision > 1`, sam `base_code` gdy `revision = 1`.
 
-**Kalkulacja standalone** (bez deala): `deal_id = NULL`. Może być tworzona i edytowana niezależnie. `apply-to-deal` i `forecast_value` działają wyłącznie gdy `deal_id != NULL`. Deal dołączany przez `attach-deal`; inwestycja (v1) przez `attach-investment`. (Rev 8a: `project_id`/`attach-project` usunięte — jedna encja inwestycji, §10.4.) Scope „own" dla standalone: `created_by = current_user_id`.
+**Kalkulacja standalone** (bez deala): `deal_id = NULL`. Może być tworzona i edytowana niezależnie. `apply-to-deal` działa wyłącznie gdy `deal_id != NULL`. Deal dołączany przez `attach-deal`; inwestycja przez `attach-investment` (MVP). (Rev 8a: `project_id`/`attach-project` usunięte — jedna encja inwestycji, §10.4.) Scope „own" dla standalone: `created_by = current_user_id`.
 
-**Indeks `investment_key`**: `CREATE INDEX pc_calculations_investment_key_trgm ON pc_calculations USING gin(investment_key gin_trgm_ops)` — wymaga rozszerzenia `pg_trgm`. Używany do wyszukiwania duplikatów inwestycji (§3.12).
+**Kalkulacja bez deala a prognoza (D61):** kalkulacja bez deala nie wchodzi do prognozy ważonej; jest pokazywana osobno (§3.11, §11).
+
+**Indeks `investment_key`** (rev 8b): tylko na `pc_investments` (§2.2 `pc_investments`); na `pc_calculations` zostaje wyłącznie FK `investment_id`.
 
 #### `pc_calculation_lines` — linie kalkulacji (z hierarchią i typami)
 
@@ -283,21 +310,17 @@ Constraints: `CHECK (status IN ('draft','sent','superseded','accepted','rejected
 | `calculation_id` | `uuid` NOT NULL | FK → `pc_calculations.id` |
 | `organization_id` | `uuid` NOT NULL | |
 | `tenant_id` | `uuid` NOT NULL | |
-| `parent_line_id` | `uuid` NULL | FK → `pc_calculation_lines.id`; NULL = linia główna |
-| `line_type` | `text` NOT NULL DEFAULT `'item'` | `section` \| `item` \| `note` \| `subtotal` |
+| `parent_line_id` | `uuid` NULL | FK → `pc_calculation_lines.id`; NULL = linia główna; MVP: rodzicem może być tylko `section`, a sekcja nie ma rodzica (jeden poziom, wymuszane w serwisie) |
+| `line_type` | `text` NOT NULL DEFAULT `'item'` | `section` \| `item` \| `note` |
 | `cost_category_id` | `uuid` NULL | FK → `pc_cost_categories.id`; wymagane dla `item` |
 | `element_type_id` | `uuid` NULL | FK → `pc_element_types.id` |
 | `label` | `text` NOT NULL | |
-| `quantity` | `numeric(14,4)` NULL | item only |
-| `unit_id` | `uuid` NULL | item only |
+| `quantity` | `numeric(14,4)` NULL | item only; `CHECK (quantity IS NULL OR quantity >= 0)`; 0 dozwolone (§3.1) |
+| `unit_id` | `uuid` NULL | item only; FK-id → wpis słownika jednostek (§2.4) |
 | `unit_cost` | `numeric(14,4)` NULL | item only |
 | `unit_price` | `numeric(14,4)` NULL | item only |
-| `markup_pct` | `numeric(6,4)` NULL | narzut cenowy tej linii/sekcji; NULL = dziedziczony |
-| `price_override` | `bool` NOT NULL DEFAULT false | |
-| `line_cost` | `numeric(14,2)` NULL | item: quantity × unit_cost; section: SUM(child line_cost) |
-| `line_price` | `numeric(14,2)` NULL | item: quantity × unit_price; section: SUM(child line_price) |
-| `line_margin` | `numeric(14,2)` NULL | line_price − line_cost |
-| `line_margin_pct` | `numeric(6,4)` NULL | line_margin / line_price |
+| `markup_pct` | `numeric(6,4)` NULL | narzut cenowy tej linii/sekcji jako ułamek (0.30 = × 1.30); NULL = dziedziczony; `CHECK (markup_pct IS NULL OR markup_pct > -1)` |
+| `price_override` | `bool` NOT NULL DEFAULT false | true = cena ręczna; „Przelicz z cennika” i redystrybucja trybu B jej nie zmieniają (D57) |
 | `sort_order` | `int` DEFAULT 0 | |
 | `notes` | `text` NULL | |
 | `catalog_entry_id` | `uuid` NULL | FK → `pc_price_catalog.id` |
@@ -306,17 +329,20 @@ Constraints: `CHECK (status IN ('draft','sent','superseded','accepted','rejected
 | `price_captured_at` | `timestamptz` NULL | |
 | `price_captured_unit_cost` | `numeric(14,4)` NULL | |
 | `price_captured_unit_price` | `numeric(14,4)` NULL | |
-| `import_error` | `bool` DEFAULT false | |
+| `import_error` | `bool` DEFAULT false | linia zaimportowana z błędem do poprawy (§6.2); blokuje mark-sent (D58) |
+| `import_error_reason` | `text` NULL | kod błędu, np. `unknown_unit`, `formula_without_value` |
 | `created_at` | `timestamptz` | |
 | `updated_at` | `timestamptz` | |
 
-Constraint: `CHECK (line_type IN ('section','item','note','subtotal'))`.
+Constraint: `CHECK (line_type IN ('section','item','note'))`.
+
+**Pola pochodne** (`line_cost`, `line_price`, `line_margin`, `line_margin_pct`, `line_full_cost`) nie są kolumnami (rev 8b, Kod p8): liczy je `calculate()` (§0.3, §3) przy odczycie i w siatce, a przy mark-sent są zamrażane w `pc_offer_snapshots`.
 
 Reguły per typ:
 - `section`: `quantity`, `unit_id`, `unit_cost`, `unit_price` = NULL; `line_cost/price/margin` = agregat dzieci.
 - `item`: pełne pola.
-- `note`: tylko `label`; żadne wartości numeryczne; nie wliczane do sum.
-- `subtotal`: linia podsumowania — `line_cost/price/margin` = agregat wszystkich poprzednich linii na tym poziomie hierarchii (lub per sekcja zdefiniowana przez `parent_line_id`).
+- `note`: tylko `label` (i `notes`); żadne wartości numeryczne; nie wliczane do sum; drukowana w PDF (D50).
+- Sumy sekcji i kalkulacji renderowane automatycznie (bez osobnego typu linii; rev 8b usuwa `subtotal`, Kod p13).
 
 #### `pc_offer_snapshots` — zamrożony snapshot wersji wysłanej
 
@@ -332,11 +358,11 @@ Reguły per typ:
 
 `UNIQUE (calculation_id)` — jeden snapshot per wersja.
 
-Snapshot tworzony przy `mark-sent`. `snapshot_data` zawiera: lines (label, qty, unit, unit_cost, unit_price, line_cost, line_price, line_margin_pct per item), totals (subtotal_cost, overhead_amount, full_cost, subtotal_price, total_margin, margin_rate), price_provenance (catalog_entry_id, price_source_id, price_source_item_code, price_captured_at, price_captured_unit_cost/price per linia). PDF generowany z snapshota (nie z bieżących linii).
+Snapshot tworzony przy `mark-sent`. `snapshot_data` zawiera: lines (line_type, label, qty, unit, unit_cost, unit_price, line_cost, line_price, line_margin_pct per item — wartości z `calculate()`), rounding (`rounding.*` użyte przy wyliczeniu), totals (subtotal_cost, overhead_amount, full_cost, subtotal_price, total_margin, margin_rate), price_provenance (catalog_entry_id, price_source_id, price_source_item_code, price_captured_at, price_captured_unit_cost/price per linia). PDF generowany z snapshota (nie z bieżących linii).
 
 #### ~~`pc_calculation_audit_log`~~ — usunięte w rev 8a
 
-Audyt akcji (mark-sent, unlock, accept/reject, activate, apply-to-deal, set-primary, merge inwestycji) pochodzi z `audit_logs` (`action_logs`) zapisywanego przez komendy. Powód odblokowania i inne parametry akcji = metadane/payload komendy. Pola kosztu i marży w `snapshot_before`/`snapshot_after`/`changes_json` są redagowane (§4.3). Szczegóły: rev 8b (Kod p6).
+Audyt akcji (mark-sent, new-revision, accept/reject, activate, apply-to-deal, recalc-from-catalog, set-primary, merge inwestycji, importy) pochodzi z `audit_logs` (`action_logs`) zapisywanego przez komendy. Powód „Nowej rewizji” i inne parametry akcji = metadane/payload komendy. Pola kosztu i marży w `snapshot_before`/`snapshot_after`/`changes_json` są redagowane (§4.3). Lista pól audytu: §0.3.
 
 #### `pc_calculation_pdf_attachments` — PDF per wersja
 
@@ -378,12 +404,13 @@ Indeksy: `(calculation_id, organization_id, tenant_id)` (primary lookup), `(deal
 | `id` | `uuid` PK | |
 | `organization_id` | `uuid` NOT NULL | |
 | `tenant_id` | `uuid` NOT NULL | |
-| `investment_code` | `text` NOT NULL | wygenerowany stabilny kod, format: `INV-{YYYY}-{NNNNNN}` (auto-increment per tenant, zero-padded 6 cyfr), np. `INV-2026-000123` |
+| `investment_code` | `text` NOT NULL | wygenerowany stabilny kod `INV-{YYYY}-{NNNNNN}` z sekwencji Postgresa per (organizacja, tenant, `kind = 'investment:{YYYY}'`) w `pc_document_sequences` (wzór `SalesDocumentNumberGenerator`), 6 cyfr z zerami, np. `INV-2026-000123` |
 | `name` | `text` NOT NULL | nazwa inwestycji |
 | `location` | `text` NULL | lokalizacja |
+| `investment_key` | `text` NULL | (v1) `lower(trim(name)) \|\| '\|' \|\| lower(trim(location))`; aktualizowany przez serwis; podpowiedzi pg_trgm |
 | `legacy_klin_project_id` | `uuid` NULL | rev 8a: ID rekordu `klin:project` z jednorazowego importu (§10.4); tylko informacyjnie, bez zależności runtime |
-| `status` | `text` NOT NULL DEFAULT `'active'` | `active` \| `merged` \| `archived` |
-| `merged_into_id` | `uuid` NULL | FK → `pc_investments.id`; wypełniony gdy `status = 'merged'` |
+| `status` | `text` NOT NULL DEFAULT `'active'` | `active` \| `archived` (MVP); `merged` (v1) |
+| `merged_into_id` | `uuid` NULL | (v1) FK → `pc_investments.id`; wypełniony gdy `status = 'merged'` |
 | `notes` | `text` NULL | |
 | `created_by` | `uuid` NULL | |
 | `created_at` | `timestamptz` | |
@@ -391,11 +418,13 @@ Indeksy: `(calculation_id, organization_id, tenant_id)` (primary lookup), `(deal
 
 `UNIQUE (organization_id, tenant_id, investment_code)`.
 
-Indeks: `(organization_id, tenant_id, status)`.
+Indeksy: `(organization_id, tenant_id, status)`; MVP: `(organization_id, tenant_id, investment_code)` + `lower(name)` do podpowiedzi po kodzie/nazwie; v1: `CREATE INDEX pc_investments_investment_key_trgm ON pc_investments USING gin(investment_key gin_trgm_ops)` (`pg_trgm`).
 
-**Merge inwestycji**: endpoint `POST /api/project-costing/investments/:id/merge` (body: `{ targetId }`). Przenosi kalkulacje (`pc_calculations.investment_id`), role ofert (`pc_deal_offer_roles.investment_id`) i identyfikatory (`pc_investment_identifiers`) na `targetId`; ustawia `status = 'merged'`, `merged_into_id = targetId`; audyt przez komendę `project_costing.investments.merge` (`audit_logs`). Idempotent. Gdy po merge'u w `targetId` byłyby dwie oferty `primary`, komenda wymaga wskazania jednej (partial unique, `pc_deal_offer_roles`). **Split** (v2): wydzielenie kalkulacji do nowej inwestycji; odwraca merge przez nowy rekord.
+**MVP (D50):** inwestycję zakłada handlowiec (n8n ich nie tworzy — D63) albo wybiera istniejącą z podpowiedzi po kodzie `INV-…` lub nazwie. Bez identyfikatorów zewnętrznych, bez automatycznego dopasowania i bez merge — to v1.
 
-#### `pc_investment_identifiers` — zewnętrzne identyfikatory inwestycji
+**Merge inwestycji (v1)**: endpoint `POST /api/project-costing/investments/:id/merge` (body: `{ targetId }`). Przenosi kalkulacje (`pc_calculations.investment_id`), role ofert (`pc_deal_offer_roles.investment_id`) i identyfikatory (`pc_investment_identifiers`) na `targetId`; ustawia `status = 'merged'`, `merged_into_id = targetId`; audyt przez komendę `project_costing.investments.merge` (`audit_logs`). Idempotent. Gdy po merge'u w `targetId` byłyby dwie oferty `primary`, komenda wymaga wskazania jednej (partial unique, `pc_deal_offer_roles`). **Split** (v2): wydzielenie kalkulacji do nowej inwestycji; odwraca merge przez nowy rekord.
+
+#### `pc_investment_identifiers` — zewnętrzne identyfikatory inwestycji (v1)
 
 | Kolumna | Typ | Uwagi |
 |---------|-----|-------|
@@ -408,6 +437,8 @@ Indeks: `(organization_id, tenant_id, status)`.
 | `created_at` | `timestamptz` | |
 
 `UNIQUE (organization_id, tenant_id, source, value)` — unikalny identyfikator per (tenant, source) chroni przed duplikatami.
+
+**Priorytet identyfikatorów (D6/D62):** e-Zamówienia (`bzp_*`) > TED (`ted_*`) > BIP (`bip_number`) > kod `INV-…`. Nazwa i NIP są tylko podpowiedzią (wymagają potwierdzenia użytkownika).
 
 **Typy identyfikatorów** (formaty [do weryfikacji] o ile nie zaznaczono inaczej):
 
@@ -422,9 +453,9 @@ Indeks: `(organization_id, tenant_id, status)`.
 | `bip_number` | BIP (Biuletyn Informacji Publicznej) numer | wolny tekst [do weryfikacji] |
 | `other` | Inny identyfikator zewnętrzny | wolny tekst |
 
-**Kolumna `investment_id` na `pc_calculations`**: dodana jako FK-id opcjonalna (nullable) w `pc_calculations` (zamiast/obok `investment_name`/`investment_location`/`investment_key` — pola pozostają dla kompatybilności i fuzzy-match). `pc_calculations.investment_id` → FK-id → `pc_investments.id`.
+**Kolumna `investment_id` na `pc_calculations`**: jedyne powiązanie kalkulacji z inwestycją (rev 8b: `investment_name`/`investment_location`/`investment_key` usunięte z `pc_calculations`; źródłem prawdy jest `pc_investments`).
 
-#### `pc_deal_offer_roles` — rola oferty deala w inwestycji (encja-rozszerzenie, rev 8a; v1)
+#### `pc_deal_offer_roles` — rola oferty deala w inwestycji (encja-rozszerzenie, rev 8a; MVP od rev 8b — D50)
 
 Zastępuje custom field `cf_offer_role` na dealu (Kod P0-2). Własność `project_costing`; zero zapisów do `customers`.
 
@@ -458,9 +489,11 @@ Deklaracja w `project_costing/data/extensions.ts` (wzór: `apps/mercato/src/modu
 ```
 Weryfikacja: deklaracja `EntityExtension` jest kontraktem dla generatora; komentarz we wzorcu mówi, że dziś żaden runtime nie dołącza danych rozszerzenia do zapytań (`includeExtensions`). Dlatego rolę na dealu pokazujemy przez response enricher / widget wstrzyknięty na dealu, a nie przez join w query engine.
 
-#### `pc_production_batches` — wbudowane partie produkcji (embedded schedule source)
+#### `pc_production_batches` — partie produkcji w kalkulacji (źródła `calculation_embedded` i `xlsx_import`)
 
-Tabela używana gdy `ScheduleSource = calculation_embedded` lub `xlsx_import` (patrz §7a). Umożliwia prognozę produkcji bez modułu `project_schedule`.
+Tabela używana gdy aktywne `ScheduleSource` = `calculation_embedded` (partie ręczne) lub `xlsx_import` (import harmonogramu z XLSX dla firm bez Gantta — D50/D56). Umożliwia prognozę produkcji bez modułu `project_schedule`.
+
+**Jedno źródło prawdy (rev 8b, spójne ze schedule §1.4):** partie kalkulacji należą do `project_costing` (`pc_production_batches`); partie harmonogramu do `project_schedule` (`ps_production_batches`). Prognoza i sumy kalkulacji czytają **wyłącznie aktywne źródło** (§7a.3), więc partie nigdy nie są liczone podwójnie. Przy włączeniu harmonogramu dla kalkulacji `project_schedule` proponuje jednorazowe skopiowanie partii `pc_` → `ps_` (po potwierdzeniu) i ustawia `schedule_source_override = 'internal'`; kierunek tylko `pc_` → `ps_`, nigdy odwrotnie. Wiersze `pc_` zostają nietknięte (tylko do odczytu w UI, gdy aktywne jest `internal`). Po wyłączeniu harmonogramu (D67) aktywne staje się z powrotem źródło kalkulacji, a UI pokazuje ostrzeżenie, że partie mogą być nieaktualne.
 
 | Kolumna | Typ | Uwagi |
 |---------|-----|-------|
@@ -477,6 +510,8 @@ Tabela używana gdy `ScheduleSource = calculation_embedded` lub `xlsx_import` (p
 | `production_end_at` | `date` NOT NULL | data końca produkcji |
 | `delivery_at` | `date` NULL | planowana data dostawy |
 | `status` | `text` DEFAULT `'planned'` | `planned` \| `in_progress` \| `done` \| `cancelled` |
+| `origin` | `text` NOT NULL DEFAULT `'manual'` | `manual` \| `xlsx_import` |
+| `import_job_id` | `uuid` NULL | ProgressJob importu, z którego pochodzi wiersz |
 | `sort_order` | `int` DEFAULT 0 | |
 | `notes` | `text` NULL | |
 | `created_at` | `timestamptz` | |
@@ -484,13 +519,26 @@ Tabela używana gdy `ScheduleSource = calculation_embedded` lub `xlsx_import` (p
 
 Indeksy: `(calculation_id, organization_id, tenant_id)`, `(production_start_at)`.
 
-Constraint: `CHECK (production_end_at >= production_start_at)`.
+Constraints: `CHECK (production_end_at >= production_start_at)`, `CHECK (quantity_m3 IS NULL OR quantity_m3 >= 0)`, `CHECK (quantity_pcs IS NULL OR quantity_pcs >= 0)`. Daty jako dni kalendarzowe, koniec włącznie (jak schedule D55).
 
-Bez zmian strukturalnych (patrz rev 4); `pc_calculation_template_lines` ma dodatkowe `line_type`, `parent_line_id`, `markup_pct` analogicznie do `pc_calculation_lines`.
+`pc_calculation_template_lines` (v1) ma `line_type`, `parent_line_id`, `markup_pct` analogicznie do `pc_calculation_lines`.
+
+#### `pc_document_sequences` — rejestr sekwencji numeracji (rev 8b)
+
+Kolumny: id, organization_id, tenant_id, kind (`calculation:{YYYY}` \| `investment:{YYYY}`), sequence_name, created_at. `UNIQUE (organization_id, tenant_id, kind)`. Sekwencję tworzy serwis numeracji przy pierwszym użyciu (wzór `SalesDocumentNumberGenerator`).
 
 ### 2.3 Waluta i zaokrąglenia
 
-`numeric(14,2)` dla sum (HALF_EVEN), `numeric(14,4)` dla cen jedn., `numeric(14,4)` dla ilości. Jednowalutowe v1 (§3.9).
+`numeric(14,2)` dla wartości linii i sum, `numeric(14,4)` dla cen jednostkowych i ilości. Jednowalutowe (§3.10; wiele walut — pytanie Q6, §16).
+
+**Zaokrąglenie (D62/D16):** `round(x)` w tej specyfikacji oznacza zaokrąglenie wg ustawień organizacji `rounding.mode` (domyślnie `half_up`, połówki od zera) do `rounding.line_decimals` miejsc (domyślnie 2). Każda wartość linii jest zaokrąglana osobno; **sumy = suma już zaokrąglonych linii** (nigdy zaokrąglona suma surowa). Ceny jednostkowe wyliczane (tryb B/C) zaokrąglamy do 4 miejsc. Arytmetyka na liczbach dziesiętnych (ciągi/liczby całkowite w groszach), nie na `float`; `Math.round` nie jest używany (dla −0,5 daje 0). Zmiana ustawienia działa na wersje `draft`; wersje wysłane zostają w snapshocie z ustawieniem z chwili mark-sent.
+
+### 2.4 Jednostki i przeliczniki (D17/D62, rev 8b)
+
+- **Lista jednostek** = słownik modułu `dictionaries` (np. `project_costing.units`; `unit_id` → `dictionary_entries.id`). Kody kanonizowane funkcją `canonicalizeUnitCode` z `@open-mercato/shared/lib/units/unitCodes` (już w repo).
+- **Weryfikacja w kodzie:** `dictionary_entries` ma pola `value`, `normalized_value`, `label`, `color?`, `icon?`, `position`, `is_default` — **nie ma pola liczbowego na współczynnik**. Przeliczniki `catalog` (`catalog/lib/unitCodes.ts`, `unitResolution.ts`, `product-unit-conversions`) są per produkt, a `catalog` jest wyłączony. Dlatego przeliczniki trzymamy we własnej tabeli.
+- **`pc_unit_conversions`** (v1): id, organization_id, tenant_id, `unit_code` (kanoniczny), `dimension` (`length` \| `area` \| `volume` \| `mass` \| `count` \| `time` \| `other`), `factor_to_base` `numeric(18,8)` > 0, `is_base` bool. `UNIQUE (organization_id, tenant_id, unit_code)`; jedna jednostka bazowa per wymiar. Konwersja tylko w obrębie wymiaru; m³ ↔ szt. wyłącznie przez parametr typu elementu (`pc_element_types.volume_m3_per_piece`, v1).
+- **MVP:** jednostka linii musi być równa jednostce pozycji cennika; inaczej „Przelicz z cennika” pomija linię i zgłasza ostrzeżenie. Import: nieznana jednostka → linia z `import_error = true` (`unknown_unit`).
 
 ---
 
@@ -499,11 +547,13 @@ Bez zmian strukturalnych (patrz rev 4); `pc_calculation_template_lines` ma dodat
 ### 3.1 Wycena pozycji (`item`)
 
 ```
-line_cost    = ROUND(quantity × unit_cost,  2, HALF_EVEN)
-line_price   = ROUND(quantity × unit_price, 2, HALF_EVEN)
+line_cost    = round(quantity × unit_cost)      -- round() = rounding.* (§2.3), domyślnie half-up, 2 miejsca
+line_price   = round(quantity × unit_price)
 line_margin  = line_price − line_cost
-line_margin_pct = line_margin / line_price   (gdy line_price > 0, else 0)
+line_margin_pct = line_margin / line_price   (gdy line_price > 0, else NULL — wyświetlane „—”)
 ```
+
+`quantity = 0` (rev 8b, Kod p19): `line_cost = line_price = 0`; pozycja jest pomijana w redystrybucji trybu B i w liczeniu `unit_price` trybu C (cena jednostkowa zostaje bez zmian). Ujemna ilość jest odrzucana (CHECK).
 
 ### 3.2 Agregacja sekcji (`section`)
 
@@ -514,13 +564,13 @@ section.line_margin = section.line_price − section.line_cost
 section.line_margin_pct = section.line_margin / section.line_price
 ```
 
-`note` i `subtotal` nie wliczane do sum sekcji. `subtotal` wyświetla sumę pozycji powyżej niego w danej sekcji.
+`note` nie jest wliczana do sum. MVP: jeden poziom (sekcja → pozycje), więc suma sekcji obejmuje wszystkie jej pozycje; sekcja bez pozycji = „pusta sekcja” (ostrzeżenie przy mark-sent, D58).
 
 ### 3.3 Sumy kalkulacji
 
 ```
-subtotal_cost   = SUM(item.line_cost)         -- tylko item, nie sekcje (unikaj podwójnego liczenia)
-overhead_amount = ROUND(subtotal_cost × overhead_rate, 2, HALF_EVEN)
+subtotal_cost   = SUM(item.line_cost)         -- suma zaokrąglonych linii; tylko item, nie sekcje
+overhead_amount = round(subtotal_cost × overhead_rate)
 full_cost       = subtotal_cost + overhead_amount
 ```
 
@@ -542,7 +592,7 @@ Input: `unit_price` per pozycja (ręcznie lub z cennika). `subtotal_price = SUM(
 
 #### Tryb B — `target_margin`
 
-Input: `target_margin_rate` na poziomie kalkulacji. `target_subtotal_price = full_cost / (1 − target_margin_rate)`. Redistrybuowanie na pozycje wg §3.6.
+Input: `target_margin_rate` na poziomie kalkulacji (ułamek, `0 ≤ m < 1` — CHECK). `target_subtotal_price = round(full_cost / (1 − target_margin_rate))`. Redystrybucja na pozycje wg §3.6.
 
 #### Tryb C — `markup`
 
@@ -550,17 +600,17 @@ Tryb C liczy `unit_price` **per pozycję** z `line_full_cost` i efektywnego narz
 
 Dla każdej pozycji `item i` z `price_override = false`:
 ```
-line_full_cost_i = ROUND(line_cost_i × (1 + overhead_rate), 2, HALF_EVEN)
+line_full_cost_i = round(line_cost_i × (1 + overhead_rate))
 effective_markup_i = pierwsze non-NULL z: [item.markup_pct, parent_section.markup_pct,
                                            calc.markup_rate, 0]
-line_price_i     = ROUND(line_full_cost_i × (1 + effective_markup_i), 2, HALF_EVEN)
-unit_price_i     = ROUND(line_price_i / quantity_i, 4, HALF_EVEN)   -- gdy quantity > 0
+line_price_i     = round(line_full_cost_i × (1 + effective_markup_i))   -- narzut jako ułamek: 0.30 = × 1.30
+unit_price_i     = round4(line_price_i / quantity_i)   -- gdy quantity > 0; round4 = ten sam tryb, 4 miejsca
 ```
 
-Pozycje z `price_override = true`: zachowują bieżące `unit_price`/`line_price` bez zmian.
+Pozycje z `price_override = true`: zachowują bieżące `unit_price`, a `line_price = round(quantity × unit_price)`. W trybie C `line_price` jest wartością wiodącą; `unit_price` (4 miejsca) jest pochodną do wyświetlenia, więc `quantity × unit_price` może różnić się od `line_price` o mniej niż jednostkę zaokrąglenia.
 
 ```
-subtotal_price = SUM(line_price_i)   -- suma wszystkich item (override i nie-override)
+subtotal_price = SUM(line_price_i)   -- suma zaokrąglonych linii (override i nie-override); tryb C nie ma reszty do rozdzielenia
 total_margin   = subtotal_price − full_cost
 margin_rate    = total_margin / subtotal_price
 ```
@@ -571,9 +621,9 @@ margin_rate    = total_margin / subtotal_price
 > |------|-----------|
 > | `overhead_rate` | % kosztów pośrednich na koszt zakupu (zwiększa koszt) |
 > | `full_cost` | `subtotal_cost + overhead_amount` |
-> | `markup_rate` | % cenowy na `full_cost` — narzut na poziomie kalkulacji (tryb C, dziedziczony) |
-> | `markup_pct` | % cenowy per pozycja/sekcja — nadpisuje `markup_rate` dla danej gałęzi |
-> | `target_margin_rate` | % marży od ceny — input trybu B |
+> | `markup_rate` | narzut cenowy na `full_cost` jako ułamek (0.30 = × 1.30) — poziom kalkulacji (tryb C, dziedziczony) |
+> | `markup_pct` | narzut per pozycja/sekcja jako ułamek — nadpisuje `markup_rate` dla danej gałęzi |
+> | `target_margin_rate` | marża od ceny jako ułamek (D14) — input trybu B |
 > | `margin_rate` | `total_margin / subtotal_price` — zawsze obliczony z rzeczywistych sum |
 > | `line_full_cost` | `line_cost × (1 + overhead_rate)` — koszt pozycji z narzutem pośrednim |
 > | `line_margin_pct` | `line_margin / line_price` per pozycja |
@@ -582,12 +632,12 @@ margin_rate    = total_margin / subtotal_price
 
 Stosowane **wyłącznie w trybie B**. Tryb C używa per-item formuły (§3.5).
 
-1. `T = full_cost / (1 − target_margin_rate)` (target całkowita cena).
+1. `T = round(full_cost / (1 − target_margin_rate))` (docelowa cena całkowita).
 2. `S_ov = SUM(item.line_price WHERE price_override = true)`.
-3. `R = T − S_ov`. Gdy `R < 0`: warning UI (nie blokada); `subtotal_price = rzeczywista suma`.
-4. Non-override pozycje N: `base = SUM(line_full_cost_i FOR i IN N)` gdzie `line_full_cost_i = line_cost_i × (1 + overhead_rate)`. Proporcja per item: `base > 0` → `line_full_cost_i / base`; `base = 0` → równy podział `1/|N|`.
-5. `new_line_price[i] = ROUND(R × proporcja[i], 2, HALF_EVEN)`; `new_unit_price[i] = ROUND(new_line_price[i] / quantity[i], 4, HALF_EVEN)`.
-6. Rounding residual: ostatnia pozycja w N absorbuje `R − SUM(new_line_price)`.
+3. `R = T − S_ov`. Gdy `R < 0`: pozycje bez override dostałyby ujemne ceny → `calculate()` zgłasza problem `negative_price`; UI pokazuje ostrzeżenie w edycji, a **mark-sent jest zablokowany** (D58, §3.8).
+4. Pozycje N = bez override i z `quantity > 0`: `base = SUM(line_full_cost_i FOR i IN N)`, gdzie `line_full_cost_i = round(line_cost_i × (1 + overhead_rate))`. Proporcja: `base > 0` → `line_full_cost_i / base`; `base = 0` → równy podział `1/|N|`. Gdy N jest puste, `subtotal_price = S_ov` (bez redystrybucji).
+5. `new_line_price[i] = round(R × proporcja[i])`; `new_unit_price[i] = round4(new_line_price[i] / quantity[i])`.
+6. **Reszta z zaokrągleń** `R − SUM(new_line_price)` trafia do pozycji z N o największym `line_full_cost` (remis: najniższy `sort_order`), więc suma linii = `T` co do grosza. Pozycja wiodąca pozostaje deterministyczna przy tych samych danych (ten sam wynik na kliencie i serwerze).
 7. `subtotal_price = SUM(line_price)` (override + non-override). `total_margin = subtotal_price − full_cost`. `margin_rate = total_margin / subtotal_price`.
 
 ### 3.7 Reguła wyznaczania ceny z cennika (layered pricelist)
@@ -605,11 +655,15 @@ Gdy brak reguły: `unit_price = unit_price` z `pc_price_catalog` (bezpośrednio)
 ### 3.8 Zamrożony snapshot (offer = frozen version)
 
 Przy `mark-sent`:
-1. Serwis weryfikuje `status = 'draft'`.
+1. Serwis weryfikuje `status = 'draft'` i uruchamia `calculate()`.
+1a. **Walidacja (D58):**
+   - **Blokuje** (422 `MARK_SENT_BLOCKED` z listą problemów): linie z `import_error = true`; brak pozycji `item`; ujemna cena (`unit_price < 0` lub `line_price < 0`, także z redystrybucji trybu B przy `R < 0`).
+   - **Ostrzega** (422 `MARK_SENT_CONFIRMATION_REQUIRED`; ponowienie z `confirmWarnings: true`): ujemna marża (`total_margin < 0` lub `line_margin < 0` na pozycji); pusta sekcja.
+   - **Nie blokuje:** brak deala (oferta standalone jest dozwolona). Cena zero — dozwolona do decyzji Q10 (§16).
 2. Tworzy `pc_offer_snapshots.snapshot_data` z bieżącymi liniami, sumami i proweniencją.
 3. Ustawia `status = 'sent'`, `sent_at = now()`.
 4. Linie `pc_calculation_lines` tej wersji są od tej chwili **immutable** (API nie przyjmuje PATCH).
-5. Generuje PDF z `snapshot_data` (nie z linii bazy).
+5. Generuje PDF z `snapshot_data` (nie z linii bazy) jako ProgressJob w workerze (§5.2).
 
 PDF klienta generowany **zawsze ze snapshota** — żadne zmiany konfiguracji cennikowej nie wpływają retroaktywnie.
 
@@ -620,26 +674,31 @@ PDF klienta generowany **zawsze ze snapshota** — żadne zmiany konfiguracji ce
 - `accepted`/`rejected`: zmiana ręczna (klient podjął decyzję).
 - `is_active_version = true`: tylko gdy `deal_id != NULL`; wersja zasilająca `deal.value_amount`.
 
-**Odblokowanie** (admin only, v1): nowa wersja `(base_code, revision + 1)`, `draft`; oryginał → `superseded`. Komenda `unlock` z powodem w metadanych (`audit_logs`).
+**Wersja aktywna (D59):** `is_active_version` wskazuje wersję, z której wolno zastosować wartość do deala. MVP: pierwsza kalkulacja dołączona do deala staje się aktywna automatycznie; zmiana przez komendę `activate` (przycisk „Ustaw jako aktywną”).
 
-**Duplikacja jako nowa wersja**: `POST .../duplicate` kopiuje linie.
+**„Nowa rewizja” (D57, v1)** — jedna akcja zamiast dawnych „odblokuj” i „duplikuj”: `POST .../new-revision` (body `{ reason }`) kopiuje wejścia linii do nowej wersji `(base_code, revision + 1)` w stanie `draft`; wersja źródłowa `sent` → `superseded`; nowa wersja przejmuje `is_active_version`, jeśli źródłowa ją miała. Komenda `calculations.new_revision` z powodem w metadanych (`audit_logs`), feature `project_costing.new_revision`.
+
+**„Przelicz z cennika” (D57, MVP):** `POST .../recalc-from-catalog` (komenda `calculations.recalc_from_catalog`, tylko `draft`) odświeża `unit_cost`/`unit_price` i proweniencję (`price_captured_*`) wyłącznie w liniach z `catalog_entry_id` i `price_override = false`; linie z override zostają bez zmian. Wynik: liczba zmienionych i pominiętych linii (z powodem, np. inna jednostka — §2.4).
 
 ### 3.10 Waluta kalkulacji
 
-Waluta = `value_currency` z `deal_snapshot` (snapshot przy attach-deal, odświeżany subscriberem) gdy `deal_id != NULL`, else ustawienie `default_currency` (ModuleConfigService). Jednowalutowe v1.
+Waluta = `value_currency` z `deal_snapshot` (snapshot przy attach-deal, odświeżany subscriberem) gdy `deal_id != NULL`, else ustawienie `default_currency` (ModuleConfigService). Jednowalutowe; wiele walut, źródło kursów i zamrożenie kursu w wysłanej wersji — pytania Q6–Q8 (§16).
 
 ### 3.11 Prognoza wartości = wartość × prawdopodobieństwo
 
-**Tylko gdy `deal_id != NULL`**:
+Dwie metryki (rev 8b, wniosek planu testów):
 ```
-forecast_value = is_active_version.subtotal_price × deal.probability / 100
+forecast_unweighted = active_version.subtotal_price                       -- deal otwarty lub wygrany
+forecast_weighted   = active_version.subtotal_price × p / 100
+  p = deal_snapshot.probability dla deala otwartego; 100 dla closure_outcome = 'won'
 ```
+- Deal przegrany lub usunięty (§0.6) — poza obiema metrykami. Deal z `probability IS NULL` — tylko w nieważonej (oznaczony „brak prawdopodobieństwa”).
+- **Kalkulacja bez deala (D61)** — poza prognozą ważoną; pokazywana osobno jako „Kalkulacje bez deala” (suma nieważona).
+- Przeliczenie przy zmianie wersji aktywnej, `deal_snapshot` (subscriber) i po `apply-to-deal`. Wartości liczone w zapytaniu z aktualnego stanu (bez przechowywanego `forecast_value`).
 
-Kalkulacje standalone (bez deala) nie wchodzą do prognozy lejka. Recalculate przy zmianie `is_active_version`, `deal.probability`, po `apply-to-deal`.
+Widget dashboardu „Prognoza lejka” (v1, §11): obie metryki per etap lejka (D33) lub `expected_close_at` + osobny wiersz „Kalkulacje bez deala”. API zawsze liczy i filtruje po stronie serwera (z redakcją §4).
 
-Widget dashboardu „Prognoza lejka": `SUM(forecast_value)` per etap pipeline lub `expected_close_at`.
-
-### 3.12 Rola oferty (`pc_deal_offer_roles`), suma inwestycji i zarządzanie inwestycjami (rev 8a; v1)
+### 3.12 Rola oferty (`pc_deal_offer_roles`), suma inwestycji i zarządzanie inwestycjami (MVP minimalnie — D50; dopasowanie i merge — v1)
 
 **Rev 8a — usunięte:** podejście z custom field `cf_offer_role` (hardkodowany UUID definicji `73f8260a-…`, który nie istnieje w innym tenancie), EAV na encji obcego modułu, sekwencja dwóch komend `customers.deals.update` z akcją kompensującą i ryzyko R10. Rola oferty jest daną `project_costing` (tabela `pc_deal_offer_roles`, §2.2).
 
@@ -648,13 +707,14 @@ Widget dashboardu „Prognoza lejka": `SUM(forecast_value)` per etap pipeline lu
 investment_total = SUM(active_calculation(deal).subtotal_price)
   FOR deal IN pc_deal_offer_roles WHERE investment_id = :investment_id
                                      AND offer_role = 'primary' AND deleted_at IS NULL
-  AND deal nieprzegrany i nieusunięty (wg pc_calculations.deal_snapshot; mapowanie statusów OM — rev 8b, Kod p5)
+  AND deal_snapshot.closure_outcome IS DISTINCT FROM 'lost' AND NOT deal_snapshot.deleted   -- §0.6
 ```
 Oferty `alternative` są widoczne w tabeli inwestycji, ale nie wliczane. Suma liczona z danych costingu (aktywna kalkulacja), bez odczytu `deal.value_amount` przez HTTP.
 
 **Przypisanie roli przy dołączeniu deala do inwestycji** (komenda `project_costing.offer_roles.assign`):
-- brak innej aktywnej oferty w inwestycji → `primary`;
-- istnieje oferta dla innego wykonawcy → wiersz zapisany jako `alternative`, a UI pokazuje dokładnie komunikat: **„Istnieje już oferta dla innego wykonawcy — wskaż, która jest główna”** (decyzja Koordynatora (b); D5). Użytkownik wybiera ofertę główną albo zostawia bieżący stan.
+- pierwsza oferta w inwestycji → `primary` automatycznie (D65);
+- istnieje oferta dla innego wykonawcy → wiersz zapisany jako `alternative`, a UI pokazuje dokładnie komunikat: **„Istnieje już oferta dla innego wykonawcy — wskaż, która jest główna”** (D51). Użytkownik wybiera ofertę główną (`set_primary`) albo zostawia bieżący stan.
+- Wybór inwestycji przy dołączaniu deala/kalkulacji (MVP): ręcznie, z podpowiedzią po kodzie `INV-…` i nazwie; brak trafienia → „Nowa inwestycja” (komenda `investments.create`).
 
 **Zmiana oferty głównej — jedna komenda, jedna transakcja** (`project_costing.offer_roles.set_primary`, `POST /api/project-costing/investments/:id/offer-roles/set-primary`, body `{ dealId }`):
 ```
@@ -667,24 +727,24 @@ COMMIT
 ```
 Kolejność (najpierw degradacja) spełnia partial unique `pc_deal_offer_roles_one_primary`; równoległa zmiana kończy się naruszeniem unikalności → 409 i ponowienie przez użytkownika. Undo komendy przywraca poprzedni `primary`. Audyt: `audit_logs`.
 
-**Migracja istniejących wartości `cf_offer_role`** (546 deali na instancji Marka): jednorazowy, **opcjonalny** import (komenda CLI `yarn mercato project_costing import-offer-roles`, uruchamiana ręcznie) czyta wartości custom fieldu przez serwis `entities` w DI i tworzy wiersze `pc_deal_offer_roles` dla deali przypisanych do inwestycji. Bez zależności runtime: po imporcie moduł nie czyta `cf_offer_role`. Pole na dealu zostaje nietknięte (zarządza nim `customers`/Data Designer); wygaszenie wysyłki z n8n (D39) — pytanie otwarte Q2 (§16).
+**Migracja istniejących wartości `cf_offer_role`** (546 deali na instancji Marka; D64): jednorazowy import przy wdrożeniu (komenda CLI `yarn mercato project_costing import-offer-roles [--dry-run]`) czyta wartości custom fieldu przez serwis `entities` w DI i tworzy wiersze `pc_deal_offer_roles` dla deali przypisanych do inwestycji (po imporcie `klin:project`, §10.4). Import jest idempotentny: tworzy tylko brakujące wiersze i nie nadpisuje ról zmienionych już w module, więc można go powtórzyć przed wyłączeniem wysyłki z n8n. Bez zależności runtime: moduł nie czyta `cf_offer_role`. **Okres przejściowy (D64):** n8n wysyła `cf_offer_role` do czasu wdrożenia modułu i migracji; potem wysyłkę wyłącza Enka, a pole na dealu zostaje nietknięte (zarządza nim `customers`/Data Designer). Ryzyko R13.
 
 ---
 
 **Zarządzanie inwestycjami (entity `pc_investments`)**
 
-Inwestycja (`pc_investments`) żyje w module `project_costing` i jest **jedynym** bytem „inwestycja/projekt” w systemie (rev 8a; `klin:project` wygaszany — §10.4). Każda kalkulacja może być skojarzona z inwestycją przez `pc_calculations.investment_id`, a deal przez `pc_deal_offer_roles`.
+Inwestycja (`pc_investments`) żyje w module `project_costing` i jest **jedynym, kanonicznym** bytem „inwestycja/projekt” w systemie (D63; `klin:project` importowany i wyłączany — §10.4). Inwestycje zakłada handlowiec; n8n ich nie tworzy. Każda kalkulacja może być skojarzona z inwestycją przez `pc_calculations.investment_id`, a deal przez `pc_deal_offer_roles`.
 
-**Stabilny kod inwestycji**: `INV-{YYYY}-{NNNNNN}` (auto-increment per tenant). Kod jest niezmienny po przypisaniu.
+**Stabilny kod inwestycji**: `INV-{YYYY}-{NNNNNN}` (sekwencja Postgresa per organizacja, §2.2). Kod jest niezmienny po przypisaniu.
 
-**Dopasowanie — kolejność priorytetu**:
+**Dopasowanie (v1) — kolejność priorytetu** (D6/D62: e-Zamówienia > TED > BIP > INV; nazwa/NIP tylko podpowiedź):
 
-1. **Priorytet 1 — zewnętrzne identyfikatory** (`pc_investment_identifiers`): serwis szuka inwestycji z dokładnie pasującym identyfikatorem `(source, value)`. Gdy znaleziono jednoznaczny wynik → automatyczne skojarzenie (bez pytania użytkownika). Obsługiwane źródła: `bzp_notice_number`, `bzp_procedure_id`, `bzp_procedure_number`, `bzp_plan_item`, `ted_procedure_id`, `ted_notice_id`, `bip_number`, `other`. Formaty zewnętrznych identyfikatorów oznaczone `[do weryfikacji]` w §2.2.
+1. **Priorytet 1 — zewnętrzne identyfikatory** (`pc_investment_identifiers`): serwis szuka inwestycji z dokładnie pasującym identyfikatorem `(source, value)`. Gdy znaleziono jednoznaczny wynik → automatyczne skojarzenie (bez pytania użytkownika); przy trafieniach w kilku źródłach wygrywa źródło o wyższym priorytecie. Obsługiwane źródła: `bzp_notice_number`, `bzp_procedure_id`, `bzp_procedure_number`, `bzp_plan_item`, `ted_procedure_id`, `ted_notice_id`, `bip_number`, `other`. Formaty zewnętrznych identyfikatorów oznaczone `[do weryfikacji]` w §2.2.
 
 2. **Priorytet 2 — fuzzy-match (fallback)**: gdy brak dopasowania przez identyfikatory, serwis generuje kandydatów przez:
-   - **Źródło A — pg_trgm**: `similarity(investment_key, :target_key) > 0.5` na `pc_investments` i/lub `pc_calculations.investment_key`
+   - **Źródło A — pg_trgm**: `similarity(investment_key, :target_key) > investments.trgm_threshold` na `pc_investments.investment_key`
    - **Źródło B — NIP klienta**: matching po `company.cf_nip` z deala = NIP inwestora w istniejących inwestycjach (odczyt przez query engine / serwis DI `customers`, bez HTTP — rev 8a)
-   - Wyniki łączone, zdeduplikowane, posortowane wg `score DESC`. `pg_trgm` threshold = 0.5 (konfigurowalny per tenant).
+   - Wyniki łączone, zdeduplikowane, posortowane wg `score DESC`. Próg `investments.trgm_threshold` (domyślnie 0.5, per organizacja, §2.2).
    - **User confirms**: każdy kandydat z fuzzy-match wymaga potwierdzenia użytkownika — brak automatyzacji.
 
 **Endpoint**: `GET /api/project-costing/investments/match-candidates?name=&location=&identifiers[]=`
@@ -705,11 +765,11 @@ type InvestmentMatchCandidate = {
 
 Przyciski: „Tak — połącz" / „Nie — nowa inwestycja" / „Ignoruj".
 
-**Merge/split inwestycji** (patrz §2.2 `pc_investments`): `POST .../merge`, komenda `project_costing.investments.merge` (audyt w `audit_logs`).
+**Merge/split inwestycji (v1)** (patrz §2.2 `pc_investments`): `POST .../merge`, komenda `project_costing.investments.merge` (audyt w `audit_logs`).
 
-`pg_trgm` wymagane: `CREATE EXTENSION IF NOT EXISTS pg_trgm;` w migracji.
+`pg_trgm` wymagane w v1: `CREATE EXTENSION IF NOT EXISTS pg_trgm;` w migracji v1.
 
-### 3.13 Koszty rzeczywiste vs budżet
+### 3.13 Koszty rzeczywiste vs budżet (v1)
 
 Budżet pochodzi z wersji `accepted` (fallback: najnowsza `sent`). `pc_cost_entries` wymaga `calculation_id` dla raportu budżet-vs-actual (zapewnia spójność z konkretną wersją); `deal_id`/`investment_id` opcjonalne (kalkulacje standalone obsługiwane przez `calculation_id`).
 
@@ -745,11 +805,11 @@ margin_actual = subtotal_price − SUM(actual_cost)   (marża wykonawcza przy zr
 
 ---
 
-## 4. Widoczność (rev 8a — wyłącznie RBAC; ukryta marża = ukryty koszt)
+## 4. Widoczność (wyłącznie RBAC; ukryta marża = ukryty koszt)
 
 ### 4.1 Źródło prawdy: `acl.ts`
 
-Widoczność kosztów, cen i marży wynika **wyłącznie** z feature'ów w `project_costing/acl.ts` (§9). Ustawienia modułu nie zawierają list feature'ów ani flag widoczności (Kod p4, decyzja Koordynatora (e)). „Ustawienie per firma” = które role w organizacji mają dane feature'y: domyślne przypisanie w `setup.ts` `defaultRoleFeatures` (admin/employee), dalej edycja ról w UI auth. Sprawdzanie feature'ów zawsze wildcard-aware (`project_costing.*`), nigdy przez porównanie stringów.
+Widoczność kosztów, cen i marży wynika **wyłącznie** z feature'ów w `project_costing/acl.ts` (§9). Ustawienia modułu nie zawierają list feature'ów ani flag widoczności (Kod p4, D48). „Ustawienie per firma” = które role w organizacji mają dane feature'y: domyślne przypisanie w `setup.ts` `defaultRoleFeatures` (admin/employee), dalej edycja ról w UI auth. Sprawdzanie feature'ów zawsze wildcard-aware (`project_costing.*`), nigdy przez porównanie stringów.
 
 ### 4.2 Reguła efektywnej widoczności (Kod P0-3)
 
@@ -758,13 +818,16 @@ Marża = cena − koszt, więc kto widzi cenę i koszt, zna marżę. Dlatego:
 ```
 canSeePrices = has('project_costing.view_prices')
 canSeeMargin = has('project_costing.view_margin')
-             || (has('project_costing.view_margin_after_close') && deal zamknięty jako wygrany && calc.status = 'accepted')
+             || (has('project_costing.view_margin_after_close')
+                 && calc.is_active_version
+                 && deal_snapshot.closure_outcome IN ('won','lost'))   -- D49
 canSeeCosts  = has('project_costing.view_costs') && (canSeeMargin || !canSeePrices)
 ```
 
 - Rola bez prawa do marży, która widzi ceny, **nie widzi też kosztów** (`unit_cost`, `line_cost`, `subtotal_cost`, `overhead_amount`, `full_cost`, `line_full_cost`, koszty rzeczywiste, wariancja budżetu) ani pól, z których da się odtworzyć marżę (`markup_pct`, `markup_rate`, `overhead_rate`, `target_margin_rate`).
 - Edycja (`project_costing.edit`) dotyczy tylko pól widocznych dla użytkownika; zapis pola niewidocznego → 403.
-- `view_margin` domyślnie ma tylko `admin`.
+- `view_margin` i `view_costs` domyślnie ma tylko `admin`; `employee` domyślnie nie widzi kosztów ani marży (D68). Organizacja zmienia to, edytując role (feature'y zostają w `acl.ts`).
+- Redakcja zawsze po stronie serwera (API, eksport, PDF, analityka); UI tylko odzwierciedla odpowiedź API.
 
 ### 4.3 Kanały i reguła dla każdego
 
@@ -784,7 +847,7 @@ canSeeCosts  = has('project_costing.view_costs') && (canSeeMargin || !canSeePric
 
 ### 4.3a Zamknięty deal
 
-Feature `project_costing.view_margin_after_close` (zastępuje ustawienie `margin_visible_after_deal_close`) pozwala zobaczyć marżę zaakceptowanej wersji wygranego deala. Status deala z `deal_snapshot` (subscriber `customers.deal.won`/`lost`), bez HTTP.
+Feature `project_costing.view_margin_after_close` (zastępuje ustawienie `margin_visible_after_deal_close`) odsłania marżę i koszt wersji aktywnej po zamknięciu deala — przy `closure_outcome` = `won` **albo** `lost` (D49). „Ustawienie organizacji” = przypisanie tego feature'a do ról (domyślnie `admin`; D48). Status deala z `deal_snapshot` (subscribery `customers.deal.won`/`lost`, persistent), bez HTTP.
 
 ### 4.4 Scope kalkulacji (`calculation_scope`)
 
@@ -802,13 +865,13 @@ Feature `project_costing.view_margin_after_close` (zastępuje ustawienie `margin
 
 PDF generowany zawsze z `pc_offer_snapshots.snapshot_data` — niezmienny po wysyłce. Dane firmy: `Organization.name` + `Organization.logoUrl` z `directory` + brakujące pola z ustawień `pdf.*` (ModuleConfigService, §2.2).
 
-### 5.2 Renderowanie: `@react-pdf/renderer` v3 (MIT)
+### 5.2 Renderowanie: `pdf-lib` (już w repo)
 
-Brak Chromium. Rev 8a: generowanie PDF zawsze jako ProgressJob + worker (`@open-mercato/queue`). Wybór biblioteki (`pdf-lib` z core vs `@react-pdf/renderer`) i lista nowych zależności: rev 8b (Kod p10).
+Rev 8b (Kod p10): PDF składamy biblioteką `pdf-lib`, która jest już zależnością `packages/core` (`packages/core/package.json` l.256; wzór użycia: `packages/core/src/modules/forms/services/pdf-snapshot-service.ts`). Bez nowej zależności i bez Chromium. Generowanie zawsze jako ProgressJob + worker (`@open-mercato/queue`); wynik zapisany w `attachments` i w `pc_calculation_pdf_attachments`. Font z polskimi znakami osadzany w PDF (plik fontu w module).
 
 ### 5.3 Zawartość PDF
 
-Logo + dane firmy, numer oferty (display code `K/2026/001-R2`), data, ważność, dane odbiorcy, hierarchiczna tabela pozycji (sekcje + pozycje, `note` i `subtotal` stylizowane inaczej), kolumny: label, qty, unit, unit_price, line_price. **Bez** unit_cost, line_cost, narzutu, marży. Warunki, stopka, podpis.
+Logo + dane firmy, numer oferty (display code `K/2026/001-R2`), data, ważność, dane odbiorcy, hierarchiczna tabela pozycji (sekcje z automatyczną sumą + pozycje, `note` stylizowana inaczej), kolumny: label, qty, unit, unit_price, line_price. **Bez** unit_cost, line_cost, narzutu, marży. Warunki, stopka, podpis.
 
 ### 5.4 Endpointy
 
@@ -822,28 +885,62 @@ GET  /api/project-costing/calculations/:id/pdf-attachments
 
 ## 6. Import / Eksport
 
-### 6.1 Biblioteka XLSX: `exceljs` v4.4.0 (MIT)
+### 6.1 Biblioteka XLSX: `exceljs` v4.4.0 (MIT) — do akceptacji
+
+Nowa zależność produkcyjna (ostatnie wydanie 2023-10-19) — wymaga akceptacji Marka (root `AGENTS.md` l.26; lista §18a, pytanie Q11). Odczyt strumieniowy (`WorkbookReader`).
 
 ### 6.2 Import XLSX/CSV — kreator mapowania (MVP, rev 8a)
 
-Rev 8a: import XLSX jest w **MVP** (decyzja Koordynatora (a) — główna potrzeba: przeniesienie kosztów z Excela). Wykonanie: upload i podgląd synchronicznie, zatwierdzenie jako ProgressJob + worker kolejki, zapis komendą `project_costing.import.commit`. Edge case'y (formuły bez zapisanej wartości, scalone komórki, wiele arkuszy, „1 234,56”, jednostki ze słownika): rev 8b (Kod p9). MVP nie ma formuł — importujemy wartości komórek.
+Rev 8a: import XLSX jest w **MVP** (decyzja Koordynatora (a) — główna potrzeba: przeniesienie kosztów z Excela). Wykonanie: upload i podgląd synchronicznie, zatwierdzenie jako ProgressJob + worker kolejki, zapis komendą `project_costing.import.commit`. MVP nie ma formuł — importujemy wartości komórek.
+
+**Przypadki brzegowe (rev 8b, Kod p9):**
+- **Formuły:** czytamy wyłącznie ostatnią wartość zapisaną w pliku (`result`); formuła bez zapisanej wartości → linia z `import_error` (`formula_without_value`). Formuł nigdy nie wyliczamy.
+- **Scalone komórki:** wartość z lewej górnej komórki zakresu; pozostałe komórki zakresu puste.
+- **Wiele arkuszy:** użytkownik wybiera arkusz w kreatorze (domyślnie pierwszy niepusty).
+- **Liczby:** format wybierany w kreatorze (domyślnie `pl`: separator tysięcy spacja lub twarda spacja, przecinek dziesiętny, np. „1 234,56”); alternatywnie `en` („1,234.56”). Komórki liczbowe XLSX bierzemy bez parsowania tekstu.
+- **Jednostki:** mapowane na słownik jednostek przez `canonicalizeUnitCode` (§2.4); nieznana → linia z `import_error` (`unknown_unit`).
+- **Sekcje:** jawna kolumna `line_type` albo reguła wybrana w kreatorze („wiersz bez ilości i ceny = sekcja”) z podglądem wyniku przed zapisem — bez ukrytej heurystyki.
+
+**Błędny wiersz (rev 8b):** dwa poziomy.
+- *Odrzucony* (nie importowany, w raporcie z numerem wiersza i powodem): pusta etykieta przy niepustych liczbach, ilość nieliczbowa lub ujemna, koszt/cena nieliczbowe, wiersz ponad limit.
+- *Zaimportowany z błędem* (`import_error = true`, do poprawy w siatce; blokuje mark-sent — D58): nieznana jednostka, nieznana kategoria kosztu, formuła bez wartości.
+Import nigdy nie przerywa się na pierwszym błędzie; podgląd przed zapisem pokazuje liczby wierszy poprawnych, z błędem i odrzuconych. Tryb zapisu: `replace` (zastępuje linie wersji `draft`) albo `append`; wybór w kreatorze.
 
 
-1. Upload (max 10 MB, max 5000 wierszy — patrz §6.4).
+1. Upload (limity — §6.4).
 2. Podgląd (5 wierszy). Mapowanie: `line_type`, `label`, `quantity`, `unit`, `unit_cost`, `unit_price`, `cost_category`, `element_type`, `markup_pct`, `notes`.
 3. Sekcje importowane jako `line_type=section` gdy `quantity=null`. Mapowanie z `pc_import_column_mappings`.
 4. Walidacja + podgląd po mapowaniu. Zatwierdzenie: `POST .../import`.
 
-### 6.3 Eksport XLSX (v1, rev 8a)
+### 6.3 Eksport XLSX (v1)
 
 Rev 8a: eksport XLSX/CSV idzie do **v1**, bo nie jest marginalny — wymaga tej samej redakcji widoczności co API (§4.3) i osobnych testów tego kanału, a w MVP ofertę wysyła się jako PDF.
 
 
-Wieloarkuszowy (kolumny redagowane wg §4): linie, sumy per kategoria, nagłówek.
+Wieloarkuszowy (kolumny redagowane wg §4): linie, sumy per kategoria, nagłówek. Ochrona przed formula/CSV injection: wartości tekstowe zaczynające się od `=`, `+`, `-`, `@`, tabulatora lub CR są poprzedzane apostrofem; eksport nie zawiera formuł.
 
-### 6.4 Limity importu
+### 6.4 Limity i bezpieczeństwo importu XLSX/CSV (jedna wartość dla obu modułów — schedule §8.3)
 
-Max **5000 pozycji** / **10 MB**. Timeout 30 s.
+| Limit | Wartość |
+|---|---|
+| Rozmiar pliku (przed rozpakowaniem) | 10 MB |
+| Suma rozpakowanych części XLSX (sprawdzana z katalogu ZIP przed parsowaniem) | 100 MB |
+| Wiersze danych | 10 000 |
+| Kolumny | 200 |
+| Upload + podgląd (synchronicznie) | 30 s, potem 408 z komunikatem |
+| Zatwierdzenie (worker, ProgressJob) | 120 s na zadanie, potem status `failed` z raportem |
+
+- Odrzucane: pliki z makrami (`.xlsm`, `vbaProject.bin` w archiwum), niezgodność rozszerzenia i zawartości (sygnatura ZIP/CSV), zaszyfrowane arkusze.
+- Formuły nie są wyliczane (tylko wartość zapisana w pliku); zewnętrzne łącza i obiekty osadzone są ignorowane; parser bez pobierania czegokolwiek z sieci.
+- Parsowanie strumieniowe; przekroczenie limitu wierszy lub kolumn przerywa odczyt od razu (szybkie odrzucenie, bez pełnego parsowania).
+- Te same limity dotyczą importu harmonogramu do partii (§6.5) i importu harmonogramu w `project_schedule` (schedule §8.3).
+
+### 6.5 Import harmonogramu z XLSX do partii (`xlsx_import`, MVP — D50/D56)
+
+Dla firm bez Gantta: `POST /api/project-costing/calculations/:id/import-schedule` (upload + podgląd synchronicznie, zatwierdzenie jako ProgressJob, komenda `schedule_import.commit`). Kolumny: `label`, `element_type_code`, `quantity_m3`, `quantity_pcs`, `production_start_at`, `production_end_at`, `delivery_at` (daty jako komórki daty XLSX lub `YYYY-MM-DD`).
+- **Zastąpienie po potwierdzeniu (D56):** import zastępuje wszystkie partie kalkulacji; podgląd pokazuje, ile partii zostanie usuniętych (soft delete) i utworzonych; zapis dopiero po potwierdzeniu.
+- **Błędne wiersze odrzucane z raportem (D56):** pusta etykieta, niepoprawna data, koniec przed startem, ujemna ilość, obie ilości puste, nieznany `element_type_code`. Raport (numer wiersza, kolumna, powód) jest dostępny w ProgressJob i do pobrania.
+- Po zapisie: `origin = 'xlsx_import'`, `import_job_id`; aktywne źródło kalkulacji = `xlsx_import` (§7a.3); komenda `refresh_schedule_totals` przez kolejkę z debounce.
 
 ---
 
@@ -920,7 +1017,7 @@ export interface ScheduleSourceRegistry {
 | Implementacja | Właściciel | Opis |
 |---------------|-----------|------|
 | `EmbeddedScheduleSource` | `project_costing` | Czyta `pc_production_batches`; zawsze dostępna; fallback |
-| `XlsxImportSource` | `project_costing` | Import harmonogramu z XLSX do `pc_production_batches` (wariant embedded); `POST .../calculations/:id/import-schedule` (v1) |
+| `XlsxImportSource` | `project_costing` | Te same `pc_production_batches`, zasilane importem harmonogramu z XLSX (§6.5); `POST .../calculations/:id/import-schedule` (MVP — D50) |
 | `InternalScheduleSource` | **`project_schedule`** | Rejestrowana przez `project_schedule/di.ts`; czyta `ps_*` przez własne serwisy schedule. `isAvailable()` = moduł aktywny w organizacji (schedule §1.0) i istnieje harmonogram powiązany z kalkulacją. **Zero HTTP.** |
 | `ExternalAdapterSource` | przyszły moduł integracji | v2; rejestruje się tak samo |
 
@@ -935,9 +1032,9 @@ Priorytet (per kalkulacja/organizacja):
 
 ### 7a.4 Prognoza 6 miesięcy z aktywnego źródła
 
-Prognoza (`GET /api/project-costing/calculations/:id/production-forecast?months=6&probability=`) agreguje dane z `scheduleSourceService.getActiveSource(calculationId)`. Pro-rata LRM + ważenie prawdopodobieństwem — identyczna logika niezależnie od źródła (patrz `project_schedule` §4 dla wzorów LRM).
+Prognoza (`GET /api/project-costing/calculations/:id/production-forecast?months=6`) agreguje dane wyłącznie z aktywnego źródła (`scheduleSourceRegistry.getActive(calculationId)`), więc partie `pc_` i `ps_` nie są liczone podwójnie. Pro-rata LRM; zwraca obie metryki: ilości nieważone i ważone prawdopodobieństwem deala (§3.11; kalkulacja bez deala — tylko nieważone, D61). Logika identyczna niezależnie od źródła (wzory LRM — schedule §4).
 
-Pola `total_quantity_m3/pcs`, `production_start_at/end_at` w `pc_calculations` aktualizuje komenda `project_costing.calculations.refresh_schedule_totals` (DI, przez kolejkę z debounce). Wywołuje ją właściciel danych: costing po zmianie partii embedded, a `project_schedule` (jego subscriber na własne eventy) po zmianie harmonogramu. Costing nie subskrybuje eventów `project_schedule.*`.
+Pola `total_quantity_m3/pcs`, `production_start_at/end_at` w `pc_calculations` są cache'em przez `ScheduleSource`; aktualizuje je komenda `project_costing.calculations.refresh_schedule_totals` (DI, zadanie kolejki z debounce per kalkulacja). Wywołuje ją właściciel danych: costing po zmianie partii `pc_` (ręcznej lub z importu `xlsx_import`), a `project_schedule` (jego subscriber na własne eventy) po zmianie harmonogramu. Costing nie subskrybuje eventów `project_schedule.*`.
 
 ### 7a.5 Element types a opcjonalność
 
@@ -956,7 +1053,7 @@ GET   /api/project-costing/settings
 PATCH /api/project-costing/settings    (partial update; body: { key: value, ... })
 ```
 
-Odczyt i zapis przez `ModuleConfigService` (§2.2): `GET` zwraca ustawienia efektywne organizacji z kontekstu; `PATCH` zapisuje `org:{organizationId}:settings` (feature `project_costing.admin`). Klucze: `default_currency`, `default_overhead_rate`, `calculation_scope`, `pdf.*`, `schedule_source`, `schedule.enabled`.
+Odczyt i zapis przez `ModuleConfigService` (§2.2): `GET` zwraca ustawienia efektywne organizacji z kontekstu; `PATCH` zapisuje `org:{organizationId}:settings` (feature `project_costing.admin`). Klucze: `default_currency`, `default_overhead_rate`, `calculation_scope`, `pdf.*`, `schedule_source`, `schedule.enabled`, `rounding.mode`, `rounding.line_decimals`, `investments.trgm_threshold` (v1). Walidacja zod; nieznane klucze → 400.
 
 ### 8.2 Segmenty, kategorie kosztów i typy elementów
 
@@ -1002,68 +1099,69 @@ GET/POST  /api/project-costing/calculations?dealId=&status=&isActiveVersion=
 GET/PATCH /api/project-costing/calculations/:id
 DELETE    /api/project-costing/calculations/:id    (tylko draft)
 
-POST .../duplicate           (nowa rewizja: base_code + revision+1)
-POST .../recalc              (przelicz linie + narzut + tryb)
-POST .../activate            (is_active_version → true; wymaga deal_id != NULL)
-POST .../mark-sent           (snapshot + status=sent)
-POST .../mark-accepted       (status=accepted, is_active_version=true gdy deal_id != NULL)
-POST .../mark-rejected       (status=rejected)
-POST .../unlock              (admin: nowa rewizja draft, stara=superseded, audit log)
-POST .../apply-to-deal       (value_amount przez command bus; wymaga deal_id != NULL)
-POST .../generate-pdf        (z snapshota)
-POST .../attach-deal         (dołącz deal: body { dealId }; sprawdza match inwestycji)
-DELETE .../attach-deal       (odłącz deal; is_active_version → false)
-POST .../attach-investment   (dołącz inwestycję: body { investmentId }; tworzy pc_investments jeśli brak)
-DELETE .../attach-investment (odłącz inwestycję)
-GET  .../investment-match-candidates?name=&location=&identifiers[]=  (match §3.12)
-GET  .../production-forecast?months=6&probability=  (z aktywnego ScheduleSource)
+POST .../recalc              (MVP: przelicz sumy nagłówka funkcją calculate())
+POST .../recalc-from-catalog (MVP, D57: odśwież ceny z cennika tylko w liniach bez override)
+POST .../activate            (MVP: is_active_version → true; wymaga deal_id != NULL)
+POST .../mark-sent           (MVP: walidacja D58, snapshot + status=sent; body { confirmWarnings? })
+POST .../apply-to-deal       (MVP: tylko z wersji aktywnej — D59; jawna komenda customers.deals.update — D66)
+POST .../generate-pdf        (MVP: ProgressJob, z snapshota)
+POST .../attach-deal         (MVP: body { dealId })
+DELETE .../attach-deal       (MVP: odłącz deal; is_active_version → false)
+POST .../attach-investment   (MVP: body { investmentId } albo { newInvestment: { name, location } })
+DELETE .../attach-investment (MVP)
+GET  .../production-forecast?months=6  (MVP: z aktywnego ScheduleSource; metryki nieważona i ważona)
+POST .../import              (MVP: upload + podgląd; commit jako ProgressJob)
+GET  .../pdf-attachments     (MVP)
+GET  .../snapshot            (MVP, z redakcją)
 
-GET  .../export?format=xlsx|csv
-POST .../import
-GET  .../pdf-attachments
-GET  .../snapshot
-GET  .../compare?with=<otherId>          (diff dwóch wersji — patrz §8.10)
+POST .../new-revision        (v1, D57: jedna akcja zamiast unlock + duplicate; body { reason })
+POST .../mark-accepted       (v1: status=accepted)
+POST .../mark-rejected       (v1: status=rejected)
+GET  .../investment-match-candidates?name=&location=&identifiers[]=  (v1, §3.12)
+GET  .../export?format=xlsx|csv  (v1)
+GET  .../compare?with=<otherId>  (v1, §8.10)
 ```
 
 ### 8.5a Inwestycje
 
 ```
-GET/POST  /api/project-costing/investments?status=
-GET/PATCH /api/project-costing/investments/:id
-DELETE    /api/project-costing/investments/:id   (tylko gdy brak powiązanych kalkulacji)
+GET/POST  /api/project-costing/investments?status=&q=           (MVP; q = podpowiedź po kodzie INV-… lub nazwie)
+GET/PATCH /api/project-costing/investments/:id                    (MVP)
+DELETE    /api/project-costing/investments/:id   (MVP; tylko gdy brak powiązanych kalkulacji i ról ofert)
+GET       /api/project-costing/investments/:id/offer-roles               (MVP; lista ról ofert, §3.12)
+POST      /api/project-costing/investments/:id/offer-roles               (MVP; assign: body { dealId }; pierwsza oferta = primary — D65; komunikat D51)
+POST      /api/project-costing/investments/:id/offer-roles/set-primary   (MVP; body { dealId }; jedna komenda, jedna transakcja)
 
-GET/POST/DELETE /api/project-costing/investments/:id/identifiers[/:identifierId]
-GET       /api/project-costing/investments/:id/offer-roles               (lista ról ofert, §3.12)
-POST      /api/project-costing/investments/:id/offer-roles               (assign: body { dealId }; ostrzeżenie z komunikatem z §3.12)
-POST      /api/project-costing/investments/:id/offer-roles/set-primary   (body { dealId }; jedna komenda, jedna transakcja)
-POST      /api/project-costing/investments/:id/merge   (body: { targetId })
-GET       /api/project-costing/investments/match-candidates?name=&location=&identifiers[]=
+GET/POST/DELETE /api/project-costing/investments/:id/identifiers[/:identifierId]   (v1)
+POST      /api/project-costing/investments/:id/merge   (v1; body: { targetId })
+GET       /api/project-costing/investments/match-candidates?name=&location=&identifiers[]=   (v1)
 ```
 
-### 8.5b Embedded production batches
+### 8.5b Partie produkcji w kalkulacji (MVP)
 
 ```
 GET/POST  /api/project-costing/calculations/:id/production-batches
 PATCH/DELETE /api/project-costing/calculations/:id/production-batches/:batchId
-POST      /api/project-costing/calculations/:id/import-schedule   (xlsx_import source)
+POST      /api/project-costing/calculations/:id/import-schedule   (xlsx_import; podgląd → potwierdzenie → zastąpienie partii, D56; §6.5)
 ```
 
-`PATCH /api/project-costing/calculations/:id` akceptuje: `price_mode`, `overhead_rate`, `markup_rate`, `target_margin_rate`, `label`, `currency`, `notes`. Zmiana `price_mode` wyzwala recalc.
+`PATCH /api/project-costing/calculations/:id` akceptuje: `price_mode`, `overhead_rate`, `markup_rate`, `target_margin_rate`, `label`, `currency`, `notes`, `schedule_source_override`. Zmiana `price_mode` lub stawek przelicza sumy nagłówka w tej samej komendzie.
 
 ### 8.6 Linie kalkulacji
 
 ```
 GET/POST /api/project-costing/calculation-lines?calculationId=
 PATCH/DELETE /api/project-costing/calculation-lines/:id
-POST /api/project-costing/calculation-lines/batch   (bulk upsert — auto-save)
+POST /api/project-costing/calculation-lines/batch   (auto-save: tylko zmienione wiersze, pola wejściowe + updatedAt nagłówka; komenda save_lines — §0.3)
 ```
 
-Wersje z `status != 'draft'`: API odrzuca PATCH/DELETE z 409.
+Wersje z `status != 'draft'`: API odrzuca PATCH/DELETE z 409. Odpowiedzi zawierają pola pochodne z `calculate()` po redakcji (§4).
 
-### 8.7 `apply-to-deal` — jawna komenda `customers` wywołana przez użytkownika (rev 8a)
+### 8.7 `apply-to-deal` — jawna komenda `customers` wywołana przez użytkownika (D59, D66)
 
 `apply-to-deal` zapisuje `value_amount` deala, czyli pole modułu `customers`. Zgodnie z P0-2 costing **nie zapisuje pól obcego modułu po cichu**:
 - akcję uruchamia wyłącznie przycisk użytkownika („Zastosuj wartość do deala”) z potwierdzeniem pokazującym starą i nową wartość; żaden subscriber ani automat tego nie robi;
+- działa **tylko z wersji aktywnej** (`is_active_version = true`, D59); inna wersja → 422 `NOT_ACTIVE_VERSION`, a przycisk jest nieaktywny;
 - wykonanie = komenda właściciela `customers.deals.update` (`packages/core/src/modules/customers/commands/deals.ts`) przez `commandBus` z kontekstem użytkownika — z audytem, undo i ACL `customers` (użytkownik musi mieć prawo edycji deala oraz `project_costing.apply_to_deal`);
 - costing nie pisze bezpośrednio do tabel `customers` ani do custom fieldów deala.
 
@@ -1071,9 +1169,9 @@ Wersje z `status != 'draft'`: API odrzuca PATCH/DELETE z 409.
 await commandBus.execute({ commandId: 'customers.deals.update',
   input: { id: calculation.dealId, valueAmount: calculation.subtotalPrice }, ctx /* użytkownik */ })
 ```
-Alternatywa bez zapisu do `customers` (wartość kalkulacji tylko wyświetlana na dealu przez enricher) — pytanie otwarte Q1 (§16).
+Rozstrzygnięte (D66, dawne Q1): apply-to-deal to jawna komenda `customers.deals.update`, nie enricher.
 
-### 8.8 Koszty rzeczywiste
+### 8.8 Koszty rzeczywiste (v1)
 
 ```
 GET/POST /api/project-costing/cost-entries?dealId=&calculationId=
@@ -1088,7 +1186,7 @@ GET  /api/project-costing/deals/:dealId/budget-vs-actual   (raport budżet vs re
 GET/POST/PATCH/DELETE /api/project-costing/import-column-mappings[/:id]
 ```
 
-### 8.10 Porównanie wersji kalkulacji
+### 8.10 Porównanie wersji kalkulacji (v1)
 
 ```
 GET /api/project-costing/calculations/:id/compare?with=<otherId>
@@ -1129,7 +1227,7 @@ Pola kosztów/marż/cen w `headerDeltas` i `lineChanges.deltas` podlegają tej s
 
 ---
 
-## 9. Uprawnienia (ACL) — rev 8a
+## 9. Uprawnienia (ACL) — rev 8b
 
 Role OM: `superadmin`, `admin`, `employee` (`packages/core/src/modules/customers/setup.ts` `defaultRoleFeatures`). Ról `manager`/`sales` nie zakładamy (Kod p4; role własne tworzy się w UI auth, `sync-role-acls` ról nie tworzy). Feature'y z `acl.ts` trafiają do `setup.ts` `defaultRoleFeatures`.
 
@@ -1139,19 +1237,21 @@ Role OM: `superadmin`, `admin`, `employee` (`packages/core/src/modules/customers
 | `project_costing.view_prices` | Ceny sprzedaży | MVP | ✅ | ✅ |
 | `project_costing.view_costs` | Koszty (efektywnie tylko z `view_margin` albo bez `view_prices`, §4.2) | MVP | ✅ | ❌ |
 | `project_costing.view_margin` | Marża (i koszt przy widocznych cenach) | MVP | ✅ | ❌ |
-| `project_costing.view_margin_after_close` | Marża zaakceptowanej wersji wygranego deala | v1 | ✅ | ❌ |
+| `project_costing.view_margin_after_close` | Marża i koszt wersji aktywnej po zamknięciu deala (`closure_outcome` won albo lost — D49) | v1 | ✅ | ❌ |
 | `project_costing.edit` | Edycja kalkulacji i linii (tylko pól widocznych) | MVP | ✅ | ✅ |
 | `project_costing.edit_markup` | Edycja narzutów i trybu ceny | MVP | ✅ | ❌ |
-| `project_costing.lock` | Mark-sent (snapshot) | MVP | ✅ | ✅ |
+| `project_costing.lock` | Mark-sent (snapshot), generowanie PDF | MVP | ✅ | ✅ |
 | `project_costing.apply_to_deal` | Zastosuj wartość do deala (§8.7) | MVP | ✅ | ❌ |
-| `project_costing.import` | Import XLSX | MVP | ✅ | ✅ |
+| `project_costing.import` | Import XLSX linii i harmonogramu do partii (`xlsx_import`) | MVP | ✅ | ✅ |
 | `project_costing.export` | Eksport XLSX/CSV (PDF oferty wymaga `view` + `view_prices`) | v1 | ✅ | ✅ |
-| `project_costing.admin` | Ustawienia, cennik, kategorie, typy elementów, odblokowanie, merge inwestycji | MVP | ✅ | ❌ |
-| `project_costing.manage_offer_roles` | Przypisanie i zmiana oferty głównej | v1 | ✅ | ✅ |
+| `project_costing.admin` | Ustawienia (w tym `rounding.*`), cennik, kategorie, typy elementów; merge inwestycji (v1) | MVP | ✅ | ❌ |
+| `project_costing.new_revision` | „Nowa rewizja” wersji wysłanej (D57) | v1 | ✅ | ❌ |
+| `project_costing.manage_investments` | Zakładanie i edycja inwestycji, dołączanie kalkulacji do inwestycji | MVP | ✅ | ✅ |
+| `project_costing.manage_offer_roles` | Przypisanie i zmiana oferty głównej (D50) | MVP | ✅ | ✅ |
 | `project_costing.view_actual_costs` | Koszty rzeczywiste | v1 | ✅ | ❌ |
 | `project_costing.edit_actual_costs` | Wpisy kosztów rzeczywistych | v1 | ✅ | ❌ |
 
-`superadmin` ma wszystko z mocy roli. Domyślne przypisanie dla `employee` (bez kosztów i marży) to propozycja — pytanie Q5 (§16). Organizacja zmienia je, edytując role; to jest „ustawienie widoczności per firma” (D13, decyzja (e)).
+`superadmin` ma wszystko z mocy roli. `employee` domyślnie bez kosztów i marży (D68, dawne Q5); konfigurowalne. Organizacja zmienia przypisanie, edytując role; to jest „ustawienie widoczności per firma” (D48). Feature'y zostają w `acl.ts`; trasy deklarują `requiredFeatures`, a sprawdzanie jest wildcard-aware.
 
 ---
 
@@ -1167,50 +1267,55 @@ project_costing.calculation.sent        (clientBroadcast: true)
 project_costing.calculation.accepted
 project_costing.calculation.rejected
 project_costing.calculation.superseded
-project_costing.calculation.unlocked
+project_costing.calculation.revision_created   (v1, D57; zastępuje .unlocked)
+project_costing.calculation.deleted
+project_costing.investment.created
+project_costing.investment.updated
+project_costing.offer_role.changed     (clientBroadcast: true)
+project_costing.production_batches.replaced   (import harmonogramu, D56)
 project_costing.deal.value_applied      (clientBroadcast: true)
 project_costing.pdf.generated           (clientBroadcast: true)
 project_costing.cost_entry.created
 project_costing.cost_entry.updated
 ```
 
-Rev 8a: payload każdego eventu = `{ id, organizationId, tenantId, dealId?, investmentId? }`, bez kwot (§4.3). `clientBroadcast` tylko z ID. Dochodzi `project_costing.calculation.deleted` (dla konsumentów, np. `project_schedule`).
+Payload każdego eventu = `{ id, organizationId, tenantId, dealId?, investmentId? }`, bez kwot (§4.3). `clientBroadcast` tylko z ID. `project_costing.calculation.deleted` służy konsumentom (np. `project_schedule`).
 
 ### 10.2 Integracja z Dealem
 
 - Zakładka `detail:customers.deal:tabs`.
 - `apply-to-deal`: §8.7.
-- Subscribery (persistent) `customers.deal.updated|won|lost|deleted` → odśwież `deal_snapshot` (waluta, prawdopodobieństwo, status), przelicz `forecast_value`. Dane deala przez query engine / serwis DI, bez HTTP.
-- Rola oferty na dealu (v1): widget + response enricher (dane z `pc_deal_offer_roles`), bez zapisu do `customers`.
+- Subscribery (`persistent: true`) `customers.deal.updated|won|lost|deleted` → odśwież `deal_snapshot` (§0.6). Prognoza liczona z aktualnego snapshotu (§3.11). Dane deala przez query engine / serwis DI, bez HTTP.
+- Rola oferty i inwestycja na dealu (MVP — D50): widget + response enricher (dane z `pc_deal_offer_roles`), bez zapisu do `customers`. Enricher tylko wyświetla; wartość deala zmienia wyłącznie jawna komenda apply-to-deal (D66).
 
 ### 10.3 Integracja z `project_schedule` (rev 8a)
 
 `project_costing` nie subskrybuje eventów `project_schedule` i nie wywołuje jego API. Całą integrację trzyma `project_schedule` (konsument): rejestruje `InternalScheduleSource` w `scheduleSourceRegistry`, subskrybuje `project_costing.calculation.activated` / `.deleted` i po zmianach własnego harmonogramu wywołuje komendę costingu `refresh_schedule_totals` (DI, kolejka z debounce). Szczegóły: schedule §5.
 
-### 10.4 Inwestycja = jedna encja (`pc_investments`); wygaszenie `klin:project` (rev 8a, decyzja (c))
+### 10.4 Inwestycja = jedna encja (`pc_investments`); wygaszenie `klin:project` (D63)
 
-**Decyzja (propozycja rev 8a):** zostaje `pc_investments`. Uzasadnienie:
+**Decyzja D63:** `pc_investments` jest kanoniczne. Uzasadnienie:
 - `klin:project` to custom entity Data Designera: istnieje tylko w tenancie, który ją zdefiniował, a moduł musiałby polegać na jej ID i polach (ten sam problem co hardkodowany UUID `cf_offer_role`);
 - `pc_investments` ma typowany schemat, stabilny kod `INV-YYYY-NNNNNN`, identyfikatory zewnętrzne z unikalnością (D6), merge, partial unique na ofercie głównej i podlega komendom oraz ACL modułu;
 - jedno pojęcie zamiast dwóch prawie identycznych (Kod p11).
 
 Usunięte z modelu: `project_id` na `pc_calculations`/`pc_investments`/`pc_cost_entries`, endpointy `attach-project`, widget na stronie `klin:project`, strona `/project-costing/projects/:projectId`. Zamiast nich: strona inwestycji `/backend/project-costing/investments/:id` (deale z rolą oferty, suma inwestycji, kalkulacje) i zakładka na dealu przez istniejący spot `detail:customers.deal:tabs` (zweryfikowano: `packages/core/src/modules/customers/backend/customers/deals/[id]/hooks/useDealInjectedTabs.tsx` l.28).
 
-**Migracja danych `klin:project`** (jednorazowa, opcjonalna, v1; komenda CLI `yarn mercato project_costing import-klin-projects --tenant <id> [--dry-run]`):
+**Migracja danych `klin:project`** (jednorazowa, przy wdrożeniu modułu; komenda CLI `yarn mercato project_costing import-klin-projects --tenant <id> [--dry-run]`):
 1. Odczyt rekordów `klin:project` i ich relacji do deali przez serwis `entities` w DI (bez HTTP); brak definicji w tenancie = no-op.
-2. Dla każdego rekordu: znajdź `pc_investments` po identyfikatorze zewnętrznym (D6), a jeśli brak — utwórz nową (`name`, `location`, `legacy_klin_project_id`, identyfikatory) komendą `investments.create` (audyt).
-3. Dla każdego powiązanego deala utwórz `pc_deal_offer_roles` (rola z `cf_offer_role`, jeśli była — §3.12; brak = reguła „pierwsza oferta = primary”).
+2. Dla każdego rekordu: znajdź `pc_investments` po `legacy_klin_project_id` (idempotencja), a jeśli brak — utwórz nową (`name`, `location`, `legacy_klin_project_id`) komendą `investments.create` (audyt). Identyfikatory zewnętrzne (priorytet D6) dopisuje import, gdy tabela `pc_investment_identifiers` już istnieje (v1).
+3. Dla każdego powiązanego deala utwórz `pc_deal_offer_roles` (rola z `cf_offer_role`, jeśli była — §3.12; brak = reguła „pierwsza oferta = primary”, D65).
 4. Raport (`--dry-run` domyślnie pokazuje plan): utworzone, dopasowane, konflikty dwóch `primary`.
-5. Po akceptacji wyniku przez Marka definicję `klin:project` wyłącza użytkownik w Data Designerze; moduł jej nie usuwa i po imporcie nie czyta. D7/D43 wymagają nowego wiersza w `decisions.md` (Koordynator).
+5. Import właściwy uruchamiamy dopiero po `--dry-run` i akceptacji raportu przez Marka (D63). Potem definicję `klin:project` wyłącza użytkownik w Data Designerze; moduł jej nie usuwa i po imporcie nie czyta. (D7/D43 zastąpione przez D63.)
 
 ---
 
 ## 11. Analityka (`analytics.ts`)
 
-Encja `project_costing:calculations` (fieldMappings): id, dealId, status, priceMode, currency, subtotalCost[`view_costs`+`view_margin`], overheadAmount[`view_costs`+`view_margin`], fullCost[`view_costs`+`view_margin`], subtotalPrice[`view_prices`], totalMargin[`view_margin`], marginRate[`view_margin`], totalQuantityM3, totalQuantityPcs, createdAt, isActiveVersion. (Rev 8a: koszt wymaga też `view_margin`, §4.2. Analityka = v1.)
+Encja `project_costing:calculations` (fieldMappings): id, dealId, investmentId, status, priceMode, currency, subtotalCost[`view_costs`+`view_margin`], overheadAmount[`view_costs`+`view_margin`], fullCost[`view_costs`+`view_margin`], subtotalPrice[`view_prices`], totalMargin[`view_margin`], marginRate[`view_margin`], totalQuantityM3, totalQuantityPcs, createdAt, isActiveVersion. (Koszt wymaga też `view_margin`, §4.2. Analityka = v1.)
 
 Widget TOP/BOTTOM marża: filtr `isActiveVersion=true`, metryka `marginRate`[`view_margin`].
-Widget prognoza lejka: `subtotalPrice × probability` z `deal_snapshot` per etap (bez joinu do tabel `customers` w czasie zapytania; v1).
+Widget prognoza lejka (v1): metryki nieważona i ważona (§3.11) z `deal_snapshot` per etap D33 (bez joinu do tabel `customers` w czasie zapytania); kalkulacje bez deala w osobnym wierszu, poza ważoną (D61); deale przegrane i usunięte pominięte.
 
 ---
 
@@ -1220,19 +1325,21 @@ Widget prognoza lejka: `subtotalPrice × probability` z `deal_snapshot` per etap
 
 Spot: `detail:customers.deal:tabs`. Widget: `DealCalculationTab.tsx`.
 
-Nagłówek: dropdown wersji (display code `K/2026/001-R2`, status badge), tryb ceny A/B/C, `overhead_rate`, `markup_rate`/`target_margin_rate` per tryb, sumy (koszty/ceny/marża — redagowane wg §4), przycisk „Wyślij ofertę" → `mark-sent`, „Generuj PDF", „Aktywuj", „Zaakceptowano" / „Odrzucono", „Duplikuj jako nową rewizję".
+Nagłówek: dropdown wersji (display code `K/2026/001-R2`, status badge), tryb ceny A/B/C, `overhead_rate`, `markup_rate`/`target_margin_rate` per tryb, sumy (koszty/ceny/marża — redagowane wg §4), przycisk „Wyślij ofertę" → `mark-sent` (dialog: błędy blokujące albo ostrzeżenia do potwierdzenia — D58), „Generuj PDF", „Ustaw jako aktywną", „Przelicz z cennika" (D57), „Zastosuj wartość do deala" (tylko wersja aktywna — D59), „Inwestycja" (wybór z podpowiedzią po kodzie, rola oferty — D50/D51). v1: „Zaakceptowano" / „Odrzucono", „Nowa rewizja" (jedna akcja — D57).
 
-### 12.2 Siatka kosztów — `react-data-grid` v7 (MIT, ~50 KB)
+### 12.2 Siatka kosztów — `packages/ui` (`DataTable` + `InlineEditors`), `react-data-grid` tylko po akceptacji
 
-Hierarchia: kolumna `label` z wcięciem per `parent_line_id`. Typy linii: `section` (bold, tło DS), `item` (normalna), `note` (italic, bez liczb), `subtotal` (bold, podsumowanie).
+Rev 8b (Kod p10): najpierw PoC na komponentach `packages/ui` (`packages/ui/src/backend/detail/InlineEditors.tsx`, `DataTable`). `react-data-grid` v7 jest tylko w wersji beta — użyjemy go wyłącznie, gdy PoC nie spełni wymagań i Marek zaakceptuje zależność (§18a, Q11).
+
+Hierarchia: kolumna `label` z wcięciem per `parent_line_id`. Typy linii: `section` (bold, tło DS, suma sekcji wyliczana automatycznie), `item` (normalna), `note` (italic, bez liczb).
 
 Kolumny: line_type [icon], label, qty, unit, unit_cost [`view_costs`], unit_price [`view_prices`], markup_pct, line_cost [`view_costs`], line_price [`view_prices`], line_margin [`view_margin`], line_margin_pct [`view_margin`], akcje.
 
-### 12.3 Widok budget vs actual
+### 12.3 Widok budget vs actual (v1)
 
 Strona `/project-costing/deals/:dealId/actual-costs`: tabela per kategoria z kolumnami: bezpośredni koszt (budżet), narzut pośredni (budżet), pełny koszt (budżet), rzeczywisty, wariancja, wariancja %. Dane z `GET /api/project-costing/deals/:dealId/budget-vs-actual`.
 
-### 12.4 Porównanie wersji kalkulacji
+### 12.4 Porównanie wersji kalkulacji (v1)
 
 Strona `/project-costing/calculations/:id/compare?with=<otherId>` (lub modal z version selectorem). Widok side-by-side:
 - Nagłówek: sumy base vs compare (koszty/ceny/marża — redagowane wg §4), ze strzałkami kierunku zmiany (↑/↓) i kolorem DS.
@@ -1242,7 +1349,7 @@ Strona `/project-costing/calculations/:id/compare?with=<otherId>` (lub modal z v
 
 ### 12.5 Strony backend
 
-MVP: `/settings`, `/cost-categories`, `/element-types`, `/price-catalog[/id]`, `/calculations[/id]`, `/import-mappings`. v1: `/segments[/id]`, `/templates[/id]`, `/price-list-rules`, `/investments[/id]`, `/deals/:dealId/actual-costs`, `/calculations/:id/compare`. Listy i formularze na `DataTable`/`CrudForm` z `packages/ui`.
+MVP: `/settings`, `/cost-categories`, `/element-types`, `/price-catalog[/id]`, `/calculations[/id]`, `/import-mappings`, `/investments[/id]` (lista, formularz, deale z rolą oferty i suma inwestycji). v1: `/segments[/id]`, `/templates[/id]`, `/price-list-rules`, `/investments/:id` (identyfikatory, merge), `/deals/:dealId/actual-costs`, `/calculations/:id/compare`. Listy i formularze na `DataTable`/`CrudForm` z `packages/ui`.
 
 ---
 
@@ -1252,98 +1359,70 @@ MVP: `/settings`, `/cost-categories`, `/element-types`, `/price-catalog[/id]`, `
 
 ---
 
-## 14. Fazy i szacowanie wysiłku (rev 8a — przeliczone od zera)
+## 14. Fazy — zakres funkcji i encji (rev 8b)
 
-**Metoda.** Liczymy encje, trasy API i ekrany w każdej fazie. Prace domenowe (D) szacujemy osobno od narzutu OM (O), który wynika z konwencji repo: per encja — migracja i snapshot, zod, komendy z undo, `makeCrudRoute` + `openApi` + indexer, granty w `setup.ts` (`packages/core/AGENTS.md` l.8–13); per ekran — `CrudForm`/`DataTable`; i18n pl/en; testy integracyjne każdej trasy API w tej samej zmianie (root `AGENTS.md` l.166, `.ai/qa/AGENTS.md`; Playwright w `__integration__` modułu) oraz unit Jest. Stawki: pełna encja 0,5 d, encja systemowa (bez CRUD dla użytkownika) 0,25 d, ekran 0,4 d, ~0,1 d testu integracyjnego na trasę. Do tego bufor 10% (integracja, review, poprawki po odbiorze Cezara).
+Rev 8b (P11): estymaty w dniach usunięte ze specyfikacji. Fazy opisujemy wyłącznie listą funkcji, encji i tras. Harmonogram realizacji i wycenę prowadzi Koordynator poza speką.
 
-### `project_costing` — MVP (40 dni roboczych)
+### `project_costing` — MVP
 
-Zakres (Kod p15 + decyzja (a)): siatka sekcje → pozycje, import XLSX, tryby A i C, prosty cennik firmy (jedno źródło `company_catalog`, bez reguł), mark-sent ze snapshotem + PDF, apply-to-deal, widoczność przez RBAC, partie produkcji w kalkulacji + prognoza 6 mies. Bez Gantta, formuł, eksportu XLSX, trybu B, inwestycji i porównania wersji.
+**Funkcje:**
+1. Szkielet modułu: `index.ts`, `acl.ts`, `setup.ts` (`defaultRoleFeatures`), `events.ts`, `di.ts`; ustawienia per organizacja przez ModuleConfigService (`org:{id}:settings`, D69), w tym `rounding.*` (D62/D16).
+2. Słowniki: kategorie kosztów, typy elementów, jednostki (słownik `dictionaries`, §2.4).
+3. Prosty cennik firmy (jedno źródło `company_catalog`, bez reguł): lookup pozycji w siatce, proweniencja ceny, „Przelicz z cennika” tylko dla linii bez override (D57).
+4. Nagłówek kalkulacji: numeracja sekwencją Postgresa per organizacja (`pc_document_sequences`, wzór `SalesDocumentNumberGenerator`), statusy `draft`/`sent`, attach/detach deal, `deal_snapshot` z subscriberów (§0.6), wersja aktywna (`activate`; pierwsza kalkulacja deala aktywna automatycznie).
+5. Czysta funkcja `calculate()` (klient = serwer): tryby A i C, sekcja → pozycje (jeden poziom), linie `note`, narzut, zaokrąglenia half-up per linia (§2.3); komenda `save_lines` (wejścia + sumy nagłówka, lock na nagłówku); benchmark 10 000 linii.
+6. Siatka „jak Excel” (edycja klawiaturą, sekcje, autosave) na komponentach `packages/ui`.
+7. Import XLSX linii: upload, podgląd, kreator mapowania, przypadki brzegowe i limity (§6.2, §6.4), ProgressJob + worker, komenda commit.
+8. Mark-sent z walidacją D58: snapshot (`pc_offer_snapshots`) + PDF oferty (`pdf-lib`) w workerze + `attachments`.
+9. Apply-to-deal z wersji aktywnej (D59): jawna komenda `customers.deals.update` (D66) + zakładka „Kalkulacja” na `detail:customers.deal:tabs`.
+10. RBAC i redakcja we wszystkich kanałach (§4.3): API, payload indexera, search, audit, eventy, PDF; `employee` bez kosztów i marży (D68).
+11. Minimalne inwestycje (D50, D63): `pc_investments` (kod `INV-…`, nazwa, lokalizacja), ręczne wskazanie z podpowiedzią po kodzie/nazwie, strona inwestycji z sumą.
+12. Role ofert (D50/D51/D65): `pc_deal_offer_roles`, assign (pierwsza oferta = primary), set-primary w jednej transakcji z komunikatem „Istnieje już oferta dla innego wykonawcy — wskaż, która jest główna”, widget + enricher na dealu.
+13. Importy wdrożeniowe CLI (D63/D64): `import-klin-projects` i `import-offer-roles` — idempotentne, z `--dry-run` i raportem.
+14. Partie produkcji: ręczne (`calculation_embedded`) i import harmonogramu XLSX (`xlsx_import`, zastąpienie po potwierdzeniu, odrzucenie błędnych wierszy z raportem — D56); `ScheduleSource` + rejestr DI; prognoza 6 mies. (LRM, nieważona i ważona).
 
-Encje: pełne (7) `pc_cost_categories`, `pc_element_types`, `pc_price_catalog`, `pc_calculations`, `pc_calculation_lines` (sub-resource), `pc_production_batches`, `pc_import_column_mappings`; systemowe (2) `pc_offer_snapshots`, `pc_calculation_pdf_attachments`; seed `pc_price_sources` (1 wiersz, bez CRUD). Trasy API: 43 (settings 2, cost-categories 4, element-types 4, price-catalog 4 + search 1, calculations CRUD 4 + mark-sent, generate-pdf, pdf-attachments, snapshot, apply-to-deal, recalc, attach-deal, detach-deal, production-forecast = 13, calculation-lines 4 + batch 1, production-batches 4, import preview + commit 2, import-column-mappings 4). Ekrany: 6 (ustawienia, kategorie, typy elementów, cennik, lista kalkulacji, mapowania importu); siatka i zakładka deala liczone w D.
+**Encje MVP:** `pc_cost_categories`, `pc_element_types`, `pc_price_sources` (seed), `pc_price_catalog`, `pc_calculations`, `pc_calculation_lines` (sub-resource), `pc_offer_snapshots`, `pc_calculation_pdf_attachments`, `pc_import_column_mappings`, `pc_production_batches`, `pc_investments` (minimalnie), `pc_deal_offer_roles`, `pc_document_sequences` (systemowa).
 
-| # | Zadanie | Dni |
-|---|---------|-----|
-| D1 | Szkielet modułu: `index.ts`, `acl.ts`, `setup.ts` (`defaultRoleFeatures`), `events.ts`, `di.ts`; ustawienia per organizacja przez ModuleConfigService | 1 |
-| D2 | Prosty cennik firmy: lookup pozycji w siatce, proweniencja ceny | 1 |
-| D3 | Nagłówek kalkulacji: numeracja sekwencją Postgresa per organizacja (wzór `packages/core/src/modules/sales/services/salesDocumentNumberGenerator.ts`), statusy draft/sent, attach/detach deal, `deal_snapshot` | 1,5 |
-| D4 | Czysta funkcja `calculate()` (klient = serwer): tryby A i C, sekcja → pozycje, narzut; komenda zapisu inputów + sum, lock na nagłówku; benchmark 5000 linii | 2,5 |
-| D5 | Siatka „jak Excel” (edycja klawiaturą, sekcje, autosave) na komponentach `packages/ui` | 4 |
-| D6 | Import XLSX: upload, podgląd, kreator mapowania, ProgressJob + worker, komenda commit | 3,5 |
-| D7 | Mark-sent: snapshot (`pc_offer_snapshots`) + PDF oferty w workerze + `attachments` | 3 |
-| D8 | Apply-to-deal (jawna komenda `customers`) + zakładka „Kalkulacja” na `detail:customers.deal:tabs` | 1,5 |
-| D9 | RBAC i redakcja we wszystkich kanałach (§4.3): API, payload indexera, search, audit, eventy, PDF | 2 |
-| D10 | Partie produkcji (`pc_production_batches`), `ScheduleSource` + rejestr DI, prognoza 6 mies. (LRM) | 2,5 |
-| | **Suma prac domenowych** | **23** |
-| O1 | Narzut OM per encja: 7 × 0,5 + 2 × 0,25 | 4 |
-| O2 | `CrudForm`/`DataTable`: 6 ekranów × 0,4 | 2,5 |
-| O3 | i18n pl/en | 1 |
-| O4 | Testy integracyjne Playwright: 43 trasy × ~0,1 | 4,5 |
-| O5 | Testy unit Jest (`calculate()`, LRM, numeracja, redakcja) | 1,5 |
-| | **Suma narzutu OM** | **13,5** |
-| B | Bufor 10% | 3,5 |
-| | **Suma MVP** | **40** |
+**Poza MVP:** Gantt, formuły, eksport XLSX, tryb B, reguły cennika, segmenty, szablony, identyfikatory i dopasowanie inwestycji, merge, „Nowa rewizja”, accepted/rejected, porównanie wersji, koszty rzeczywiste, analityka.
 
-### `project_costing` — v1 (45 dni roboczych)
+### `project_costing` — v1
 
-Encje: 8 (`pc_segments`, `pc_price_list_rules`, `pc_calculation_templates`, `pc_calculation_template_lines`, `pc_investments`, `pc_investment_identifiers`, `pc_deal_offer_roles`, `pc_cost_entries`). Trasy API: 44 (segments 4, price-list-rules 4, templates 4 + lines 4, investments 5 + identifiers 3 + merge 1 + match 1, offer-roles 3, lifecycle 5, compare 1, cost-entries 4 + budget-vs-actual 1 + import-schedule 1, export 1, price-catalog import/export 2). Ekrany: 8.
+**Funkcje:**
+1. Tryb B (`target_margin`) + redystrybucja z resztą na największej linii (§3.6).
+2. Wielopoziomowe reguły cennika (`pc_price_list_rules`).
+3. Segmenty.
+4. Szablony kalkulacji.
+5. Inwestycje — pełne: identyfikatory zewnętrzne (priorytet D6: e-Zamówienia > TED > BIP > INV), dopasowanie (identyfikator → pg_trgm), merge.
+6. Pełny cykl wersji: „Nowa rewizja” jako jedna akcja (D57), `accepted`/`rejected`/`superseded`.
+7. Porównanie wersji (`/compare` + UI).
+8. Koszty rzeczywiste + raport budżet vs wykonanie.
+9. Analityka: TOP/BOTTOM marża, prognoza lejka (nieważona i ważona; bez deala osobno — D61); `view_margin_after_close` (D49).
+10. Eksport XLSX/CSV z redakcją i ochroną przed formula injection.
+11. `quantity_expr` z bezpiecznym parserem arytmetyki (bez `eval`; ilość z wymiarów) — D30.
+12. Import/eksport cennika CSV/XLSX.
+13. Przeliczniki jednostek (`pc_unit_conversions`, §2.4).
 
-| # | Zadanie | Dni |
-|---|---------|-----|
-| D1 | Tryb B (`target_margin`) + redystrybucja | 1,5 |
-| D2 | Wielopoziomowe reguły cennika (`pc_price_list_rules`) | 2,5 |
-| D3 | Segmenty | 1 |
-| D4 | Szablony kalkulacji | 2 |
-| D5 | Inwestycje: encja, identyfikatory, dopasowanie (identyfikator → pg_trgm), merge, strona inwestycji | 4 |
-| D6 | Role ofert (`pc_deal_offer_roles`): assign + komunikat, set-primary w jednej transakcji, enricher/widget na dealu | 2 |
-| D7 | Jednorazowe importy `cf_offer_role` i `klin:project` (CLI, dry-run, raport) | 1,5 |
-| D8 | Pełny cykl wersji: accepted/rejected/superseded, activate, unlock, duplicate | 2 |
-| D9 | Porównanie wersji (`/compare` + UI) | 2 |
-| D10 | Koszty rzeczywiste + raport budżet vs wykonanie | 2,5 |
-| D11 | Analityka: TOP/BOTTOM marża, prognoza lejka | 1,5 |
-| D12 | Eksport XLSX/CSV z redakcją (TC-IMP-008 → v1) + import harmonogramu XLSX do partii | 1,5 |
-| D13 | `quantity_expr` z bezpiecznym parserem arytmetyki (bez `eval`; ilość z wymiarów) — D30 | 2 |
-| D14 | Import/eksport cennika CSV/XLSX | 1 |
-| | **Suma prac domenowych** | **27** |
-| O1 | Narzut OM per encja: 8 × 0,5 | 4 |
-| O2 | `CrudForm`/`DataTable`: 8 ekranów × ~0,4 | 3 |
-| O3 | i18n pl/en | 1 |
-| O4 | Testy integracyjne: 44 trasy × ~0,1 | 4,5 |
-| O5 | Testy unit (tryb B, reguły, parser, dopasowanie) | 1,5 |
-| | **Suma narzutu OM** | **14** |
-| B | Bufor 10% | 4 |
-| | **Suma v1** | **45** |
+**Encje v1:** `pc_segments`, `pc_price_list_rules`, `pc_calculation_templates`, `pc_calculation_template_lines`, `pc_investment_identifiers`, `pc_cost_entries`, `pc_unit_conversions`; rozszerzenie `pc_investments` (`investment_key` + indeks trgm, `merged_into_id`).
 
-### `project_costing` — v2 (16 dni roboczych)
+### `project_costing` — v2
 
-| # | Zadanie | Dni |
-|---|---------|-----|
-| D1 | Multi-segment + nowe kategorie | 1 |
-| D2 | Adapter Sekocenbud/Intercenbud XLSX + KNR `mapExternalCode` | 2,5 |
-| D3 | Import kosztów rzeczywistych z faktur + integracje (ERP, plik) | 2 |
-| D4 | Biblioteka szablonów KNR (seed) | 2 |
-| D5 | Konwersja walutowa (`currencies`) | 1 |
-| D6 | AI-tool: generowanie linii kalkulacji z opisu | 3 |
-| | **Suma prac domenowych** | **11,5** |
-| O | Narzut OM (trasy, testy, i18n) | 3 |
-| B | Bufor 10% | 1,5 |
-| | **Suma v2** | **16** |
+1. Multi-segment + nowe kategorie.
+2. Adapter Sekocenbud/Intercenbud XLSX + KNR `mapExternalCode`.
+3. Import kosztów rzeczywistych z faktur + integracje (ERP, plik).
+4. Biblioteka szablonów KNR (seed).
+5. Wiele walut i konwersja (`currencies`) — po decyzjach Q6–Q8.
+6. AI-tool: generowanie linii kalkulacji z opisu.
 
-**Total `project_costing`**: 40 + 45 + 16 = **101 dni roboczych**.
+### Narzut OM (wymagania w każdej fazie, bez estymaty)
 
----
+Każda encja i trasa z fazy przechodzi przez konwencje repo: migracja i snapshot, walidatory zod, komendy z undo i `audit_logs`, `makeCrudRoute` + `openApi` + indexer, granty w `setup.ts` (`packages/core/AGENTS.md` l.8–13); każdy ekran na `CrudForm`/`DataTable`; i18n pl/en; testy integracyjne każdej trasy API w tej samej zmianie (root `AGENTS.md` l.166, `.ai/qa/AGENTS.md`; Playwright w `__integration__` modułu) oraz testy unit Jest (`calculate()`, zaokrąglenia, LRM, numeracja, redakcja, import).
 
-### Podsumowanie zbiorcze (oba moduły) — rev 8a
+### Zakres zbiorczy (oba moduły)
 
-| Moduł | MVP | v1 | v2 | Suma |
-|-------|-----|----|----|------|
-| `project_costing` | 40 d | 45 d | 16 d | 101 d |
-| `project_schedule` | 0 d | 34 d | 16 d | 50 d |
-| **Łącznie** | **40 d** | **79 d** | **32 d** | **151 d** |
-
-Jednostka: dzień roboczy doświadczonego dewelopera znającego OM. Każda faza zawiera osobne pozycje na narzut OM (encje, ekrany, i18n, testy) i bufor 10%. Szczegóły: costing §14, schedule §12.
-
-**Porównanie z szacunkiem Kod (review PR #10, 2026-10-19):** Kod: przycięte MVP ~25–30 d, całość ~150–170 d, MVP bez przycięcia ~50–60 d; rev 7: 94,5 d. Rev 8a: MVP 40 d = ~31,5 d dla zakresu Kod (górna granica jego widełek) + import XLSX w MVP (decyzja Koordynatora (a): ~3,5 d domeny + ~1,5 d narzutu) + bufor 3,5 d. Całość 151 d mieści się w widełkach Kod. Różnica względem rev 7 (+56,5 d) to głównie narzut OM liczony jawnie (~52 d we wszystkich fazach), bufor (~15 d) i własny Gantt bez SVAR PRO (~10,5 d: auto-scheduling 3,5 + własne elementy UI ~2 + CPM 3 + kalendarz dni roboczych 2).
+| Moduł | MVP | v1 | v2 |
+|---|---|---|---|
+| `project_costing` | lista MVP powyżej | lista v1 powyżej | lista v2 powyżej |
+| `project_schedule` | — (moduł nie wchodzi do MVP) | schedule §12 | schedule §13 |
 
 ---
 
@@ -1351,36 +1430,51 @@ Jednostka: dzień roboczy doświadczonego dewelopera znającego OM. Każda faza 
 
 | # | Scenariusz awarii | Obszar | Ważność | Mitygacja | Ryzyko rezydualne |
 |---|---|---|---|---|---|
-| R1 | Siatka nie udźwignie hierarchii + 5000 linii (lag, utrata edycji) | UI siatki | Wysoka | PoC na `packages/ui` przed D5; benchmark 5000 linii; MVP: tylko sekcja → pozycje | Średnie — wydajność edycji „jak Excel” potwierdzi dopiero PoC |
-| R2 | PDF z hierarchiczną tabelą łamie layout lub przekracza czas | PDF | Średnia | Generowanie w workerze (ProgressJob); test layoutu z wieloma sekcjami | Niskie |
-| R3 | Tryb B przy `R < 0` daje ujemne ceny (v1) | Obliczenia | Średnia | Ostrzeżenie + blokada mark-sent (szczegóły rev 8b, Kod p19) | Niskie |
-| R4 | Dryf zaokrągleń | Obliczenia | Niska | Residual na ostatniej linii; jedna funkcja `calculate()` klient = serwer | Niskie (≤ 0,01 PLN) |
+| R1 | Siatka nie udźwignie hierarchii + 10 000 linii (lag, utrata edycji) | UI siatki | Wysoka | PoC na `packages/ui` przed budową siatki (§14 MVP pkt 6); benchmark 10 000 linii; minimalny zapis (§0.3); MVP: tylko sekcja → pozycje | Średnie — wydajność edycji „jak Excel” potwierdzi dopiero PoC |
+| R2 | PDF z hierarchiczną tabelą łamie layout lub przekracza czas (`pdf-lib` nie ma silnika layoutu) | PDF | Średnia | Generowanie w workerze (ProgressJob); własny moduł łamania tabeli; test layoutu z wieloma sekcjami i polskimi znakami | Niskie |
+| R3 | Tryb B przy `R < 0` daje ujemne ceny (v1) | Obliczenia | Średnia | Ostrzeżenie w edycji + blokada mark-sent (D58, §3.8) | Niskie |
+| R4 | Dryf zaokrągleń | Obliczenia | Niska | Half-up per linia, suma = suma zaokrąglonych linii (D62); reszta trybu B na największej linii; jedna funkcja `calculate()` klient = serwer; arytmetyka dziesiętna | Niskie (≤ jednostka zaokrąglenia na linię) |
 | R5 | Wyścig: dwie aktywne wersje albo dwie oferty `primary` | Dane | Wysoka | Partial unique indexy + obsługa konfliktu 409 (bez SERIALIZABLE) | Niskie — użytkownik ponawia akcję |
 | R6 | Konflikt optimistic lock deala przy apply-to-deal | Integracja `customers` | Średnia | Komenda `customers.deals.update` z `updatedAt`; 409 → odśwież i ponów | Niskie |
 | R7 | Brak integracji z fakturami w v1 | Koszty rzeczywiste | Niska | Ręczne wpisy w v1; import w v2 | Niskie (świadoma decyzja zakresu) |
-| R8 | Snapshot `jsonb` rośnie (5000 linii × N wersji) | Baza | Niska | Snapshot tylko przy mark-sent | Niskie |
+| R8 | Snapshot `jsonb` rośnie (10 000 linii × N wersji) | Baza | Niska | Snapshot tylko przy mark-sent | Niskie |
 | R9 | pg_trgm daje fałszywe dopasowania | Inwestycje (v1) | Niska | Próg konfigurowalny; zawsze potwierdza użytkownik | Niskie |
 | R11 | Wyciek marży/kosztu kanałem pominiętym w §4.3 (np. nowy widget) | Bezpieczeństwo danych | Wysoka | Jedna funkcja redakcji; test integracyjny per kanał dla roli `employee` | Średnie — każdy nowy kanał wymaga testu |
-| R12 | `ModuleConfigService` nie rozróżnia organizacji (zweryfikowane w kodzie) | Konfiguracja | Średnia | Nazwa klucza z `organizationId` + merge w `projectCostingSettings`; testy izolacji organizacji | Niskie — gdyby core dodał natywny scope organizacji, trzeba przenieść klucze |
-| R13 | n8n dalej wysyła `cf_offer_role` (D39), więc są dwa źródła prawdy | Dane / integracja | Średnia | Moduł nie czyta `cf_offer_role` po imporcie; decyzja Q2 | Średnie do czasu decyzji Q2 |
-| R14 | Import `klin:project` tworzy duplikaty inwestycji | Migracja | Średnia | `--dry-run`, dopasowanie po identyfikatorach, raport konfliktów | Niskie |
-| R15 | Wycena niedoszacowana (konwencje OM, bety zależności) | Plan | Średnia | Jawny narzut OM + bufor 10%; przegląd po MVP | Średnie |
+| R12 | `ModuleConfigService` nie rozróżnia organizacji (zweryfikowane w kodzie) | Konfiguracja | Średnia | Świadome obejście D69: klucz `org:{id}:settings` + merge w `projectCostingSettings`; testy izolacji organizacji | Niskie — gdyby core dodał natywny scope organizacji, trzeba przenieść klucze |
+| R13 | Okres przejściowy (D64): n8n wysyła `cf_offer_role` do wdrożenia modułu i migracji, więc przez ten czas są dwa źródła | Dane / integracja | Średnia | Import `import-offer-roles` idempotentny i powtarzalny (tworzy tylko brakujące wiersze) tuż przed wyłączeniem wysyłki w n8n; moduł nie czyta `cf_offer_role` w runtime | Niskie po wyłączeniu wysyłki w n8n |
+| R14 | Import `klin:project` tworzy duplikaty inwestycji | Migracja | Średnia | `--dry-run` + akceptacja raportu (D63), idempotencja po `legacy_klin_project_id`, raport konfliktów | Niskie |
+| R15 | Zakres niedoszacowany (konwencje OM, bety zależności) | Plan | Średnia | Narzut OM opisany jako wymagania w każdej fazie (§14); zależności do akceptacji przed implementacją (§18a); przegląd zakresu po MVP | Średnie |
+| R16 | Zależność od wersji beta (`react-data-grid` v7) lub dużej rodziny pakietów (`@svar-ui`) | Zależności | Średnia | Najpierw `packages/ui`; nowe pakiety tylko po akceptacji (Q11) | Niskie |
 
 (R10 z rev 7 — sekwencja dwóch komend `cf_offer_role` — usunięte: rola oferty zmieniana jedną komendą w jednej transakcji, §3.12.)
 
 ---
 
-## 16. Pytania otwarte do Marka (rev 8a)
+## 16. Pytania otwarte do Marka (rev 8b)
 
-Zamknięte w rev 8a: **pkt 14 (formuły)** — MVP bez formuł; v1 `quantity_expr` z bezpiecznym parserem arytmetyki, bez `eval` (D30; §14 v1 D13). **Pkt 20 (SVAR PRO)** — Gantt własny, bez SVAR PRO (D21; schedule §3.2).
+**Zamknięte** (`.ai/decisions.md`, d818aa2):
+
+| # | Temat | Rozstrzygnięcie |
+|---|---|---|
+| Q1 | Apply-to-deal | D66: jawna komenda `customers.deals.update` (przycisk), nie enricher; tylko z wersji aktywnej (D59) |
+| Q2 | `cf_offer_role` z n8n | D64: n8n wysyła do czasu wdrożenia i migracji; potem wyłączenie; R13 przejściowe |
+| Q3 | Import `klin:project` | D63: `pc_investments` kanoniczne; import po `--dry-run` i akceptacji raportu, potem `klin:project` wyłączony; inwestycje zakłada handlowiec, nie n8n |
+| Q4 | Wyłączenie harmonogramu | D67: dane zostają, ukryte do ponownego włączenia (schedule §1.0) |
+| Q5 | Uprawnienia `employee` | D68: domyślnie bez kosztów i marży; konfigurowalne przez role |
+| — | Ustawienia per organizacja | D69: klucz `org:{id}:settings` jako świadome obejście (R12) |
+| — | Formuły | MVP bez formuł; v1 `quantity_expr` z bezpiecznym parserem (D30) |
+| — | Gantt | własny, bez SVAR PRO (D21; schedule §3.2) |
+
+**Otwarte (biznesowe, rev 8b):**
 
 | # | Pytanie | Opcje | Propozycja |
 |---|---|---|---|
-| Q1 | Apply-to-deal: czy kalkulacja ma zapisywać wartość deala? | (a) jawna akcja użytkownika → komenda `customers.deals.update` (§8.7); (b) bez zapisu — wartość kalkulacji tylko wyświetlana na dealu przez enricher | (a) — zgodne z dotychczasowym apply-to-deal, bez cichych zapisów |
-| Q2 | Co z `cf_offer_role` wysyłanym przez n8n (D39) po przejściu na `pc_deal_offer_roles`? | (a) n8n przestaje wysyłać pole; rolę nadaje costing (pierwsza oferta = primary); (b) pole zostaje jako informacyjne, moduł je ignoruje | (a) — jedno źródło prawdy; wymaga zmiany kontraktu n8n (Enka) |
-| Q3 | Czy wykonać jednorazowy import `klin:project` → `pc_investments` i potem wyłączyć `klin:project`? | tak / nie (inwestycje zakładane ręcznie) | tak, po `--dry-run` i akceptacji raportu |
-| Q4 | Wyłączenie harmonogramu w organizacji, która ma już harmonogramy | (a) dane zostają, niewidoczne do ponownego włączenia; (b) archiwizacja | (a) |
-| Q5 | Domyślne uprawnienia roli `employee` | (a) bez kosztów i marży (ceny, edycja ilości, import, mark-sent); (b) z kosztami bez marży — niemożliwe przy widocznych cenach (§4.2) | (a); osoby liczące koszty dostają rolę `admin` lub własną |
+| Q6 | Czy kalkulacja może być w walucie innej niż PLN (wiele walut)? | (a) tylko PLN; (b) waluta deala, jedna na kalkulację; (c) waluty per linia | (b) — waluta deala, bez mieszania walut w kalkulacji |
+| Q7 | Zaokrąglenie per waluta | (a) zawsze 2 miejsca; (b) wg ISO 4217 (np. JPY 0, KWD 3) | (b), gdy Q6 = (b)/(c) |
+| Q8 | Źródło kursów i zamrożenie kursu | (a) NBP tabela A z dnia mark-sent, zamrożony w snapshocie; (b) kurs ręczny w kalkulacji | (a) z możliwością ręcznej korekty przed mark-sent |
+| Q9 | Harmonogram wykonawczy po ponownym otwarciu deala (`closure_outcome` → NULL) | (a) zostaje bez zmian; (b) archiwizowany; (c) oznaczony „deal ponownie otwarty” | (c) — bez usuwania danych |
+| Q10 | Cena zero (`unit_price = 0`) na pozycji | (a) dozwolona bez ostrzeżenia; (b) ostrzeżenie przy mark-sent; (c) blokada | (b) |
+| Q11 | Akceptacja nowych zależności (§18a) | per pakiet: tak / nie / najpierw PoC | `exceljs` — tak; siatka — najpierw `packages/ui`; `@svar-ui` — PoC w v1 schedule; `xml2js` — dopiero v2 |
 
 ---
 
@@ -1388,41 +1482,54 @@ Zamknięte w rev 8a: **pkt 14 (formuły)** — MVP bez formuł; v1 `quantity_exp
 
 | # | Założenie | Uzasadnienie |
 |---|-----------|--------------|
-| A1 | Siatka: react-data-grid v7 (MIT, ~50 KB) | Najlżejsza z Excel-like UX |
-| A2 | Tryby A/B/C + dziedziczenie markup_pct: jednolita redistrybuowanie §3.6; margin_rate z rzeczywistych sum | Spójność; markup per item/sekcja nie zastępuje trybów B/C ale współdziała |
-| A3 | **Rev 8a (poprawione):** `project_costing` = moduł bazowy; `project_schedule` (opcjonalny) zależy od costing i rejestruje provider `ScheduleSource` w DI; costing nigdy nie importuje schedule; zero HTTP | Jednokierunkowa zależność zgodna z `packages/core/AGENTS.md` § Cross-Module Coupling (Kod P0-1) |
+| A1 | Siatka: najpierw `packages/ui` (`DataTable` + `InlineEditors`); `react-data-grid` v7 (beta) tylko po PoC i akceptacji (Q11) | Kod p10; root `AGENTS.md` l.26 |
+| A2 | Tryby A/B/C + dziedziczenie markup_pct: jednolita redystrybucja §3.6; margin_rate z rzeczywistych sum | Spójność; markup per item/sekcja nie zastępuje trybów B/C, ale współdziała |
+| A3 | **Rev 8a (poprawione):** `project_costing` = moduł bazowy; `project_schedule` (opcjonalny) zależy od costing i rejestruje provider `ScheduleSource` w DI; costing nigdy nie importuje schedule | Kod P0-1 |
 | A4 | deal_id nullable ✅ (Marek potwierdził); ownership standalone = created_by (rev 8a: project_id usunięte) | Odpowiedź Marka na pytanie C |
-| A18 | investment_key = lower(trim(name)) \|\| '\|' \|\| lower(trim(location)); pg_trgm threshold = 0.5 | Prosty normalizowany klucz; próg konfigurowalny |
-| A19 | Rola oferty: zmiana tylko decyzją użytkownika w UI; jedna komenda `offer_roles.set_primary` w jednej transakcji (rev 8a) | Odpowiedź Marka — no silent automation; Kod P0-2 |
-| A20 | attach-deal sprawdza duplikaty inwestycji i pokazuje notice; nie blokuje | Informowanie bez blokady |
-| A5 | Waluta = waluta deala (jednowalutowe v1) | Eliminuje konwersje |
-| A6 | Import: 5000 pozycji / 10 MB | §6.4 |
+| A5 | Waluta = waluta deala (jednowalutowe; wiele walut — Q6) | Eliminuje konwersje |
+| A6 | Import XLSX/CSV: 10 MB, 100 MB po rozpakowaniu, 10 000 wierszy, 200 kolumn (§6.4; to samo w schedule) | Jeden limit dla obu modułów |
 | A7 | Auto-save: debounce 800 ms | Minimalizuje requesty |
-| A8 | exceljs v4.4.0 (MIT) | xlsx npm nieaktualizowane |
-| A9 | @react-pdf/renderer v3 (MIT) | Brak Chromium |
-| A10 | Odblokowanie: admin only; nowa rewizja + audit log | Immutability |
-| A11 | apply-to-deal: command bus (zweryfikowano w kodzie) | Historia deala |
-| A12 | ~~`cf_offer_role` przez `customers.deals.update`~~ — **usunięte w rev 8a**; zastąpione `pc_deal_offer_roles` (§2.2, §3.12) | Kod P0-2: hardkodowany UUID, EAV na obcej encji, brak transakcji |
-| A13 | Dane firmy PDF: Organization.name + logoUrl z directory; reszta z ustawień `pdf.*` (ModuleConfigService) | Organization nie ma adresu/NIP |
-| A14 | Marża ukryta domyślnie: `view_margin` tylko dla `admin` w `defaultRoleFeatures` (rev 8a: bez flagi w ustawieniach) | Wymóg Marka (rev 5); decyzja (e) |
-| A15 | Offer snapshot tworzony przy mark-sent; PDF generowany ze snapshota | Immutability oferowanej ceny |
-| A16 | CostEntry w project_costing (nie osobnym module) | Spójność danych budżet vs realizacja w jednym module |
-| A17 | pc_price_list_rules: priority = im wyższy, tym bardziej szczegółowy | Intuicyjne; item>category>segment>global |
-| A21 | Version compare: matching linii po `label` + `sort_order` + `cost_category_id` (brak stabilnego line-id między wersjami) | Kalkulacje mogą mieć różne line IDs nawet przy duplikacji |
-| A22 | Budget vs actual: `calculation_id` NOT NULL na `pc_cost_entries`; `deal_id`/`investment_id` opcjonalne (rev 8a) | Spójność z konkretną wersją oferty |
-| A23 | NIP klienta: odczyt `company.cf_nip` przez query engine / serwis DI (rev 8a: bez HTTP); brak przechowywania w pc_calculations | Unika duplikacji danych; zero HTTP między modułami |
-| A24 | `pc_element_types` własność `project_costing`; `project_schedule` referencjonuje przez `element_type_code` (string); brak FK z `project_schedule` do `pc_element_types` | Zapewnia opcjonalność `project_schedule`; costing zawsze dostępny |
-| A25 | `project_schedule` jest OPCJONALNY per firma (organizację): `schedule.enabled` per organizacja (ModuleConfigService) + ACL; feature toggle = globalny kill-switch per tenant; `ScheduleSource` w project_costing zapewnia działanie bez niego | Decyzja Marka rev 7; decyzja (d) rev 8a |
-| A26 | Inwestycja = jedna encja `pc_investments` w `project_costing`; `klin:project` wygaszany jednorazowym importem (rev 8a) | Decyzja (c); Kod p11 |
-| A27 | Investment matching — Priorytet 1: zewnętrzne identyfikatory (dokładne), Priorytet 2: pg_trgm fallback (threshold 0.5, konfigurowalny); user zawsze potwierdza fuzzy-match | Decyzja Marka rev 7 |
-| A28 | Marża po zamknięciu deala: feature `project_costing.view_margin_after_close` (rev 8a, zamiast ustawienia); per firma = przypisanie do ról | Decyzja Marka rev 7 + decyzja (e) |
-| A29 | ~~Widget `klin:project`~~ — usunięte w rev 8a; zamiast niego strona inwestycji i zakładka deala (§10.4) | Decyzja (c) |
+| A8 | exceljs v4.4.0 (MIT) — do akceptacji (Q11) | xlsx npm nieaktualizowane |
+| A9 | PDF: `pdf-lib` (już w `packages/core`) | Bez nowej zależności, bez Chromium (Kod p10) |
+| A10 | „Nowa rewizja” (D57): jedna akcja, feature `new_revision` (admin), powód w `audit_logs` | Immutability |
+| A11 | apply-to-deal: komenda `customers.deals.update` (zweryfikowano w kodzie), tylko z wersji aktywnej | D59, D66; historia deala |
+| A12 | Dane firmy PDF: Organization.name + logoUrl z directory; reszta z ustawień `pdf.*` (ModuleConfigService) | Organization nie ma adresu/NIP (D60) |
+| A13 | Marża ukryta domyślnie: `view_margin` i `view_costs` tylko dla `admin` w `defaultRoleFeatures` (bez flagi w ustawieniach) | D48, D68 |
+| A14 | Offer snapshot tworzony przy mark-sent; PDF generowany ze snapshota | Immutability oferowanej ceny |
+| A15 | CostEntry w project_costing (nie osobnym module) | Spójność danych budżet vs realizacja w jednym module |
+| A16 | pc_price_list_rules: priority = im wyższy, tym bardziej szczegółowy | Intuicyjne; item>category>segment>global |
+| A17 | investment_key = lower(trim(name)) \|\| '\|' \|\| lower(trim(location)) **na `pc_investments`** (v1); próg `investments.trgm_threshold` = 0.5 | Prosty normalizowany klucz; jedno miejsce |
+| A18 | Rola oferty: zmiana tylko decyzją użytkownika w UI; jedna komenda `offer_roles.set_primary` w jednej transakcji; pierwsza oferta = primary (D65) | Odpowiedź Marka — no silent automation; Kod P0-2 |
+| A19 | attach-deal/attach-investment informuje o innej ofercie w inwestycji (komunikat D51); nie blokuje | Informowanie bez blokady |
+| A20 | Version compare: matching linii po `label` + `sort_order` + `cost_category_id` (brak stabilnego line-id między wersjami) | Kalkulacje mogą mieć różne line IDs po „Nowej rewizji” |
+| A21 | Budget vs actual: `calculation_id` NOT NULL na `pc_cost_entries`; `deal_id`/`investment_id` opcjonalne | Spójność z konkretną wersją oferty |
+| A22 | NIP klienta: odczyt `company.cf_nip` przez query engine / serwis DI (bez HTTP); brak przechowywania w pc_calculations | Unika duplikacji danych; zero HTTP między modułami |
+| A23 | `pc_element_types` własność `project_costing`; `project_schedule` referencjonuje przez `element_type_code` (string) i `elementTypeService` w DI; brak FK z `project_schedule` do `pc_element_types` | Opcjonalność schedule |
+| A24 | `project_schedule` jest OPCJONALNY per organizację: `schedule.enabled` (ModuleConfigService) + ACL; feature toggle = globalny kill-switch per tenant; po wyłączeniu dane ukryte do ponownego włączenia (D67) | D15, D67 |
+| A25 | Inwestycja = jedna encja `pc_investments` (kanoniczna, D63); `klin:project` importowany po `--dry-run` i wyłączany | D63; Kod p11 |
+| A26 | Investment matching (v1) — priorytet identyfikatorów e-Zamówienia > TED > BIP > INV (D6), potem pg_trgm; user zawsze potwierdza fuzzy-match | D6, D62 |
+| A27 | Marża po zamknięciu deala: feature `project_costing.view_margin_after_close`; won **albo** lost (D49); per firma = przypisanie do ról | D48, D49 |
+| A28 | Zaokrąglenie: `rounding.mode` (domyślnie half-up, połówki od zera), 2 miejsca per linia; sumy = suma zaokrąglonych linii; per organizacja | D62/D16 |
+| A29 | Jednostki: słownik `dictionaries` + własne przeliczniki `pc_unit_conversions` (v1); bez przeliczników `catalog` | `dictionary_entries` bez pola współczynnika (zweryfikowane) |
+| A30 | Numeracja `K/{YYYY}/{NNN}` i `INV-{YYYY}-{NNNNNN}` z sekwencji PG per organizacja (`pc_document_sequences`); luki dopuszczalne | Kod p18; wzór `SalesDocumentNumberGenerator` |
+| A31 | Pola pochodne linii liczone przez `calculate()`, nieprzechowywane; zamrażane w snapshocie | Kod p8; minimalny zapis |
+| A32 | Partie: `pc_production_batches` (costing) i `ps_production_batches` (schedule); prognoza czyta tylko aktywne źródło; kopia `pc_` → `ps_` jednorazowa, po potwierdzeniu | Jedno źródło prawdy (§2.2, schedule §1.4) |
 
 ---
 
 ## 18. Migracje i backward compatibility
 
-Nowe tabele `pc_*` only. Zero zmian w `packages/core`. Wszystkie encje domenowe z `deleted_at`. Ustawienia w `module_configs` (bez własnej tabeli). Kolejność MVP: pc_cost_categories → pc_element_types → pc_price_sources (seed) → pc_price_catalog → pc_calculations → pc_calculation_lines → pc_offer_snapshots → pc_calculation_pdf_attachments → pc_import_column_mappings → pc_production_batches. v1: pc_segments → pc_price_list_rules → pc_calculation_templates + pc_calculation_template_lines → pc_investments → pc_investment_identifiers → pc_deal_offer_roles → pc_cost_entries. (Rev 8a: usunięte `pc_settings` i `pc_calculation_audit_log`.) Jednorazowe importy `cf_offer_role` i `klin:project` to komendy CLI, nie migracje.
+Nowe tabele `pc_*` only. Zero zmian w `packages/core`. Wszystkie encje domenowe z `deleted_at`. Ustawienia w `module_configs` (bez własnej tabeli). Kolejność MVP: pc_document_sequences → pc_cost_categories → pc_element_types → pc_price_sources (seed) → pc_price_catalog → pc_investments → pc_calculations → pc_calculation_lines → pc_offer_snapshots → pc_calculation_pdf_attachments → pc_import_column_mappings → pc_production_batches → pc_deal_offer_roles. v1: pc_segments → pc_price_list_rules → pc_calculation_templates + pc_calculation_template_lines → pc_investment_identifiers → pc_unit_conversions → pc_cost_entries; `pc_investments` + `investment_key`, `merged_into_id`, `CREATE EXTENSION pg_trgm` i indeks trgm. (Rev 8a: usunięte `pc_settings` i `pc_calculation_audit_log`.) Importy wdrożeniowe `klin:project` i `cf_offer_role` to komendy CLI (`--dry-run`, idempotentne), nie migracje; kolejność: najpierw `import-klin-projects`, potem `import-offer-roles`.
+
+## 18a. Nowe zależności — lista do akceptacji Marka (rev 8b, Kod p10, Q11)
+
+| Pakiet | Wersja / stan | Moduł, faza | Alternatywa w repo | Propozycja |
+|---|---|---|---|---|
+| `exceljs` | 4.4.0, MIT, ostatnie wydanie 2023-10-19 | costing MVP (import), v1 (eksport); schedule v1 | brak czytnika XLSX w repo | akceptacja |
+| `react-data-grid` | v7 tylko beta, MIT | costing MVP (siatka), tylko gdy PoC na `packages/ui` nie wystarczy | `packages/ui` `DataTable` + `InlineEditors` | najpierw `packages/ui` |
+| `@svar-ui/*` (`react-gantt` 2.8.1 i ok. 17 pakietów w drzewie zależności) | MIT | schedule v1 | brak Gantta w repo | PoC w v1 schedule, potem decyzja |
+| `xml2js` | MIT | schedule v2 (MS Project XML) | — | decyzja dopiero w v2 |
+| `pdf-lib` | już w `packages/core` | costing MVP (PDF) | — | bez nowej zależności |
 
 ---
 
@@ -1433,13 +1540,13 @@ apps/mercato/src/modules/project_costing/
 ├── acl.ts, analytics.ts, events.ts, index.ts, setup.ts, di.ts, search.ts, extension-points.ts
 ├── commands/                     # rev 8a: wszystkie zapisy (undo, audit_logs)
 ├── workers/                      # import XLSX, PDF (ProgressJob)
-├── cli.ts                        # import-offer-roles, import-klin-projects (jednorazowe)
+├── cli.ts                        # import-klin-projects, import-offer-roles (wdrożeniowe, --dry-run, idempotentne)
 ├── api/
 │   ├── settings/ (ModuleConfigService), segments/, cost-categories/, element-types/
 │   ├── price-sources/, price-catalog/, price-list-rules/
 │   ├── calculation-templates/, calculation-template-lines/
-│   ├── calculations/[id]/{duplicate,recalc,activate,mark-sent,mark-accepted,mark-rejected,
-│   │                       unlock,apply-to-deal,generate-pdf,export,import,
+│   ├── calculations/[id]/{recalc,recalc-from-catalog,activate,mark-sent,mark-accepted,mark-rejected,
+│   │                       new-revision,apply-to-deal,generate-pdf,export,import,
 │   │                       pdf-attachments,snapshot,production-batches,import-schedule,
 │   │                       attach-deal,attach-investment,
 │   │                       investment-match-candidates,
@@ -1466,15 +1573,18 @@ apps/mercato/src/modules/project_costing/
 ├── subscribers/dealUpdated.ts + dealClosed.ts (won/lost) + dealDeleted.ts   # rev 8a: brak subscriberów na eventy project_schedule
 ├── widgets/
 │   ├── DealCalculationTab.tsx
-│   └── DealOfferRoleWidget.tsx           # rola oferty na dealu (v1)
+│   └── DealOfferRoleWidget.tsx           # rola oferty i inwestycja na dealu (MVP — D50)
 └── lib/
-    ├── calculation.service.ts    # recalc, redistribute B/C, snapshot, lifecycle
-    ├── pdf.service.ts            # @react-pdf/renderer + snapshot data
+    ├── calculate.ts              # czysta funkcja calculate() — klient i serwer (§0.3)
+    ├── money.ts                  # arytmetyka dziesiętna + round() wg rounding.* (§2.3)
+    ├── numbering.ts              # pc_document_sequences, nextval per organizacja
+    ├── calculation.service.ts    # snapshot, lifecycle, walidacja mark-sent (D58)
+    ├── pdf.service.ts            # pdf-lib + snapshot data
     ├── import.service.ts
     ├── visibility.ts
-    ├── forecast.ts               # forecast_value = price × probability
+    ├── forecast.ts               # metryki nieważona i ważona (§3.11)
     ├── investment.service.ts     # match candidates, merge/split
-    ├── offer-roles.service.ts    # set-primary w jednej transakcji (v1)
+    ├── offer-roles.service.ts    # assign (D65), set-primary w jednej transakcji (MVP)
     ├── settings.ts               # projectCostingSettings: merge org → tenant → defaults
     └── schedule-source/
         ├── schedule-source.interface.ts
@@ -1486,30 +1596,30 @@ apps/mercato/src/modules/project_costing/
 
 ---
 
-## 20. Final Compliance Report (rev 8a, vs `AGENTS.md`)
+## 20. Final Compliance Report (rev 8b, vs `AGENTS.md`)
 
 | Reguła | Źródło | Status |
 |---|---|---|
 | Sekcje TLDR, Architecture, Data Models, API Contracts, Risks (z ryzykiem rezydualnym), Final Compliance Report, Changelog | `.ai/specs/AGENTS.md` § Spec Content Checklist | ✅ TLDR, §0, §2, §8, §15, §20, Changelog (Overview/Problem/Proposed Solution = §1) |
 | Brak relacji ORM między modułami; FK-id | `packages/core/AGENTS.md` § Never | ✅ |
 | Kierunek zależności: baza nie importuje opcjonalnego konsumenta | `packages/core/AGENTS.md` § Cross-Module Coupling | ✅ §0.1, §7a |
-| Zapisy przez komendy; `makeCrudRoute` + indexer; `openApi` na trasach; mutation guard | `packages/core/AGENTS.md` § Always | ✅ deklaratywnie §0.3, §8; szczegóły write path w rev 8b |
+| Zapisy przez komendy; `makeCrudRoute` + indexer; `openApi` na trasach; mutation guard | `packages/core/AGENTS.md` § Always | ✅ §0.3 (write path: `calculate()`, `save_lines`, lock na nagłówku, audyt), §8 |
 | Feature'y `acl.ts` w `setup.ts` `defaultRoleFeatures`; sprawdzanie wildcard-aware | `packages/core/AGENTS.md` § Always/Never, § ACL Grant Sync | ✅ §9 |
 | `deleted_at` na encjach | `packages/core/AGENTS.md` § Database Entities | ✅ §2.1 |
 | `updated_at` + optimistic locking na encjach edytowalnych | `packages/core/AGENTS.md` § Database Entities | ✅ |
 | Ustawienia przez ModuleConfigService | `packages/core/AGENTS.md` § Module Config | ✅ §2.2 (klucz per organizacja; ograniczenie serwisu opisane) |
 | ProgressJob + worker dla importu i PDF | `packages/core/AGENTS.md` § Operation Progress | ✅ §5.2, §6.2 |
-| Testy integracyjne każdej trasy w tej samej zmianie | root `AGENTS.md` l.166 | ✅ w wycenie (§14 O4); plan testów w PR #11 |
-| Nowe zależności produkcyjne = ask first | root `AGENTS.md` l.26 | ⚠️ rev 8b (Kod p10): lista do akceptacji Marka |
+| Testy integracyjne każdej trasy w tej samej zmianie | root `AGENTS.md` l.166 | ✅ wymaganie w każdej fazie (§14 „Narzut OM”); plan testów w PR #11 |
+| Nowe zależności produkcyjne = ask first | root `AGENTS.md` l.26 | ✅ §18a — lista do akceptacji Marka (Q11); żadna nowa zależność przed akceptacją |
 | Domyślne custom fieldy w `ce.ts`; brak hardkodowanych UUID | `packages/core/src/modules/customers/AGENTS.md` l.103 | ✅ `cf_offer_role` usunięte |
 
-## 21. Checklist compliance (`om-architecture-checklist.md`, stan 2026-10-20)
+## 21. Checklist compliance (`om-architecture-checklist.md`, stan 2026-10-23)
 
-| # | Punkt listy (Kod pN) | Wynik rev 8a |
+| # | Punkt listy (Kod pN) | Wynik rev 8b |
 |---|---|---|
 | 1 | Komunikacja przez DI/eventy/widget/FK-id; zero HTTP (p1) | ✅ §0, §7a, §10 (odczyty `customers` też bez HTTP) |
 | 2 | Zależność jednokierunkowa; provider w rejestrze DI bazy (p1) | ✅ §0.2, §7a.2 |
-| 3 | Brak zapisów do cudzych tabel/pól; encja-rozszerzenie + `data/extensions.ts` (p2) | ✅ §2.2 `pc_deal_offer_roles`, §3.12; jawny wyjątek: apply-to-deal przez komendę `customers` (§8.7, Q1) |
+| 3 | Brak zapisów do cudzych tabel/pól; encja-rozszerzenie + `data/extensions.ts` (p2) | ✅ §2.2 `pc_deal_offer_roles`, §3.12; jawny wyjątek: apply-to-deal przez komendę `customers` (§8.7, D66) |
 | 4 | Zero hardkodowanych UUID (p2) | ✅ UUID `cf_offer_role` usunięty |
 | 5 | Partial unique na `primary`, zmiana w jednej transakcji (p2) | ✅ §2.2, §3.12 |
 | 6 | Jedno pojęcie na byt (inwestycja); zakładka przez `detail:customers.deal:tabs` (p11) | ✅ §10.4 |
@@ -1517,29 +1627,29 @@ apps/mercato/src/modules/project_costing/
 | 8 | Ustawienia nie dublują RBAC (p4) | ✅ §2.2 (usunięte klucze `visibility.*`) |
 | 9 | Ukryta marża = ukryty koszt (p3) | ✅ §4.2 |
 | 10 | Pola ukryte wykluczone z index/search/audit/eventów/compare (p3) | ✅ §4.3 |
-| 11 | Zapisy przez komendy: mark-sent, unlock, recalc, apply-to-deal (p6) | ✅ §0.3 (szczegóły rev 8b) |
+| 11 | Zapisy przez komendy: mark-sent, new-revision, recalc, apply-to-deal (p6) | ✅ §0.3 (lista komend + write path) |
 | 12 | Audyt przez `audit_logs`, bez własnych tabel (p6) | ✅ `pc_calculation_audit_log` usunięte |
 | 13 | `makeCrudRoute` + indexer, `openApi`, mutation guards (p6) | ✅ §0.3, §8 |
-| 14 | Zapis minimalny, lock na nagłówku, `calculate()` klient = serwer, benchmark (p8) | ⚠️ w wycenie (MVP D4); specyfikacja szczegółowa rev 8b |
+| 14 | Zapis minimalny, lock na nagłówku, `calculate()` klient = serwer, benchmark (p8) | ✅ §0.3 write path, §2.2 (pola pochodne nieprzechowywane), R1 benchmark 10 000 linii |
 | 15 | `deleted_at` (p20) | ✅ §2.1 |
 | 16 | Ustawienia przez ModuleConfigService (**p7**) | ✅ §2.2 — **spełniony**: ustawienia w `module_configs`; źródło: `packages/core/src/modules/configs/lib/module-config-service.ts` |
 | 17 | Włączanie: build + `feature_toggles` per tenant + blokady menu/widget/API (**p7**) | ✅ §0.5, schedule §1.0 — **spełniony**: włącznik per organizacja `schedule.enabled` w ModuleConfigService + feature'y ACL; `feature_toggles` (per tenant — `packages/core/src/modules/feature_toggles/lib/feature-flag-check.ts`) tylko jako globalny kill-switch; blokady w menu, w zakładce `detail:customers.deal:tabs` i w API (route guard) |
 | 18 | Zakres „firmy” zdefiniowany i dobrany mechanizm (**p7**) | ✅ **spełniony**: firma = organizacja (D15); ModuleConfigService per organizacja, feature toggle per tenant tylko kill-switch (schedule §1.0) |
-| 19 | Statusy deala zgodne z OM, eventy won/lost, snapshot (p5) | ⚠️ częściowo: `deal_snapshot` + subscribery; mapowanie statusów rev 8b |
+| 19 | Statusy deala zgodne z OM, eventy won/lost, snapshot (p5) | ✅ §0.6 (`closure_outcome`, `deleted_at`, eventy won/lost persistent, etapy D33) |
 | 20 | Import i PDF przez ProgressJob + worker (p9) | ✅ §5.2, §6.2 |
-| 21 | Edge case'y importu (p9) | ⚠️ rev 8b |
-| 22 | Nowe zależności = ask first (p10) | ⚠️ rev 8b |
-| 23 | Najpierw to, co jest w repo: `pdf-lib`, `packages/ui` (p10) | ⚠️ siatka na `packages/ui` (§14 D5); PDF w rev 8b |
-| 24 | Numeracja przez sekwencje PG per organizacja (p18) | ⚠️ w wycenie (MVP D3); opis w §2.2 w rev 8b |
-| 25 | Walidacje brzegowe: CHECK, qty 0, ujemne ceny (p19) | ⚠️ rev 8b |
-| 26 | Hierarchia MVP: sekcja → pozycje, bez `subtotal` (p13) | ⚠️ MVP = sekcja → pozycje (§14); usunięcie `subtotal` z modelu w rev 8b |
-| 27 | Algorytmy harmonogramu (p12) | ⚠️ schedule — rev 8b |
-| 28 | Wycena z narzutem OM (p16) | ✅ §14 (osobne pozycje O1–O5) |
-| 29 | Testy: Jest `__tests__`, Playwright `__integration__` (p17) | ✅ §14 O4/O5 (plan testów PR #11) |
+| 21 | Edge case'y importu (p9) | ✅ §6.2, §6.4, §6.5 |
+| 22 | Nowe zależności = ask first (p10) | ✅ §18a, Q11 |
+| 23 | Najpierw to, co jest w repo: `pdf-lib`, `packages/ui` (p10) | ✅ siatka na `packages/ui` (§12.2); PDF na `pdf-lib` (§5.2) |
+| 24 | Numeracja przez sekwencje PG per organizacja (p18) | ✅ §2.2 (`pc_document_sequences`, wzór `SalesDocumentNumberGenerator`) |
+| 25 | Walidacje brzegowe: CHECK, qty 0, ujemne ceny (p19) | ✅ §2.2 (CHECK), §3.1 (qty 0), §3.8 (D58) |
+| 26 | Hierarchia MVP: sekcja → pozycje, bez `subtotal` (p13) | ✅ §2.2 (`subtotal` usunięty, jeden poziom) |
+| 27 | Algorytmy harmonogramu (p12) | ✅ schedule §3a (D54, D55) |
+| 28 | Narzut OM w zakresie faz (p16) | ✅ §14 „Narzut OM” jako wymagania (estymaty usunięte — P11) |
+| 29 | Testy: Jest `__tests__`, Playwright `__integration__` (p17) | ✅ §14 „Narzut OM” (plan testów PR #11) |
 | 30 | MVP pocięty po wartości (p15) | ✅ §14, TLDR |
 | 31 | Forma speki: TLDR, Architecture, Risks, FCR (p20) | ✅ |
 
-Punkty ⚠️ są przypisane do rev 8b; ich ryzyko opisują §15 (R1, R3, R15).
+Brak punktów ⚠️. Ryzyka rezydualne: §15 (R1, R2, R15, R16).
 
 ---
 
@@ -1547,10 +1657,11 @@ Punkty ⚠️ są przypisane do rev 8b; ich ryzyko opisują §15 (R1, R3, R15).
 
 | Data | Zmiana |
 |------|--------|
-| 2026-10-20 | **rev 8a** — Review Kod (PR #10 rev 7) + decyzje Koordynatora/Marka. **P0-1:** costing = moduł bazowy z `ScheduleSource` + `scheduleSourceRegistry` w DI; `project_schedule` rejestruje provider; usunięte HTTP (`InternalScheduleSource` przez HTTP, `GET element-types` dla schedule → `elementTypeService` w DI, odczyty `customers` → query engine/DI) i subscriber costingu na eventy schedule; A3 poprawione; nowa §0 Architecture. **P0-2:** `cf_offer_role` + UUID `73f8260a…` + dwie komendy usunięte → encja `pc_deal_offer_roles` (`data/extensions.ts`, partial unique na `primary`, `set_primary` w jednej transakcji); komunikat „Istnieje już oferta dla innego wykonawcy — wskaż, która jest główna”; R10 usunięte; import 546 wartości jako opcjonalna komenda CLI; apply-to-deal = jawna komenda `customers` (Q1). **P0-3:** ukryta marża = ukryty koszt; tabela kanałów (API, query_index `buildUpsertPayload`, search, audit_logs, eventy tylko z ID, eksport, PDF, compare, analityka, snapshot, notyfikacje). **Firma = organizacja:** `pc_settings` → ModuleConfigService (zweryfikowano: brak natywnego scope organizacji → klucz `org:{id}:settings`); harmonogram per organizacja przez ModuleConfigService + ACL + blokady menu/API, `feature_toggles` tylko jako kill-switch per tenant (schedule §1.0). **Decyzja (e):** widoczność tylko przez `acl.ts`; role admin/employee; `view_margin_after_close`. **Decyzja (c):** inwestycja = `pc_investments`; `project_id`, `attach-project` i widget `klin:project` usunięte; migracja `klin:project` jako CLI. **P1-15 + (a):** nowe MVP (siatka, import XLSX, A/C, prosty cennik, mark-sent + PDF, apply-to-deal, RBAC, partie + prognoza); eksport XLSX → v1. **P1-16:** wycena od zera z narzutem OM i buforem: costing 40/45/16 = 101 d; oba moduły 151 d. Pkt 14 i 20 zamknięte (D30, D21). Dodane: TLDR, Risks z ryzykiem rezydualnym, Final Compliance Report, Checklist compliance, `deleted_at`. `pc_calculation_audit_log` → `audit_logs`. Weryfikacja review w kodzie — zgodne: feature_toggles per tenant (`feature-flag-check.ts`: klucz cache i override po `tenantId`), role admin/employee (`customers/setup.ts`), `useDealInjectedTabs.tsx` l.28, snapshoty w `audit_logs/data/entities.ts`, `pdf-lib` w `packages/core/package.json` l.256, `salesDocumentNumberGenerator.ts`. **Niezgodne/uzupełnione:** ModuleConfigService przyjmuje `organizationId`, ale nie używa go przy odczycie (opisane w §2.2); `data/extensions.ts` jest dziś deklaracją bez runtime joinu (dlatego enricher). Numery linii w AGENTS.md podane wg gałęzi spec. Poza zakresem (rev 8b): Kod p4–6 (szczegóły), 8–13, 16 (szczegóły), 18–19, A7/A13, partie pc_/ps_, investment_key, numeracja założeń, half-up. |
+| 2026-10-23 | **rev 8b** — spójność, review P1/P2, decyzje D47–D69 (`.ai/decisions.md` d818aa2), wnioski z planu testów. **P11:** usunięte wszystkie estymaty w dniach (tabele, sumy, narzut OM, rezerwy procentowe, porównania; też w starszych wierszach changelogu); §14 = listy funkcji i encji per faza; R15 bez rezerwy w dniach. **D50:** do MVP weszły minimalne `pc_investments`, `pc_deal_offer_roles` (D51 komunikat, D65 pierwsza = primary), linie `note`, partie ręczne + import harmonogramu XLSX `xlsx_import` (D56: zastąpienie po potwierdzeniu, raport odrzuconych wierszy); importy CLI `klin:project`/`cf_offer_role` jako wdrożeniowe. **D62/D16:** half-up 2 miejsca per linia, suma = suma zaokrąglonych linii, `rounding.*` per organizacja; wzory §3 przepisane; reszta trybu B na największej linii; zaokrąglanie bankierskie usunięte. **Jednostki:** słownik + własne `pc_unit_conversions` (v1), §2.4. **D6:** priorytet e-Zamówienia > TED > BIP > INV. **D57:** „Przelicz z cennika” (MVP) tylko bez override; „Nowa rewizja” = jedna akcja (zastępuje unlock + duplicate). **D58:** walidacja mark-sent (blokady/ostrzeżenia). **D59/D66:** apply-to-deal przycisk z wersji aktywnej, komenda `customers.deals.update`; `activate` w MVP. **D49:** `view_margin_after_close` przy won albo lost. **D61:** kalkulacja bez deala poza prognozą ważoną. **D68:** `employee` bez kosztów/marży. **D63/D64/D69:** §10.4, §3.12, R12, R13. **§16:** Q1–Q5 zamknięte; nowe Q6–Q11. **Kod p5:** §0.6 statusy deala (`closure_outcome`, etapy D33). **p6/p8:** write path (`calculate()`, `save_lines`, lock na nagłówku, pola pochodne nieprzechowywane, audyt). **p9:** przypadki brzegowe i bezpieczeństwo importu, limity 10 MB / 100 MB / 10 000 wierszy / 200 kolumn (wspólne ze schedule). **p10:** PDF na `pdf-lib`; siatka na `packages/ui`; §18a lista zależności. **p13:** `subtotal` usunięty. **p18:** numeracja sekwencjami PG (`pc_document_sequences`). **p19:** CHECK (marża < 1, narzut > −1), qty 0, ujemne ceny blokują mark-sent; bez SERIALIZABLE. **Plan testów:** pola audytu, jeden limit importu, definicja błędnego wiersza, narzut jako ułamek, prognoza nieważona + ważona, bezpieczeństwo XLSX, filtrowanie po stronie serwera. **A2–A5:** nagłówek „Kluczowe cechy”, cache `total_quantity` przez kolejkę, jedno źródło partii, `investment_key` na `pc_investments`. **Założenia przenumerowane** (stary → nowy): A1–A11 → A1–A11 (A1, A6, A8–A11 zaktualizowane); A12 usunięte; A13→A12, A14→A13, A15→A14, A16→A15, A17→A16, A18→A17, A19→A18, A20→A19, A21→A20, A22→A21, A23→A22, A24→A23, A25→A24, A26→A25, A27→A26, A28→A27; A29 usunięte; nowe A28–A32. |
+| 2026-10-20 | **rev 8a** — Review Kod (PR #10 rev 7) + decyzje Koordynatora/Marka. **P0-1:** costing = moduł bazowy z `ScheduleSource` + `scheduleSourceRegistry` w DI; `project_schedule` rejestruje provider; usunięte HTTP (`InternalScheduleSource` przez HTTP, `GET element-types` dla schedule → `elementTypeService` w DI, odczyty `customers` → query engine/DI) i subscriber costingu na eventy schedule; A3 poprawione; nowa §0 Architecture. **P0-2:** `cf_offer_role` + UUID `73f8260a…` + dwie komendy usunięte → encja `pc_deal_offer_roles` (`data/extensions.ts`, partial unique na `primary`, `set_primary` w jednej transakcji); komunikat „Istnieje już oferta dla innego wykonawcy — wskaż, która jest główna”; R10 usunięte; import 546 wartości jako opcjonalna komenda CLI; apply-to-deal = jawna komenda `customers` (Q1). **P0-3:** ukryta marża = ukryty koszt; tabela kanałów (API, query_index `buildUpsertPayload`, search, audit_logs, eventy tylko z ID, eksport, PDF, compare, analityka, snapshot, notyfikacje). **Firma = organizacja:** `pc_settings` → ModuleConfigService (zweryfikowano: brak natywnego scope organizacji → klucz `org:{id}:settings`); harmonogram per organizacja przez ModuleConfigService + ACL + blokady menu/API, `feature_toggles` tylko jako kill-switch per tenant (schedule §1.0). **Decyzja (e):** widoczność tylko przez `acl.ts`; role admin/employee; `view_margin_after_close`. **Decyzja (c):** inwestycja = `pc_investments`; `project_id`, `attach-project` i widget `klin:project` usunięte; migracja `klin:project` jako CLI. **P1-15 + (a):** nowe MVP (siatka, import XLSX, A/C, prosty cennik, mark-sent + PDF, apply-to-deal, RBAC, partie + prognoza); eksport XLSX → v1. **P1-16:** wycena od zera z narzutem OM (estymaty usunięte w rev 8b — P11). Pkt 14 i 20 zamknięte (D30, D21). Dodane: TLDR, Risks z ryzykiem rezydualnym, Final Compliance Report, Checklist compliance, `deleted_at`. `pc_calculation_audit_log` → `audit_logs`. Weryfikacja review w kodzie — zgodne: feature_toggles per tenant (`feature-flag-check.ts`: klucz cache i override po `tenantId`), role admin/employee (`customers/setup.ts`), `useDealInjectedTabs.tsx` l.28, snapshoty w `audit_logs/data/entities.ts`, `pdf-lib` w `packages/core/package.json` l.256, `salesDocumentNumberGenerator.ts`. **Niezgodne/uzupełnione:** ModuleConfigService przyjmuje `organizationId`, ale nie używa go przy odczycie (opisane w §2.2); `data/extensions.ts` jest dziś deklaracją bez runtime joinu (dlatego enricher). Numery linii w AGENTS.md podane wg gałęzi spec. Poza zakresem rev 8a (zrobione w rev 8b): Kod p4–6 (szczegóły), 8–13, 16 (szczegóły), 18–19, A7/A13, partie pc_/ps_, investment_key, numeracja założeń, half-up. |
 | 2026-10-19 | v1–v4: patrz poprzednie rewizje |
-| 2026-10-19 | v5 — Oferta = frozen snapshot (pc_offer_snapshots); typy linii (section/item/note/subtotal) + hierarchia (parent_line_id) + markup_pct z dziedziczeniem; cykl życia wersji: draft/sent/superseded/accepted/rejected + numeracja base_code-R{revision}; layered price list (pc_price_list_rules); koszty rzeczywiste CostEntry (pc_cost_entries); marża ukryta domyślnie; deal_id nullable; effort: MVP 17d, v1 17d, v2 14d = 48d |
+| 2026-10-19 | v5 — Oferta = frozen snapshot (pc_offer_snapshots); typy linii (section/item/note/subtotal) + hierarchia (parent_line_id) + markup_pct z dziedziczeniem; cykl życia wersji: draft/sent/superseded/accepted/rejected + numeracja base_code-R{revision}; layered price list (pc_price_list_rules); koszty rzeczywiste CostEntry (pc_cost_entries); marża ukryta domyślnie; deal_id nullable |
 | 2026-10-19 | v5 patch (a) — @svar-ui/react-gantt MIT/PRO split zweryfikowany z tarball (patrz project_schedule §3); bez wpływu na model danych project_costing |
-| 2026-10-19 | v6 — mode C per-item (line_full_cost×(1+effective_markup)), redistyb. §3.6 tylko dla B; cf_offer_role: read+write (nie read-only), safe two-step z compensating action; budget formula: line_full_cost per kat., direct+overhead kolumny, calculation_id required; investment detection: NIP matching + deal search bez kalkulacji; compare API + UI side-by-side; §8.1-8.2 expand; §10.4 expand; §12.3/12.4 compare UI; effort v1 22→23d, total 53→54d; combined 83→84d; R10 fix; A2/A12 fix; A21-A23 |
-| 2026-10-19 | **v7** — Decyzje Marka: (1) widget `klin:project` YES (§10.4); (2) widoczność marży po zamknięciu deala: per-company `margin_visible_after_deal_close` (§2.2 pc_settings, §4.3); (3) investment matching primarynie przez zewnętrzne identyfikatory — nowe tabele `pc_investments` + `pc_investment_identifiers`, stabilny kod INV-YYYY-NNNNNN, merge/split+audit, pg_trgm tylko fallback (§3.12); (4) wszystkie pytania z §16 usunięte (odpowiedziane). ScheduleSource abstraction (§7a): `project_schedule` opcjonalny — implementacje `internal`/`calculation_embedded`/`xlsx_import`/`external_adapter`; nowe tabele `pc_production_batches` i `pc_element_types` (przejęte od schedule). pc_element_types własność costing (A24). pc_cost_entries: `calculation_id` NOT NULL, `deal_id` nullable, `project_id` added (§2.2). A12: usunięto "read-only". Wysiłek: MVP 17d (bez zmian, absorbcja pc_element_types), v1 23→28.5d (+ScheduleSource+batches+investment), total costing 54→59.5d; combined (z schedule) 85→94.5d |
-| 2026-10-19 | v5 patch (b) — Odpowiedzi Marka: kalkulacja może istnieć bez deala (deal_id+project_id nullable, project_id/investment_name/investment_location/investment_key na pc_calculations, ownership standalone=created_by, attach/detach-deal/project endpoints); detekcja duplikatów inwestycji (pg_trgm, duplicate-investment-candidates, UI notice bez automatyzacji, set-primary-offer via command bus, audit log); effort v1 17→22d; total 48→53d; combined 78→83d; Pytania otwarte Q1/Q2 usunięte (odpowiedziane) |
+| 2026-10-19 | v6 — mode C per-item (line_full_cost×(1+effective_markup)), redistyb. §3.6 tylko dla B; cf_offer_role: read+write (nie read-only), safe two-step z compensating action; budget formula: line_full_cost per kat., direct+overhead kolumny, calculation_id required; investment detection: NIP matching + deal search bez kalkulacji; compare API + UI side-by-side; §8.1-8.2 expand; §10.4 expand; §12.3/12.4 compare UI; R10 fix; A2/A12 fix; A21-A23 |
+| 2026-10-19 | **v7** — Decyzje Marka: (1) widget `klin:project` YES (§10.4); (2) widoczność marży po zamknięciu deala: per-company `margin_visible_after_deal_close` (§2.2 pc_settings, §4.3); (3) investment matching primarynie przez zewnętrzne identyfikatory — nowe tabele `pc_investments` + `pc_investment_identifiers`, stabilny kod INV-YYYY-NNNNNN, merge/split+audit, pg_trgm tylko fallback (§3.12); (4) wszystkie pytania z §16 usunięte (odpowiedziane). ScheduleSource abstraction (§7a): `project_schedule` opcjonalny — implementacje `internal`/`calculation_embedded`/`xlsx_import`/`external_adapter`; nowe tabele `pc_production_batches` i `pc_element_types` (przejęte od schedule). pc_element_types własność costing (A24). pc_cost_entries: `calculation_id` NOT NULL, `deal_id` nullable, `project_id` added (§2.2). A12: usunięto "read-only". |
+| 2026-10-19 | v5 patch (b) — Odpowiedzi Marka: kalkulacja może istnieć bez deala (deal_id+project_id nullable, project_id/investment_name/investment_location/investment_key na pc_calculations, ownership standalone=created_by, attach/detach-deal/project endpoints); detekcja duplikatów inwestycji (pg_trgm, duplicate-investment-candidates, UI notice bez automatyzacji, set-primary-offer via command bus, audit log); Pytania otwarte Q1/Q2 usunięte (odpowiedziane) |
