@@ -3,7 +3,7 @@
 **Dokument**: SPEC ONLY (plan testów niezależny od specyfikacji PR #10, brak kodu)
 **Data**: 2026-10-19
 **Autor**: Copilot (plan testów na podstawie wymagań biznesowych Marka Adamskiego)
-**Rewizja**: rev 6 (2026-10-23) — zgodność z decyzjami koordynacyjnymi (`.ai/vision.md`, `.ai/decisions.md`, `.ai/om-architecture-checklist.md`) i rozstrzygnięciami Koordynatora z 2026-10-23; mapowanie scenariuszy na decyzje w załączniku „Traceability TC → D”
+**Rewizja**: rev 8 (2026-10-23, runda rev 8g) — TC-CUR-011: wyszukiwanie modułu Waluty o 00:30 czasu warszawskiego daje kurs z dnia poprzedniego, wysłanie oferty liczy datę w Europe/Warsaw, suma deali zaokrąglona do całości, godziny graniczne lato/zima; TC-CUR-001: zamrożony obraz bez źródła kursu; poprzednio rev 7 (runda rev 8f) — waluty przez moduł Waluty platformy (TC-CUR-002..007 przepisane, nowe TC-CUR-008..013), annex do D94; poprzednio rev 6 — zgodność z decyzjami koordynacyjnymi (`.ai/vision.md`, `.ai/decisions.md`, `.ai/om-architecture-checklist.md`) i rozstrzygnięciami Koordynatora z 2026-10-23; mapowanie scenariuszy na decyzje w załączniku „Traceability TC → D”
 
 ---
 
@@ -20,14 +20,14 @@
 | Koszty rzeczywiste (TC-REAL) | 3 |
 | Harmonogram Gantt (TC-GANTT) | 11 |
 | Testy wydajności (TC-PERF) | 3 |
-| Waluty (TC-CUR) | 7 |
+| Waluty (TC-CUR) | 13 |
 | Firmy bez modułu harmonogramu (TC-NOSCHED) | 5 |
 | Prognoza produkcji (TC-FCST) | 6 |
 | Harmonogram ofertowy → wykonawczy (TC-EXEC) | 5 |
 | Bezpieczeństwo plików (TC-SEC) | 6 |
 | Izolacja multi-tenant (TC-TEN) | 7 |
 | Edycja równoległa (TC-CONC) | 5 |
-| **Razem** | **135** |
+| **Razem** | **141** |
 
 ---
 
@@ -46,7 +46,7 @@
 | R7 | Duplikowanie lub gubianie inwestycji (dopasowanie) | Niski | Wysoki | P2 | Powiązania | TC-DEAL-009 do TC-DEAL-016 |
 | R8 | Ataki plikowe (XLSX bomb, formula injection) na VPS | Wysoki | Krytyczny | P0 | Bezpieczeństwo plików | TC-SEC-001 do TC-SEC-006 |
 | R9 | Utrata danych przy równoległej edycji (race condition) | Średni | Krytyczny | P0 | Edycja równoległa | TC-CONC-001 do TC-CONC-005 |
-| R10 | Błędy walutowe (kursy, zamrożenie, zaokrąglenia per waluta) | Średni | Wysoki | P1 | Waluty | TC-CUR-001 do TC-CUR-007 |
+| R10 | Błędy walutowe (kursy, zamrożenie, zaokrąglenia per waluta) | Średni | Wysoki | P1 | Waluty | TC-CUR-001 do TC-CUR-013 |
 | R11 | Nieprawidłowa prognoza produkcji (suma ≠ partie, prob) | Niski | Średni | P2 | Prognoza | TC-FCST-001 do TC-FCST-006 |
 | R12 | Wyciek danych przez eksport / PDF (marża, koszty) | Wysoki | Wysoki | P1 | Uprawnienia, Waluty, Tenant | TC-PERM-007, TC-TEN-004, TC-CUR-005 |
 | R13 | Wartość deala niezgodna z ofertą (automatyczna zmiana, nadpisanie z n8n, wersja nieaktywna) | Średni | Wysoki | P0 | Powiązania, Wersje | TC-DEAL-002, TC-DEAL-016, TC-VER-007, TC-VER-010 |
@@ -59,6 +59,7 @@
 - Adapter MS Project
 - Ręczny wiersz sumy częściowej (w MVP sumy sekcji liczy system — TC-COST-020)
 - Ręczna korekta kursu poza oknem przed wysłaniem (TC-CUR-007)
+- Kurs krzyżowy przy walucie bazowej innej niż PLN
 - Scenariusze sprawdzające konkretne biblioteki (siatka, Gantt, XLSX, PDF): plan testuje zachowanie, nie pakiety
 - Systemy płatności i faktury
 - Mobilna aplikacja
@@ -67,10 +68,9 @@
 
 | Etap | Zakres | Scenariusze |
 |------|--------|-------------|
-| **MVP** | Tryby ceny A (suma linii) i C (koszt × (1 + narzut)); wiersze: sekcja, pozycja, notatka; sumy sekcji automatyczne; import XLSX linii i harmonogramu; ręczne partie; prognoza; zamrożony obraz + PDF; blokady i ostrzeżenia wysłania; „Zastosuj wartość do deala” z aktywnej wersji; „Przelicz z cennika” dla linii bez ręcznej ceny; minimalne inwestycje (ręczne wskazanie, podpowiedź po kodzie), role ofert, pierwsza oferta główna; import CLI inwestycji i ról ofert jako krok wdrożenia; jedna waluta (PLN, kurs 1) | TC-COST (poza -007, -012), TC-IMP-001..007, TC-DEAL-001..005, TC-DEAL-011..016, TC-VER-002, -003, -006..-012, TC-PRICE-003, -005, TC-PERM (poza -004, -006, -008), w tym -010..-012, TC-PERF-001, -003, TC-CUR-001, TC-NOSCHED-001, -003, TC-FCST-002..006, TC-SEC (poza -003), TC-TEN, TC-CONC |
-| **v1** | Cały moduł harmonogramu z Ganttem (włączanie per organizacja, harmonogram inwestycji, faza wykonawcza); tryb B (marża docelowa); eksport XLSX; „Nowa rewizja”; porównanie wersji; cennik warstwowy; przeliczniki jednostek; marża po zamknięciu deala; „tylko własne deale”; koszty rzeczywiste; dopasowanie inwestycji po identyfikatorach; scalanie i rozdzielanie inwestycji (wybór oferty głównej); dashboard rankingu marż | TC-COST-007, -012, TC-IMP-008, TC-DEAL-006..010, TC-VER-001, -004, -005, TC-PRICE-001, -002, TC-PERM-004, -006, -008, TC-REAL, TC-GANTT, TC-PERF-002, TC-NOSCHED-002, -004, -005, TC-FCST-001, TC-EXEC, TC-SEC-003 |
+| **MVP** | Tryby ceny A (suma linii) i C (koszt × (1 + narzut)); wiersze: sekcja, pozycja, notatka; sumy sekcji automatyczne; import XLSX linii i harmonogramu; ręczne partie; prognoza; zamrożony obraz + PDF; blokady i ostrzeżenia wysłania; „Zastosuj wartość do deala” z aktywnej wersji; „Przelicz z cennika” dla linii bez ręcznej ceny; minimalne inwestycje (ręczne wskazanie, podpowiedź po kodzie), role ofert, pierwsza oferta główna; import CLI inwestycji i ról ofert jako krok wdrożenia; jedna waluta na kalkulację (waluta deala; waluta bazowa bez kursu; inna waluta z kursem z tabeli A NBP zamrożonym przy wysłaniu albo kursem ręcznym z wersji roboczej) | TC-COST (poza -007, -012), TC-IMP-001..007, TC-DEAL-001..005, TC-DEAL-011..016, TC-VER-002, -003, -006..-012, TC-PRICE-003, -005, TC-PERM (poza -004, -006, -008), w tym -010..-012, TC-PERF-001, -003, TC-CUR-001..012 (TC-CUR-004 i -005 częściowo v1), TC-NOSCHED-001, -003, TC-FCST-002..006, TC-SEC (poza -003), TC-TEN, TC-CONC |
+| **v1** | Cały moduł harmonogramu z Ganttem (włączanie per organizacja, harmonogram inwestycji, faza wykonawcza); tryb B (marża docelowa); eksport XLSX; „Nowa rewizja”; porównanie wersji; cennik warstwowy; przeliczniki jednostek; marża po zamknięciu deala; „tylko własne deale”; koszty rzeczywiste; dopasowanie inwestycji po identyfikatorach; scalanie i rozdzielanie inwestycji (wybór oferty głównej); dashboard rankingu marż; waluty per pozycja; dzienne pobieranie kursów | TC-COST-007, -012, TC-IMP-008, TC-DEAL-006..010, TC-VER-001, -004, -005, TC-PRICE-001, -002, TC-PERM-004, -006, -008, TC-REAL, TC-GANTT, TC-PERF-002, TC-CUR-004 (przeliczenie), TC-CUR-005 (XLSX), TC-CUR-013, TC-NOSCHED-002, -004, -005, TC-FCST-001, TC-EXEC, TC-SEC-003 |
 | **v2** | Integracje cenników zewnętrznych | TC-PRICE-004 |
-| **Warunkowe** | Waluty inne niż PLN — tylko gdy firma je dopuści (faza v1/v2) | TC-CUR-002..007 |
 
 ---
 
@@ -1460,120 +1460,214 @@ Konwencja dat: data końca wliczona; czas trwania = koniec − start + 1 w dniac
 
 ---
 
-## 12. Scenariusze testowe: Waluty (TC-CUR) — 7 TC
+## 12. Scenariusze testowe: Waluty (TC-CUR) — 13 TC
 
-Kalkulacja jednowalutowa, kursy wymiany, zaokrąglenie per waluta, zmiana waluty deala.
+Kalkulacja jednowalutowa (MVP) i wielowalutowa (v1), waluta bazowa, kursy wymiany, zaokrąglenie per waluta, zmiana waluty deala.
 
-Bezwarunkowo (MVP): jedna waluta na kalkulację — waluta deala, a bez deala waluta domyślna firmy; PLN ma 2 miejsca i kurs 1 (TC-CUR-001). Scenariusze TC-CUR-002..007 są **warunkowe: tylko gdy firma dopuści waluty inne niż PLN** (pytanie otwarte). Wtedy: liczba miejsc wg ISO 4217, kurs średni z tabeli A NBP z dnia wysłania zamrożony w wersji, w dzień bez tabeli ostatnia opublikowana tabela z jej datą, ręczna korekta kursu tylko przed wysłaniem.
+Waluty i kursy pochodzą z modułu Waluty platformy (lista walut aktywnych, waluta bazowa organizacji, kursy). MVP: jedna waluta na kalkulację — waluta deala, a bez deala waluta domyślna firmy albo waluta bazowa. Gdy waluta kalkulacji jest walutą bazową, kurs nie jest pobierany. Gdy jest inna: kurs średni z tabeli A NBP pobrany na żądanie przy wysłaniu i zamrożony w wysłanej wersji, w dzień bez tabeli ostatnia opublikowana tabela, kurs ręczny tylko w wersji roboczej. Liczba miejsc po przecinku z ustawień waluty w module Waluty. v1: waluta per pozycja. Wszystkie wartości kursów w scenariuszach to **kurs przykładowy** podstawiany w teście bez ruchu sieciowego — nie są to rzeczywiste notowania.
 
 #### TC-CUR-001: Waluta kalkulacji = waluta deala / domyślna firmy; PLN bez kursu
 
 - **Priorytet**: P1 | **Etap**: MVP | **Poziom**: Integration + API
-- **Warunki wstępne**: Organizacja A z domyślną walutą PLN; Deal X w PLN
+- **Warunki wstępne**: Organizacja A z walutą bazową PLN (moduł Waluty) i bez własnej waluty domyślnej kalkulacji; Deal X w PLN
 - **Kroki**:
   1. Stwórz kalkulację bez deala
   2. Podepnij ją do Deal X
   3. Wyślij wersję
-  4. Monitoruj ruch wychodzący serwera
+  4. Monitoruj ruch wychodzący serwera i tabelę kursów modułu Waluty
 - **Oczekiwane wyniki**:
-  - Bez deala waluta = PLN (domyślna firmy); po podpięciu waluta = waluta deala
+  - Bez deala waluta = waluta bazowa (PLN); po podpięciu waluta = waluta deala
   - Kalkulacja jednowalutowa: jedna waluta na kalkulację, brak mieszanych walut w liniach
-  - W PLN kwoty mają 2 miejsca po przecinku; kurs = 1, zapisany w zamrożonym obrazie jako 1
-  - Brak pobierania kursu (zero żądań do NBP)
+  - W PLN kwoty mają 2 miejsca po przecinku; kurs = 1, zapisany w zamrożonym obrazie jako 1, z pustym rodzajem i pustym źródłem kursu (ani „NBP tabela A”, ani „ręczny”)
+  - Brak pobierania kursu (zero żądań do NBP, brak nowych wierszy w tabeli kursów)
 
-#### TC-CUR-002: Kurs z tabeli A NBP z dnia wysłania, zamrożony w wysłanej wersji
+#### TC-CUR-002: Kurs z tabeli A NBP pobrany przy wysłaniu, zamrożony w wysłanej wersji
 
-- **Priorytet**: P1 | **Etap**: faza walut obcych (v1/v2) | **Poziom**: Integration
-- **Warunkowe: tylko gdy firma dopuści waluty inne niż PLN**
-- **Warunki wstępne**: Kalkulacja w EUR; średni kurs z tabeli A NBP z 2026-10-21: EUR 4.2500; z 2026-10-22: 4.3000
+- **Priorytet**: P1 | **Etap**: MVP | **Poziom**: Integration
+- **Warunki wstępne**: Waluta bazowa PLN; Deal X w EUR; kalkulacja podpięta do Deal X (waluta EUR); tabela A NBP z 2026-10-21: EUR 4.2500 (kurs przykładowy), z 2026-10-22: EUR 4.3000 (kurs przykładowy); w tabeli kursów brak kursu EUR z tabeli A przed wysłaniem
 - **Kroki**:
-  1. Robocza wersja: wartość pozycji 1000 EUR
+  1. Robocza wersja: wartość pozycji 1000 EUR; sprawdź, że w wersji roboczej nie pobrano kursu
   2. Wyślij wersję 2026-10-21 po publikacji tabeli
   3. 2026-10-22 otwórz wysłaną wersję
-  4. (od v1) Nowa rewizja jako robocza kopia
+  4. (od v1) Nowa rewizja jako robocza kopia i jej wysłanie 2026-10-22
 - **Oczekiwane wyniki**:
-  - Kurs = średni kurs z tabeli A NBP z dnia wysłania (4.2500); 1000 EUR = 4250.00 PLN
-  - Kurs zamrożony w wysłanej wersji z metadanymi: źródło (NBP, tabela A), numer i data tabeli, wartość
-  - Po wysłaniu kurs się nie zmienia (2026-10-22 nadal 4.2500); PDF zawiera kurs z dnia wysłania
-  - Nowa robocza kopia pokazuje bieżący kurs (4.3000)
+  - Krok 1: brak żądania do NBP przed wysłaniem
+  - Krok 2: kurs pobrany na żądanie przy wysłaniu z tabeli A (kurs średni), nie z tabeli kupna/sprzedaży; 1000 EUR = 4250.00 PLN
+  - Zamrożony obraz zawiera: parę EUR → PLN, kurs 4.2500 jako tekst z pełną precyzją, rodzaj kursu „średni”, źródło „NBP tabela A”, datę i numer tabeli
+  - Krok 3: kurs bez zmian (nadal 4.2500); PDF zawiera kurs z dnia wysłania
+  - Krok 4: nowa rewizja po wysłaniu ma kurs 4.3000 z tabeli z 2026-10-22; poprzednia wersja nadal 4.2500
 
-#### TC-CUR-003: Zaokrąglenie per waluta — JPY 0, PLN 2, KWD 3 miejsca
+#### TC-CUR-003: Zaokrąglenie per waluta z ustawień waluty — JPY 0, PLN 2, KWD 3 miejsca
 
-- **Priorytet**: P1 | **Etap**: faza walut obcych (v1/v2) | **Poziom**: Unit
-- **Warunkowe: tylko gdy firma dopuści waluty inne niż PLN**
-- **Warunki wstępne**: Firma dopuszcza waluty PLN, JPY, KWD
+- **Priorytet**: P1 | **Etap**: MVP | **Poziom**: Unit
+- **Warunki wstępne**: Moduł Waluty: PLN (2 miejsca), JPY (0 miejsc), KWD (3 miejsca), wszystkie aktywne; organizacja bez własnego nadpisania liczby miejsc
 - **Kroki**:
   1. Kalkulacja JPY: pozycja 1 = 1005.4 JPY, pozycja 2 = 2003.5 JPY
   2. Kalkulacja PLN: pozycja 1 = 100.345 PLN, pozycja 2 = 200.344 PLN
   3. Kalkulacja KWD: pozycja 1 = 10.0005 KWD, pozycja 2 = 20.0004 KWD
+  4. Zmień w module Waluty liczbę miejsc testowej waluty i przelicz roboczą kalkulację w tej walucie
 - **Oczekiwane wyniki**:
-  - JPY (0 miejsc wg ISO 4217): 1005, 2004; suma 3009
+  - JPY (0 miejsc): 1005, 2004; suma 3009
   - PLN (2 miejsca): 100.35, 200.34; suma 300.69
   - KWD (3 miejsca): 10.001, 20.000; suma 30.001
-  - Tryb half-up i zasada „suma z pozycji już zaokrąglonych” bez zmian; liczba miejsc wynika z waluty, bez nadpisywania per firma
+  - Krok 4: liczba miejsc pochodzi z ustawień waluty w module Waluty, nie ze stałej listy w module kalkulacji; standardowa liczba miejsc ISO 4217 tylko gdy moduł Waluty jej nie podaje
+  - Tryb half-up i zasada „suma z pozycji już zaokrąglonych” bez zmian; jawne ustawienie liczby miejsc przez organizację nadpisuje wartość z waluty (TC-TEN-007)
   - PDF (i od v1 eksport) respektują precyzję waluty
 
-#### TC-CUR-004: Zmiana waluty deala po podpięciu — ostrzeżenie i przeprzeliczenie
+#### TC-CUR-004: Zmiana waluty deala po podpięciu — ostrzeżenie (MVP), przeliczenie (v1)
 
-- **Priorytet**: P1 | **Etap**: faza walut obcych (v1/v2) | **Poziom**: Integration + E2E
-- **Warunkowe: tylko gdy firma dopuści waluty inne niż PLN**
-- **Warunki wstępne**: Kalkulacja z 5 liniami (EUR), podpięta do Deal X
+- **Priorytet**: P1 | **Etap**: MVP (ostrzeżenie), v1 (przeliczenie) | **Poziom**: Integration + E2E
+- **Warunki wstępne**: Kalkulacja z 5 liniami w EUR, podpięta do Deal X (EUR); jedna wysłana wersja i jedna robocza
 - **Kroki**:
   1. Zmień walutę Deal X z EUR na USD
-  2. System wykrywa niezgodność walut (kalkulacja EUR, deal USD)
-  3. Wybierz: "Przelicz po kursie" lub "Zachowaj liczby w nowej walucie"
-  4. Zapisz
+  2. Otwórz roboczą wersję i spróbuj „Zastosuj wartość do deala”
+  3. (v1) Wybierz: „Przelicz po kursie” albo „Zachowaj liczby w nowej walucie” i zapisz
 - **Oczekiwane wyniki**:
-  - Opcja A (przelicz): każda linia = wartość_EUR × kurs_EUR/USD; kurs z dnia zmiany zapamiętany
-  - Opcja B (zachowaj liczby): wartości numeryczne bez zmian, tylko symbol waluty się zmienia
-  - Audit trail: zmiana waluty + wybrana metoda + kurs (jeśli A)
-  - Wersje robocze i wysłane traktowane różnie: wysłane nie mogą być zmienione
+  - Wysłana wersja bez zmian (waluta, kwoty i kurs z zamrożonego obrazu)
+  - MVP: robocza wersja pokazuje ostrzeżenie o niezgodności walut (kalkulacja EUR, deal USD); „Zastosuj wartość do deala” niedostępne do czasu zmiany waluty kalkulacji
+  - v1, opcja „Przelicz”: każda linia przeliczona po kursie z dnia zmiany, kurs zapamiętany
+  - v1, opcja „Zachowaj liczby”: wartości bez zmian, zmienia się tylko waluta
+  - Audit trail: zmiana waluty + wybrana metoda + kurs (jeśli przeliczenie)
+  - „Zastosuj wartość do deala” przenosi kwotę i walutę kalkulacji
 
 #### TC-CUR-005: Eksport i PDF w walucie oferty
 
-- **Priorytet**: P1 | **Etap**: faza walut obcych (v1/v2) | **Poziom**: E2E/UI
-- **Warunkowe: tylko gdy firma dopuści waluty inne niż PLN**
-- **Warunki wstępne**: Kalkulacja EUR, wysłana wersja
+- **Priorytet**: P1 | **Etap**: MVP (PDF), v1 (eksport XLSX) | **Poziom**: E2E/UI
+- **Warunki wstępne**: Kalkulacja EUR, wysłana wersja z kursem 4.2500 (kurs przykładowy) z tabeli A z 2026-10-15
 - **Kroki**:
-  1. Eksportuj do XLSX
-  2. Wygeneruj PDF
+  1. Wygeneruj PDF
+  2. (v1) Eksportuj do XLSX
   3. Sprawdź nagłówki kolumn, symbole walut, precyzję
 - **Oczekiwane wyniki**:
-  - XLSX: kolumna "Wartość (EUR)" — wszystkie kwoty w EUR z 2 miejscami
-  - PDF: symbol waluty spójny w całym dokumencie (nie mieszaj PLN/EUR)
-  - Kurs użyty do wysłania: widoczny w stopce PDF ("Kurs: 1 EUR = 4.25 PLN na dzień 2026-10-15")
+  - PDF: symbol waluty spójny w całym dokumencie (bez mieszania PLN/EUR); w stopce kurs z zamrożonego obrazu („Kurs: 1 EUR = 4.2500 PLN, NBP tabela A z 2026-10-15”)
+  - XLSX: kolumna „Wartość (EUR)” — kwoty w EUR z liczbą miejsc waluty
   - Eksport przez użytkownika bez uprawnień do marży: kolumna marży pominięta
 
 #### TC-CUR-006: Dzień bez publikacji tabeli A — ostatnia opublikowana tabela
 
-- **Priorytet**: P1 | **Etap**: faza walut obcych (v1/v2) | **Poziom**: Integration
-- **Warunkowe: tylko gdy firma dopuści waluty inne niż PLN**
-- **Warunki wstępne**: Kalkulacja w EUR; ostatnie tabele A NBP: piątek 2026-10-23 (EUR 4.2800), wtorek 2026-11-10 (EUR 4.3100); kursy NBP podstawione w teście (bez ruchu sieciowego)
+- **Priorytet**: P1 | **Etap**: MVP | **Poziom**: Integration
+- **Warunki wstępne**: Waluta bazowa PLN; kalkulacja w EUR; tabele A NBP: piątek 2026-10-23 (EUR 4.2800, kurs przykładowy), wtorek 2026-11-10 (EUR 4.3100, kurs przykładowy); NBP podstawione w teście
 - **Kroki**:
   1. Wyślij wersję w sobotę 2026-10-24
   2. Wyślij inną wersję w poniedziałek 2026-10-26 przed publikacją tabeli z tego dnia
   3. Wyślij inną wersję w święto 2026-11-11
-  4. Podstaw brak jakiejkolwiek tabeli: wyślij wersję bez kursu ręcznego, potem z kursem ręcznym 4.3000
+  4. Podstaw niedostępne API NBP i brak tabeli w bazie: wyślij wersję bez kursu ręcznego
 - **Oczekiwane wyniki**:
   - Krok 1: kurs 4.2800 z tabeli z 2026-10-23; w zamrożonym obrazie data tabeli 2026-10-23 (nie data wysłania)
   - Krok 2: kurs z ostatniej opublikowanej tabeli (2026-10-23)
   - Krok 3: kurs 4.3100 z tabeli z 2026-11-10
   - Kroki 1–3: wysłanie nie jest blokowane
-  - Krok 4: bez kursu ręcznego wysłanie odrzucone z błędem „kurs niedostępny”; z kursem ręcznym wysłanie przechodzi, zamrożony kurs 4.3000
+  - Krok 4: wysłanie odrzucone, 422 `FX_RATE_UNAVAILABLE`, komunikat z prośbą o kurs ręczny; wersja pozostaje robocza
 
-#### TC-CUR-007: Ręczna korekta kursu — przed wysłaniem dozwolona, po wysłaniu zablokowana
+#### TC-CUR-007: Kurs ręczny — tylko w wersji roboczej, do zamrożonego obrazu, nie do tabeli kursów
 
-- **Priorytet**: P1 | **Etap**: faza walut obcych (v1/v2) | **Poziom**: Integration + API
-- **Warunkowe: tylko gdy firma dopuści waluty inne niż PLN**
-- **Warunki wstępne**: Robocza wersja w EUR, kurs pobrany z tabeli A: 4.2500
+- **Priorytet**: P1 | **Etap**: MVP | **Poziom**: Integration + API
+- **Warunki wstępne**: Waluta bazowa PLN; robocza wersja w EUR; w tabeli kursów modułu Waluty kurs EUR z tabeli A 4.2500 (kurs przykładowy); użytkownik z prawem edycji kalkulacji
 - **Kroki**:
-  1. Popraw kurs ręcznie na 4.2700, zapisz
-  2. Wyślij wersję
-  3. Spróbuj zmienić kurs w wysłanej wersji (UI i API)
+  1. Ustaw kurs ręczny 4.2700 (kurs przykładowy) bez podania powodu
+  2. Ustaw kurs ręczny 4.2700 z powodem „kurs z umowy”
+  3. Wyślij wersję
+  4. Sprawdź tabelę kursów modułu Waluty
+  5. Spróbuj zmienić kurs w wysłanej wersji (UI i API)
 - **Oczekiwane wyniki**:
-  - Krok 1: kurs 4.2700 przyjęty i oznaczony jako ręczna korekta; zmiana w audycie
-  - Krok 2: zamrożony obraz zawiera 4.2700 z oznaczeniem ręcznej korekty
-  - Krok 3: pole tylko do odczytu, API 422; kurs bez zmian; zmiana kursu wymaga nowej rewizji
+  - Krok 1: odrzucone — powód wymagany
+  - Krok 2: kurs przyjęty, oznaczony jako ręczny; wpis w audycie (kto, kiedy, powód); undo przywraca stan bez kursu ręcznego
+  - Krok 3: kurs ręczny ma pierwszeństwo przed NBP (brak żądania do NBP); zamrożony obraz zawiera 4.2700 ze źródłem „ręczny” i rodzajem kursu „ręczny”
+  - Krok 4: tabela kursów bez nowego wiersza i bez zmiany kursu 4.2500 — kurs ręczny nie zmienia kursów firmy
+  - Krok 5: pole tylko do odczytu, API 422; kurs bez zmian; zmiana kursu wymaga nowej rewizji
+
+#### TC-CUR-008: Brak waluty bazowej organizacji — wysłanie zablokowane
+
+- **Priorytet**: P1 | **Etap**: MVP | **Poziom**: Integration + API
+- **Warunki wstępne**: Organizacja B bez waluty bazowej w module Waluty; robocza kalkulacja w EUR podpięta do deala; druga kalkulacja bez deala, organizacja bez waluty domyślnej kalkulacji
+- **Kroki**:
+  1. Wyślij roboczą wersję w EUR
+  2. Stwórz kalkulację bez deala
+  3. Ustaw walutę bazową PLN w module Waluty i powtórz krok 1
+- **Oczekiwane wyniki**:
+  - Krok 1: 422 `BASE_CURRENCY_MISSING`; brak zamrożonego obrazu, brak PDF; wersja pozostaje robocza
+  - Krok 2: 422 `BASE_CURRENCY_MISSING` (nie da się ustalić waluty kalkulacji)
+  - Krok 3: wysłanie przechodzi z kursem EUR → PLN
+  - Organizacja A w tym samym tenancie (z walutą bazową) działa bez zmian
+
+#### TC-CUR-009: Waluta nieaktywna albo spoza modułu Waluty — 422
+
+- **Priorytet**: P1 | **Etap**: MVP | **Poziom**: Integration + API
+- **Warunki wstępne**: Moduł Waluty: CHF nieaktywny, SEK nie istnieje; Deal Y w SEK (waluta ze słownika deala); robocza kalkulacja w CHF utworzona, gdy CHF był aktywny
+- **Kroki**:
+  1. Stwórz kalkulację w CHF
+  2. Podepnij nową kalkulację do Deal Y
+  3. Wyślij istniejącą roboczą wersję w CHF
+  4. Aktywuj CHF i powtórz krok 3
+- **Oczekiwane wyniki**:
+  - Kroki 1–3: 422 z kodem błędu nieaktywnej waluty i komunikatem „Waluta {kod} nie jest aktywna w module Waluty — dodaje ją administrator”; brak zapisu
+  - Krok 4: wysłanie przechodzi (kurs z tabeli A albo ręczny)
+  - Lista wyboru waluty w kalkulacji nie pokazuje CHF (przed aktywacją) ani SEK
+
+#### TC-CUR-010: Pracownik widzi wybór waluty bez dostępu do modułu Waluty
+
+- **Priorytet**: P1 | **Etap**: MVP | **Poziom**: API + E2E/UI
+- **Warunki wstępne**: Użytkownik z rolą `employee` z prawem podglądu i edycji kalkulacji, bez uprawnień modułu Waluty; aktywne PLN (bazowa), EUR, JPY
+- **Kroki**:
+  1. Otwórz kalkulację bez deala i rozwiń wybór waluty
+  2. Pobierz listę walut przez API modułu kalkulacji
+  3. Otwórz ekran i API modułu Waluty (lista walut, kursy)
+  4. Użytkownik bez prawa podglądu kalkulacji pobiera listę walut z kroku 2
+- **Oczekiwane wyniki**:
+  - Krok 1: wybór pokazuje PLN, EUR, JPY; PLN oznaczony jako bazowa
+  - Krok 2: lista tylko aktywnych walut z kodem, nazwą, liczbą miejsc i oznaczeniem waluty bazowej; bez kursów
+  - Krok 3: ekran i API modułu Waluty niedostępne (403) — rola nie dostała uprawnień modułu Waluty
+  - Krok 4: 403
+  - Tenant istniejący przed wdrożeniem: ten sam wynik bez synchronizacji ról
+
+#### TC-CUR-011: Kurs zapisany dla daty D znajdowany dla tej samej daty, także w sumach deali w EUR; godziny graniczne
+
+- **Priorytet**: P0 | **Etap**: MVP | **Poziom**: Integration
+- **Warunki wstępne**: Waluta bazowa PLN; strefa serwera i organizacji Europe/Warsaw; w tabeli kursów tylko wiersze dostawcy „NBP tabela A” (bez wierszy tabeli C); tabela A z datą D-1 = 2026-10-22: EUR 4.3305 (kurs przykładowy) i z datą D = 2026-10-23: EUR 4.3281 (kurs przykładowy); dla przypadku zimowego tabela A z 2026-10-26: EUR 4.3350 i z 2026-10-27: EUR 4.3400 (kursy przykładowe); pobieranie kursów z sieci wyłączone w teście (dostawca podstawiony, bez automatycznego dociągania); deale: 2 w EUR (10 000 EUR i 5 000 EUR) i 1 w PLN (20 000 PLN)
+- **Kroki**:
+  1. Zapisz kursy z tabeli A dla daty D przez dostawcę „NBP tabela A” (wiersz z datą D 00:00 UTC), nie przez dostawcę tabeli C
+  2. Wyszukaj kurs EUR → PLN tak, jak robi to moduł Waluty, dla chwili D 12:00 czasu warszawskiego
+  3. Wyszukaj kurs tak, jak robi to moduł Waluty, dla chwil: D 23:30 i D 00:30 czasu warszawskiego
+  4. Przy zegarze ustawionym na D 12:00 czasu warszawskiego otwórz podsumowanie deali (wartość lejka w walucie bazowej)
+  5. Wyślij kalkulację w EUR w dniu D o 12:00, o 23:30 i (na świeżych danych) o 00:30 czasu warszawskiego
+  6. Przypadek graniczny, czas letni (D = 2026-10-23, UTC+2): wyszukaj kurs jak moduł Waluty dla D 01:59:59 i D 02:00:00 czasu warszawskiego; wyślij kalkulację o D 01:59:59
+  7. Przypadek graniczny, czas zimowy (D = 2026-10-27, UTC+1): wyszukaj kurs jak moduł Waluty dla D 00:59:59 i D 01:00:00 czasu warszawskiego; wyślij kalkulację o D 00:59:59
+- **Oczekiwane wyniki**:
+  - Krok 2: kurs znaleziony dla daty D (4.3281), bez cofania do dni poprzednich
+  - Krok 3: 23:30 → kurs z daty D (4.3281); 00:30 → kurs z daty D-1 (4.3305) — wyszukiwanie modułu Waluty liczy dzień w UTC, więc o 00:30 czasu warszawskiego widzi jeszcze poprzedni dzień; zachowanie udokumentowane w specyfikacji, nie błąd
+  - Krok 4: podsumowanie nie zgłasza braku kursu EUR (wszystkie deale przeliczone, lista walut bez kursu pusta); suma = 15 000 × 4.3281 + 20 000 = 84 921.50 → **84 922 PLN** (podsumowanie deali zaokrągla do pełnych złotych; przykład liczbowy na kursach przykładowych)
+  - Krok 5: każde z trzech wysłań zamraża kurs z tabeli z datą D (4.3281) — data wysłania to data kalendarzowa w Europe/Warsaw, niezależnie od godziny; w realnym NBP o 00:30 tabela z dnia D nie jest jeszcze opublikowana i wynikiem byłaby tabela z D-1
+  - Krok 6: 01:59:59 → D-1 (4.3305); 02:00:00 → D (4.3281); wysłanie o 01:59:59 → kurs z daty D (4.3281)
+  - Krok 7: 00:59:59 → 2026-10-26 (4.3350); 01:00:00 → 2026-10-27 (4.3400); wysłanie o 00:59:59 → kurs z 2026-10-27 (4.3400)
+  - Test regresyjny dla opisanego w specyfikacji błędu daty (zapis o północy czasu warszawskiego, wyszukiwanie o północy UTC)
+
+#### TC-CUR-012: Waluta bez kursu w tabeli NBP — `FX_RATE_UNAVAILABLE`
+
+- **Priorytet**: P1 | **Etap**: MVP | **Poziom**: Integration + API
+- **Warunki wstępne**: Waluta bazowa PLN; CNH aktywna w module Waluty; CNH nie występuje w żadnej tabeli NBP (A, B, C); w tabeli kursów brak kursu CNH; kalkulacja robocza w CNH
+- **Kroki**:
+  1. Wyślij wersję bez kursu ręcznego
+  2. Otwórz prognozę i sumę inwestycji z tą kalkulacją
+  3. Ustaw kurs ręczny 0.5400 (kurs przykładowy) z powodem i wyślij
+- **Oczekiwane wyniki**:
+  - Krok 1: 422 `FX_RATE_UNAVAILABLE` z prośbą o kurs ręczny; brak kursu zgadywanego, brak kursu krzyżowego, brak użycia kursów kupna/sprzedaży z innej tabeli
+  - Krok 2: kwota widoczna w CNH z oznaczeniem „brak kursu”, bez przeliczenia na PLN
+  - Krok 3: wysłanie przechodzi; zamrożony obraz ze źródłem „ręczny”
+
+#### TC-CUR-013: Waluty per pozycja — suma w walucie kalkulacji
+
+- **Priorytet**: P1 | **Etap**: v1 | **Poziom**: Integration
+- **Warunki wstępne**: Waluta bazowa PLN; kalkulacja w PLN; tabela A z dnia wysłania: EUR 4.2500, USD 3.8000 (kursy przykładowe)
+- **Kroki**:
+  1. Dodaj pozycje: 1000 EUR, 500 USD, 2000 PLN
+  2. Dodaj pozycję w walucie nieaktywnej
+  3. Wyślij wersję
+  4. Zmień kurs ręczny jednej pary w nowej rewizji
+- **Oczekiwane wyniki**:
+  - Krok 1: każda pozycja pokazuje własną walutę; suma kalkulacji w PLN = 4250.00 + 1900.00 + 2000.00 = 8150.00
+  - Krok 2: 422 z kodem błędu nieaktywnej waluty
+  - Krok 3: zamrożony obraz zawiera osobny wpis kursu dla każdej pary (EUR → PLN, USD → PLN) z rodzajem kursu, źródłem i datą tabeli; pozycje PLN bez kursu
+  - Krok 4: zmiana dotyczy tylko nowej rewizji i tylko jednej pary
 
 ---
 
@@ -2119,7 +2213,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 | **XLSX/CSV testowe** | 15 plików (poprawne, złe kodowanie, brak kolumn, separator ;, duże, XLSX bomb, formula injection, .xlsm) | 15 |
 | **Harmonogramy** | 4 harmonogramy inwestycji (faza ofertowa, faza wykonawcza, z cyklem, 300+ zadań) + 2 harmonogramy XLSX z polskiego Excela (dla firm bez Gantta) | 6 |
 | **Koszty rzeczywiste** | 20 wpisów kosztów (różne kategorie, daty, kwoty) | 20 |
-| **Kursy walut** | Tabele A NBP (EUR, USD, JPY, KWD), w tym weekend i święto — tylko scenariusze warunkowe; podstawiane w teście bez ruchu sieciowego | 10 rekordów |
+| **Kursy walut** | Moduł Waluty: waluty aktywne i nieaktywne (PLN bazowa, EUR, USD, JPY 0 miejsc, KWD 3 miejsca, CHF, CNH bez kursu), organizacja bez waluty bazowej; tabele A NBP (kursy przykładowe), w tym weekend i święto; podstawiane w teście bez ruchu sieciowego | 16 rekordów |
 | **Partie produkcji** | 30 partii dla testu prognozy (różne jednostki, daty, prawdopodobieństwa) | 30 |
 | **Zdarzenia customers.deal.won** | Duplikaty i sekwencje dla testu idempotentności | 5 zdarzeń |
 
@@ -2179,7 +2273,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 | **Budżety wydajności** | Import < 10s, Gantt render < 3s, API < 500ms (TC-PERF-*) | TBD |
 | **Budżety bezpieczeństwa plików** | Zip bomb odrzucony < 5s, RAM import < 1 GB, brak SSRF (TC-SEC-001 do TC-SEC-006) | TBD |
 | **Arytmetyka finansowa** | Zaokrąglenia half-up do 2 miejsc (1,005 → 1,01), suma z pozycji zaokrąglonych, ustawienie per organizacja; marża = (cena − koszt) / cena; jednostki ze słownika, w MVP jednostka pozycji = jednostka ceny (TC-COST-*) | TBD |
-| **Poprawność walutowa** | MVP: jedna waluta, PLN 2 miejsca, kurs 1 (TC-CUR-001); warunkowo: ISO 4217, kurs z tabeli A NBP zamrożony, ręczna korekta tylko przed wysłaniem (TC-CUR-002 do TC-CUR-007) | TBD |
+| **Poprawność walutowa** | MVP: waluta deala, waluta bazowa bez kursu, kurs z tabeli A NBP zamrożony, liczba miejsc z modułu Waluty, kurs ręczny tylko w wersji roboczej i poza tabelą kursów, błędy braku waluty bazowej, nieaktywnej waluty i braku kursu, kurs znajdowany dla daty zapisu (TC-CUR-001 do TC-CUR-012); v1: waluty per pozycja (TC-CUR-013) | TBD |
 | **Edycja równoległa** | Optimistic locking 409 + brak utraty danych (TC-CONC-001 do TC-CONC-005) | TBD |
 | **Integracja z dealami/inwestycjami** | Wartość deala tylko jawnym przyciskiem z aktywnej wersji, z historią i cofnięciem (TC-VER-007, TC-DEAL-002); wartość z kalkulacji nie jest nadpisywana przez n8n (TC-DEAL-016); oferta główna, pierwsza oferta główna (TC-DEAL-004, TC-DEAL-011) | TBD |
 | **Wysłanie oferty** | Blokady z kodem i komunikatem, ostrzeżenia z potwierdzeniem, brak deala nie blokuje; blokada ujemnej marży dla roli bez wglądu w marżę bez ujawnienia znaku (TC-VER-008, TC-VER-009) | TBD |
@@ -2257,11 +2351,11 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 
 ### Nowe wnioski (rev 2)
 
-16. **Zaokrąglenia per waluta** (TC-CUR-003) — ✅ **ROZSTRZYGNIĘTE (Koordynator 2026-10-23)** — warunkowe
-    - **Decyzja**: Tylko gdy firma dopuści waluty inne niż PLN: liczba miejsc wg ISO 4217.
+16. **Zaokrąglenia per waluta** (TC-CUR-003) — ✅ **ROZSTRZYGNIĘTE (Koordynator 2026-10-23)**
+    - **Decyzja**: Liczba miejsc z ustawień waluty w module Waluty; ISO 4217 jako zapas.
 
-17. **Zamrożenie kursu w wysłanej wersji** (TC-CUR-002, TC-CUR-006, TC-CUR-007) — ✅ **ROZSTRZYGNIĘTE (Koordynator 2026-10-23)** — warunkowe
-    - **Decyzja**: Tylko gdy firma dopuści waluty inne niż PLN: kurs średni z tabeli A NBP z dnia wysłania, zamrożony w wersji; w dzień bez tabeli ostatnia opublikowana tabela; ręczna korekta dozwolona przed wysłaniem, po wysłaniu zablokowana.
+17. **Zamrożenie kursu w wysłanej wersji** (TC-CUR-002, TC-CUR-006, TC-CUR-007) — ✅ **ROZSTRZYGNIĘTE (Koordynator 2026-10-23)**
+    - **Decyzja**: Gdy waluta kalkulacji ≠ bazowa: kurs średni z tabeli A NBP z dnia wysłania, zamrożony w wersji; w dzień bez tabeli ostatnia opublikowana tabela; ręczna korekta dozwolona przed wysłaniem, po wysłaniu zablokowana.
 
 18. **Idempotentność harmonogramu wykonawczego** (TC-EXEC-002) — ✅ **ROZSTRZYGNIĘTE (Koordynator 2026-10-23)**
     - **Decyzja**: Unikalność jednego harmonogramu na inwestycję; powtórne zdarzenie won = brak zmian (no-op z logiem).
@@ -2281,8 +2375,8 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 22. **Zależność SF** (TC-GANTT-002, krok 6) — ✅ **ROZSTRZYGNIĘTE (Koordynator 2026-10-23)**
     - **Decyzja**: Przy końcu wliczonym następnik kończy się najpóźniej dzień przed startem poprzednika + lag.
 
-23. **Waluty inne niż PLN** (TC-CUR-002..007) — **otwarte**
-    - **Otwarte**: Czy firma dopuszcza waluty inne niż PLN; do czasu decyzji scenariusze walutowe są warunkowe.
+23. **Waluty inne niż PLN** (TC-CUR-002..013) — ✅ **ROZSTRZYGNIĘTE (Koordynator 2026-10-23)**
+    - **Decyzja**: MVP jedna waluta na kalkulację = waluta deala, v1 waluta per pozycja; waluty i kursy z modułu Waluty platformy.
 
 24. **Etap dashboardu rankingu marż** (TC-PERM-008) — ✅ **ROZSTRZYGNIĘTE (Koordynator 2026-10-23)**
     - **Decyzja**: v1.
@@ -2290,13 +2384,21 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 25. **Etap scalania i podziału inwestycji** (TC-DEAL-009, TC-DEAL-010) — ✅ **ROZSTRZYGNIĘTE (Koordynator 2026-10-23)**
     - **Decyzja**: oba v1. Przy rozdzieleniu użytkownik wybiera ofertę główną (domyślnie oryginał); jedna oferta główna na inwestycję, próba dwóch daje ten sam komunikat co przy duplikacie oferty.
 
+### Nowe wnioski (rev 7)
+
+26. **Aktywne waluty bez kursu w żadnej tabeli NBP** (TC-CUR-012) — **otwarte** (pytanie do Marka, raport Koordynatora 2026-10-23 §5 pkt 2)
+    - **Otwarte**: Dezaktywować takie waluty (dziś CNH), zostawić je z kursem ręcznym czy dodać inne źródło kursu?
+    - **Do czasu decyzji**: wysłanie bez kursu ręcznego kończy się błędem braku kursu (TC-CUR-012).
+
+27. **Kurs zapisany dla daty nie jest znajdowany dla tej samej daty** (TC-CUR-011) — opisane w specyfikacji kalkulacji (ryzyko daty kursu; konwencja daty wysłania w Europe/Warsaw; wyszukiwanie modułu Waluty o 00:00–02:00 latem i 00:00–01:00 zimą widzi dzień poprzedni); scenariusz regresyjny P0.
+
 ---
 
 ## 23. Podsumowanie
 
 **Dokument**: Niezależny plan testów — spec only
-**Liczba scenariuszy**: 135 (rev 6: +1; rev 5: +25; rev 2–4: 109; rev 1: 72)
-**Liczba wniosków do speki**: 25 (15 oryginalnych + 5 z rev 2 + 5 z rev 5)
+**Liczba scenariuszy**: 141 (rev 7: +6; rev 6: +1; rev 5: +25; rev 2–4: 109; rev 1: 72)
+**Liczba wniosków do speki**: 27 (15 oryginalnych + 5 z rev 2 + 5 z rev 5 + 2 z rev 7)
 **Status**: SPEC ONLY — bez kodu, bez testów wykonywalnych
 
 **Kolejne kroki**:
@@ -2308,7 +2410,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 
 ## Załącznik: Traceability TC → D
 
-Źródło: `.ai/decisions.md`@b544719 (develop_OM_CRM) — 73 aktywne decyzje, w tym D75–D82 i poprawiona D71. D83: `.ai/decisions.md`@3f00542 (develop_OM_CRM, merge PR #14), rozstrzygnięte przez Koordynatora 2026-10-23. N/A = decyzja bez zachowania testowanego w tym planie.
+Źródło: `.ai/decisions.md`@b544719 (develop_OM_CRM) — 73 aktywne decyzje, w tym D75–D82 i poprawiona D71. D83: `.ai/decisions.md`@3f00542 (develop_OM_CRM, merge PR #14), rozstrzygnięte przez Koordynatora 2026-10-23. D84–D94: `.ai/decisions.md` z tego PR (Rozstrzygnięte przez Koordynatora 2026-10-23, audyt om-overlap-audit §3–4); razem 85 aktywnych decyzji w zakresie D1–D94. N/A = decyzja bez zachowania testowanego w tym planie.
 
 | D | Treść skrócona | TC | Uwagi |
 |---|---|---|---|
@@ -2372,8 +2474,8 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 | D67 | Uzupełnienie harmonogramów po włączeniu | TC-NOSCHED-004, TC-NOSCHED-005 |  |
 | D68 | Lista feature'ów ACL | TC-PERM-001, TC-PERM-002, TC-PERM-009 |  |
 | D69 | Niezależne ustawienia organizacji | TC-TEN-007 |  |
-| D70 | ISO 4217 | TC-CUR-003 | warunkowe (waluty inne niż PLN) |
-| D71 | Kurs NBP tabela A, ostatnia tabela, korekta przed wysłaniem | TC-CUR-002, TC-CUR-006, TC-CUR-007 | warunkowe; pytanie o waluty otwarte |
+| D70 | Liczba miejsc per waluta (z modułu Waluty, ISO 4217 jako zapas) | TC-CUR-003 | realizacja: D87 |
+| D71 | Kurs NBP tabela A, ostatnia tabela, korekta przed wysłaniem | TC-CUR-002, TC-CUR-006, TC-CUR-007 | realizacja: D85 |
 | D72 | Ponowne otwarcie deala — oznaczenie bez usuwania | TC-EXEC-003 |  |
 | D73 | Cena zero / marża „—” | TC-COST-006, TC-VER-008 |  |
 | D74 | Akceptacja nowych zależności | TC-IMP-004 | zależności, nie zachowanie; testy plikami z polskiego Excela, bez testów konkretnej biblioteki |
@@ -2386,6 +2488,17 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 | D81 | Wartość z „Zastosuj do deala” wygrywa; n8n tylko pola przetargowe | TC-DEAL-016 | |
 | D82 | Gantt własny, zewnętrzna biblioteka tylko PoC w v1 | N/A | zależności, nie zachowanie; scenariusze Gantta bez nazwy biblioteki |
 | D83 | Rozdzielenie w v1; wybór oferty głównej, domyślnie oryginał | TC-DEAL-010 | etap v1; źródło: `.ai/decisions.md`@3f00542 (Rozstrzygnięte przez Koordynatora 2026-10-23) |
+| D84 | Waluty z modułu Waluty; MVP waluta deala, v1 waluta per pozycja | TC-CUR-001, TC-CUR-004, TC-CUR-013 | v1: TC-CUR-013 |
+| D85 | Tabela A na żądanie przy wysłaniu; kurs ręczny tylko w wersji roboczej, poza tabelą kursów | TC-CUR-002, TC-CUR-006, TC-CUR-007, TC-CUR-011, TC-CUR-012 | |
+| D86 | Waluta bazowa organizacji; brak → 422 | TC-CUR-001, TC-CUR-008 | |
+| D87 | Liczba miejsc z modułu Waluty; waluta aktywna | TC-CUR-003, TC-CUR-009, TC-CUR-010 | kod błędu nieaktywnej waluty — propozycja |
+| D88 | Zamrożony kurs z rodzajem, źródłem i parą; v1 wpis per para | TC-CUR-002, TC-CUR-007, TC-CUR-013 | |
+| D89 | Dzienne pobieranie kursów w v1, w MVP na żądanie | TC-CUR-002 | job dzienny v1 — zachowanie jak TC-CUR-011 |
+| D90 | Bez ofert i produktów platformy (`sales`, `catalog`) | N/A | zakres modułów, nie zachowanie |
+| D91 | XLSX bez modułu importu CSV platformy | TC-IMP-004 | zależność; testy plikami XLSX |
+| D92 | PDF z plikiem w załącznikach | TC-CUR-005, TC-VER-002 | |
+| D93 | Bez obiegu akceptacji w MVP | N/A | kandydat v2, brak zachowania w MVP |
+| D94 | Zapisane widoki i harmonogram zadań opcjonalne w v1 | N/A | opcjonalne komponenty platformy |
 
 **Decyzje zastąpione — nie testujemy:**
 - D3 — zastąpione przez D4
@@ -2400,6 +2513,24 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 ---
 
 ## Changelog
+
+### Rev 8 — 2026-10-23
+
+**Runda rev 8g — poprawki po review PR #16:**
+- TC-CUR-011 (P0): krok 1 — zapis przez dostawcę „NBP tabela A”; krok 3 — wyszukiwanie modułu Waluty o 23:30 daje kurs z D, o 00:30 kurs z D-1 (dzień liczony w UTC); krok 4 — suma deali 84 922 PLN (zaokrąglenie do całości) i brak walut bez kursu; krok 5 — wysłanie o 12:00, 23:30 i 00:30 zamraża kurs z D (data w Europe/Warsaw); nowe kroki 6–7 — godziny graniczne lato (01:59:59 / 02:00:00) i zima (00:59:59 / 01:00:00)
+- TC-CUR-001: zamrożony obraz przy walucie bazowej bez rodzaju i źródła kursu
+- §22 pkt 27 doprecyzowany
+- Liczba scenariuszy bez zmian: 141
+
+### Rev 7 — 2026-10-23
+
+**Runda rev 8f — waluty przez moduł Waluty platformy (D84–D94):**
+- TC-CUR-002..007 przepisane: etap MVP zamiast „warunkowe”; kurs z tabeli A pobierany na żądanie przy wysłaniu; kurs ręczny tylko w wersji roboczej, do zamrożonego obrazu ze źródłem „ręczny” i nie do tabeli kursów; liczba miejsc z modułu Waluty; zmiana waluty deala — ostrzeżenie w MVP, przeliczenie w v1; wartości kursów oznaczone „kurs przykładowy”
+- TC-CUR-001: waluta bazowa organizacji zamiast stałego PLN
+- Nowe TC-CUR-008 (brak waluty bazowej), TC-CUR-009 (waluta nieaktywna), TC-CUR-010 (pracownik widzi wybór waluty), TC-CUR-011 (kurs dla daty zapisu, sumy deali w EUR — P0), TC-CUR-012 (waluta bez kursu), TC-CUR-013 (v1 waluty per pozycja)
+- §1.3 bez wiersza „Warunkowe”; fixtures i kryteria akceptacji zaktualizowane; §22 pkt 16, 17, 23 rozstrzygnięte, nowe pkt 26 (otwarte) i 27
+- Annex: D70, D71 bez „warunkowe”; D84–D94 (źródło: `.ai/decisions.md` z tego PR)
+- Liczba scenariuszy: 135 → 141
 
 ### Rev 6 — 2026-10-23
 

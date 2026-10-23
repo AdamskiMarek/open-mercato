@@ -6,7 +6,7 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-19 |
-| **Rewizja** | 2026-10-23 (rev 8e — zakres traceability D1–D83, D83 N/A; poprzednio rev 8d, rev 8c, rev 8b 2026-10-23, rev 8a 2026-10-20) |
+| **Rewizja** | 2026-10-23 (rev 8f — zakres traceability D1–D94: D91 realizowana, D84–D90 i D92–D94 N/A; poprzednio rev 8e — zakres traceability D1–D83, D83 N/A; poprzednio rev 8d, rev 8c, rev 8b 2026-10-23, rev 8a 2026-10-20) |
 | **Moduł** | `project_schedule` (`apps/mercato/src/modules/project_schedule`) |
 | **Zależności upstream** | **`project_costing` (moduł bazowy)**, `customers`, `dictionaries`, `dashboards`, `attachments`, `notifications`, `configs`, `feature_toggles`, `audit_logs`, `query_index`, `progress` |
 | **Powiązany spec** | `.ai/specs/2026-10-19-project-costing-offer-calculator.md` |
@@ -991,9 +991,9 @@ apps/mercato/src/modules/project_schedule/
 
 ---
 
-## 21. Decision traceability (D1–D83)
+## 21. Decision traceability (D1–D94)
 
-Zakres D1–D83: `.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`) dla D1–D82; D83 — `.ai/decisions.md`@3f00542 (gałąź `develop_OM_CRM`). Pełna tabela wszystkich aktywnych decyzji (z N/A i powodami) jest w costing §22. Poniżej decyzje realizowane w tej specyfikacji. Decyzje zastąpione nie są cytowane (lista „superseded by” w costing §22).
+Zakres D1–D94: `.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`) dla D1–D82; D83 — `.ai/decisions.md`@3f00542 (gałąź `develop_OM_CRM`); D84–D94 — `.ai/decisions.md` z tego PR (Koordynator 2026-10-23, audyt om-overlap-audit §3–4). Pełna tabela wszystkich aktywnych decyzji (z N/A i powodami) jest w costing §22. Poniżej decyzje realizowane w tej specyfikacji. Decyzje zastąpione nie są cytowane (lista „superseded by” w costing §22).
 
 | D | Decyzja (skrót) | Sekcje tej specyfikacji |
 |---|---|---|
@@ -1025,8 +1025,16 @@ Zakres D1–D83: `.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`) dla D1�
 | **D77** | Jeden rekord harmonogramu na inwestycję z fazą (najpierw ofertowa, potem wykonawcza); klucz wymusza jeden główny rekord na inwestycję | §1.2, §2.2 (indeks unikalny, wyścig → 409, undo zmiany fazy), §6.1, §7.3, §14 (R10) |
 | **D80** | Następnik kamienia milowego (FS) startuje tego samego dnia (`P.start + lag`) | §3a.1, §16 (A16) |
 | **D82** | §18a nie przesądza SVAR; `@svar-ui` zostaje PoC w v1 | §3.2, §14 (R13) |
+| **D91** | XLSX na `exceljs`; moduł OM `sync_excel` (tylko CSV) nieużywany | §8.1 |
 
 D83 (split inwestycji w v1, wybór oferty głównej) — N/A w tej specyfikacji: to komenda `project_costing.investments.split` (costing §2.2, §3.12). Rekord harmonogramu inwestycji (D77) zostaje przy inwestycji źródłowej; nowa inwestycja zaczyna bez harmonogramu.
+
+D84–D90 i D92–D94 — N/A w tej specyfikacji (realizacja w costing §3.10, §14, §18a):
+- D84–D89 (waluty, kursy `NBP_A`, waluta bazowa, `decimal_places`, `snapshot_data.fx`, job kursów): harmonogram nie liczy kwot ani kursów; sumy kosztów pochodzą z costing przez DI.
+- D90 (bez `sales`, `catalog`, `@dainamite/cpq`): harmonogram nie korzysta z ofert ani produktów.
+- D92 (`pdf-lib` + `attachments`): harmonogram nie generuje PDF.
+- D93 (`workflows` kandydat v2): dotyczy akceptacji oferty z ujemną marżą w costing.
+- D94 (`perspectives`, `@open-mercato/scheduler` opcjonalne w v1): `@open-mercato/scheduler` dotyczy joba kursów walut (D89), nie auto-planowania Gantta (§3a); `perspectives` dotyczą list kalkulacji costing.
 
 ---
 
@@ -1034,6 +1042,7 @@ D83 (split inwestycji w v1, wybór oferty głównej) — N/A w tej specyfikacji:
 
 | Data | Zmiana |
 |------|--------|
+| 2026-10-23 | **rev 8f** — traceability D1–D94 (§21): D91 (`exceljs`, `sync_excel` nieużywany) realizowana w §8.1; D84–D90 i D92–D94 N/A z powodami (waluty, PDF, `workflows`, `perspectives`, `@open-mercato/scheduler` — dotyczą costing). Źródło D84–D94: `.ai/decisions.md` z tego PR. |
 | 2026-10-23 | **rev 8e** — traceability D1–D83 (§21): D83 (split inwestycji, costing) N/A w tej specyfikacji; rekord harmonogramu inwestycji (D77) zostaje przy inwestycji źródłowej. |
 | 2026-10-23 | **rev 8d** — odbiór 8324f29. **Wyścig:** naruszenie partial unique (`23505`) mapowane na 409 `SCHEDULE_ALREADY_EXISTS` z `existingScheduleId`; zmiana fazy inwestycji pod lockiem nagłówka (§2.2, §6.1, R10). **Undo `create_execution`:** deal — soft delete harmonogramu `execution`; inwestycja — powrót do `offer` z poprzednim baseline; obie z kontrolą `updated_at` → 409 (§2.2). **D72 dla rekordu inwestycji:** kolumna `execution_deal_id`, flaga `reopened_at` ustawiana i czyszczona także na rekordzie inwestycji (§1.2, §2.2, R15). Źródło decyzji: `.ai/decisions.md`@b544719 (`develop_OM_CRM`), D1–D82 (§21). |
 | 2026-10-23 | **rev 8c** — decyzje D72, D74 (`.ai/decisions.md` 72a63c9) oraz D77, D80, D82 (Koordynator 2026-10-23); traceability D1–D82 (§21). **D77:** jeden rekord harmonogramu na inwestycję z fazą `offer` → `execution`, klucz `(org, tenant, investment_id)` (§2.2, §6.1, §7.3, R10, A15). **dealReopened:** wykrywanie przez bieżący `closure_outcome` i własny stan modułu, nie przez starą wartość z payloadu (§1.2). **D80:** następnik kamienia milowego tego samego dnia (§3a.1, A16). **D82:** SVAR tylko PoC w v1 (TLDR, §3.2, §12, R13). `project_schedule.admin` bez typów elementów (§9). Sformułowania bez liczby dni (kamień milowy, adapter dat, lag, miejsca po przecinku). |
