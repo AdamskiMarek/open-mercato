@@ -6,7 +6,7 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-19 |
-| **Rewizja** | 2026-10-23 (rev 8d — wyścig na indeksach unikalnych → 409, undo zmiany fazy (`create_execution`), D72 dla rekordu inwestycji, źródło decyzji b544719; poprzednio rev 8c, rev 8b 2026-10-23, rev 8a 2026-10-20) |
+| **Rewizja** | 2026-10-23 (rev 8e — zakres traceability D1–D83, D83 N/A; poprzednio rev 8d, rev 8c, rev 8b 2026-10-23, rev 8a 2026-10-20) |
 | **Moduł** | `project_schedule` (`apps/mercato/src/modules/project_schedule`) |
 | **Zależności upstream** | **`project_costing` (moduł bazowy)**, `customers`, `dictionaries`, `dashboards`, `attachments`, `notifications`, `configs`, `feature_toggles`, `audit_logs`, `query_index`, `progress` |
 | **Powiązany spec** | `.ai/specs/2026-10-19-project-costing-offer-calculator.md` |
@@ -991,9 +991,9 @@ apps/mercato/src/modules/project_schedule/
 
 ---
 
-## 21. Decision traceability (D1–D82)
+## 21. Decision traceability (D1–D83)
 
-Zakres D1–D82: `.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`). Pełna tabela wszystkich aktywnych decyzji (z N/A i powodami) jest w costing §22. Poniżej decyzje realizowane w tej specyfikacji. Decyzje zastąpione nie są cytowane (lista „superseded by” w costing §22).
+Zakres D1–D83: `.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`) dla D1–D82; D83 — `.ai/decisions.md` z gałęzi `spec/rev8e`. Pełna tabela wszystkich aktywnych decyzji (z N/A i powodami) jest w costing §22. Poniżej decyzje realizowane w tej specyfikacji. Decyzje zastąpione nie są cytowane (lista „superseded by” w costing §22).
 
 | D | Decyzja (skrót) | Sekcje tej specyfikacji |
 |---|---|---|
@@ -1026,12 +1026,15 @@ Zakres D1–D82: `.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`). Pełna 
 | **D80** | Następnik kamienia milowego (FS) startuje tego samego dnia (`P.start + lag`) | §3a.1, §16 (A16) |
 | **D82** | §18a nie przesądza SVAR; `@svar-ui` zostaje PoC w v1 | §3.2, §14 (R13) |
 
+D83 (split inwestycji w v1, wybór oferty głównej) — N/A w tej specyfikacji: to komenda `project_costing.investments.split` (costing §2.2, §3.12). Rekord harmonogramu inwestycji (D77) zostaje przy inwestycji źródłowej; nowa inwestycja zaczyna bez harmonogramu.
+
 ---
 
 ## Changelog
 
 | Data | Zmiana |
 |------|--------|
+| 2026-10-23 | **rev 8e** — traceability D1–D83 (§21): D83 (split inwestycji, costing) N/A w tej specyfikacji; rekord harmonogramu inwestycji (D77) zostaje przy inwestycji źródłowej. |
 | 2026-10-23 | **rev 8d** — odbiór 8324f29. **Wyścig:** naruszenie partial unique (`23505`) mapowane na 409 `SCHEDULE_ALREADY_EXISTS` z `existingScheduleId`; zmiana fazy inwestycji pod lockiem nagłówka (§2.2, §6.1, R10). **Undo `create_execution`:** deal — soft delete harmonogramu `execution`; inwestycja — powrót do `offer` z poprzednim baseline; obie z kontrolą `updated_at` → 409 (§2.2). **D72 dla rekordu inwestycji:** kolumna `execution_deal_id`, flaga `reopened_at` ustawiana i czyszczona także na rekordzie inwestycji (§1.2, §2.2, R15). Źródło decyzji: `.ai/decisions.md`@b544719 (`develop_OM_CRM`), D1–D82 (§21). |
 | 2026-10-23 | **rev 8c** — decyzje D72, D74 (`.ai/decisions.md` 72a63c9) oraz D77, D80, D82 (Koordynator 2026-10-23); traceability D1–D82 (§21). **D77:** jeden rekord harmonogramu na inwestycję z fazą `offer` → `execution`, klucz `(org, tenant, investment_id)` (§2.2, §6.1, §7.3, R10, A15). **dealReopened:** wykrywanie przez bieżący `closure_outcome` i własny stan modułu, nie przez starą wartość z payloadu (§1.2). **D80:** następnik kamienia milowego tego samego dnia (§3a.1, A16). **D82:** SVAR tylko PoC w v1 (TLDR, §3.2, §12, R13). `project_schedule.admin` bez typów elementów (§9). Sformułowania bez liczby dni (kamień milowy, adapter dat, lag, miejsca po przecinku). |
 | 2026-10-23 | **rev 8b** — spójność, review P1/P2, decyzje (`.ai/decisions.md` d818aa2), wnioski z planu testów. **P11:** usunięte wszystkie estymaty w dniach (§12/§13 jako listy funkcji i encji; D21 bez kosztu w §3.2 i §15; R13 przeformułowane; starsze wiersze changelogu oczyszczone). **D53:** harmonogram inwestycji = osobny rekord (`schedule_scope`, `investment_id`, partial unique). **D54/D55:** §3a.1 przepisany — koniec włącznie, `E' = S' + (dur − 1)`, kamień milowy `E' = S'` (poprawka wzoru z rev 8a), FS = dzień po końcu + lag, start od najpóźniejszego poprzednika, tylko w przód, `pinned_conflict` + odpięcie, `earlier_possible` jako propozycja; `duration_days` = dni kalendarzowe; mapowanie końca do SVAR (koniec wyłącznie) przez adapter; walidacja zależności na podsumowaniach i rodzic–dziecko; lock na nagłówku `ps_schedules`; event `project_schedule.schedule.rescheduled` z listą ID. **D56:** import zastępuje dane po potwierdzeniu, błędne wiersze odrzucane z raportem. **D67:** dane ukryte po wyłączeniu, catch-up po włączeniu. **Spójność z costing:** jedno źródło partii (§1.4, kopia `pc_` → `ps_`), limity importu jak costing §6.4 (10 000 wierszy zamiast wcześniejszego limitu zadań), prognoza nieważona + ważona, idempotencja harmonogramu wykonawczego (partial unique per deal), zależności do akceptacji (costing §18a). **A7/A13:** `element_type_id` usunięte z `ps_schedule_tasks` → `element_type_code`; analytics `elementTypeId` → `elementTypeCode`. Brakujący nagłówek „## 4. Prognoza produkcji” dodany. **Założenia przenumerowane** (stary → nowy): A1–A6 bez zmian; A7 (nieaktualne) usunięte; A8→A7, A9→A8, A10→A9, A11→A10, A12→A11, A13→A12, A14→A13, A15→A14, A16→A15; nowe A16–A19. **Follow-up (spec-check):** §21 Decision traceability (decyzje realizowane w tej specyfikacji; pełna tabela w costing §22); Q9 (c) — flaga „deal ponownie otwarty” (§1.2, §2.2, subscriber `dealReopened`, R15) i Q11 (`@svar-ui` tylko PoC w v1, `xml2js` w v2) — rozstrzygnięcia Koordynatora 2026-10-23. |
