@@ -6,7 +6,7 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-19 |
-| **Rewizja** | 2026-10-23 (rev 8c — decyzje D72, D74, D77, D80, D82, wykrywanie ponownego otwarcia deala, poprawki spec-check; poprzednio rev 8b 2026-10-23, rev 8a 2026-10-20) |
+| **Rewizja** | 2026-10-23 (rev 8d — wyścig na indeksach unikalnych → 409, undo zmiany fazy (`create_execution`), D72 dla rekordu inwestycji, źródło decyzji b544719; poprzednio rev 8c, rev 8b 2026-10-23, rev 8a 2026-10-20) |
 | **Moduł** | `project_schedule` (`apps/mercato/src/modules/project_schedule`) |
 | **Zależności upstream** | **`project_costing` (moduł bazowy)**, `customers`, `dictionaries`, `dashboards`, `attachments`, `notifications`, `configs`, `feature_toggles`, `audit_logs`, `query_index`, `progress` |
 | **Powiązany spec** | `.ai/specs/2026-10-19-project-costing-offer-calculator.md` |
@@ -112,7 +112,7 @@ Mechanizm (potwierdzony przez Koordynatora 2026-10-20): **włącznik per organiz
 - Baseline capture (offer → execution transition).
 - **Auto-scheduling server-side** (FS/SS/FF/SF + lag propagacja; `is_pinned` manual override; `auto_scheduling_enabled` per harmonogram).
 - Trigger `offer → execution` gdy deal WON (subscriber `customers.deal.won`; idempotent).
-- **Deal ponownie otwarty (D72):** subscriber `customers.deal.updated` (persistent, no-op przy wyłączonym module). Wykrywanie przejścia (rev 8c): payload eventu niesie tylko ID, a subscriber nie polega na „starej wartości” z payloadu. Czyta bieżący `closure_outcome` deala (query engine / serwis DI `customers`, bez HTTP) i porównuje z własnym stanem modułu: przejście „zamknięty → otwarty” zachodzi, gdy bieżący `closure_outcome IS NULL`, a dla deala istnieje harmonogram `execution` (powstał z `customers.deal.won`) z `reopened_at IS NULL`. Powtórzony albo spóźniony event jest no-opem (flaga już ustawiona albo deal ponownie zamknięty). Wtedy ustawia `ps_schedules.reopened_at = now()` na harmonogramie `execution` tego deala. Nic nie jest usuwane ani archiwizowane; UI pokazuje badge „deal ponownie otwarty” w zakładce deala i w Gantcie inwestycji. Ponowne `customers.deal.won` czyści `reopened_at`, a `create-execution` zwraca istniejący harmonogram (partial unique, §2.2).
+- **Deal ponownie otwarty (D72):** subscriber `customers.deal.updated` (persistent, no-op przy wyłączonym module). Wykrywanie przejścia (rev 8c): payload eventu niesie tylko ID, a subscriber nie polega na „starej wartości” z payloadu. Czyta bieżący `closure_outcome` deala (query engine / serwis DI `customers`, bez HTTP) i porównuje z własnym stanem modułu: przejście „zamknięty → otwarty” zachodzi, gdy bieżący `closure_outcome IS NULL`, a dla deala istnieje harmonogram `execution` (powstał z `customers.deal.won`) z `reopened_at IS NULL`. Powtórzony albo spóźniony event jest no-opem (flaga już ustawiona albo deal ponownie zamknięty). Wtedy ustawia `ps_schedules.reopened_at = now()` na harmonogramie `execution` tego deala oraz na rekordzie inwestycji, którego faza `execution` została włączona z tym dealem (`execution_deal_id` = ID deala, `reopened_at IS NULL`; §2.2). Nic nie jest usuwane ani archiwizowane; UI pokazuje badge „deal ponownie otwarty” w zakładce deala i w Gantcie inwestycji. Ponowne `customers.deal.won` czyści `reopened_at` na obu rekordach, a `create-execution` zwraca istniejący harmonogram (partial unique, §2.2). Rekord inwestycji przełączony na `execution` bez deala (`execution_deal_id IS NULL`) nie dostaje flagi D72 — nie ma deala, którego ponowne otwarcie by go dotyczyło.
 - **Harmonogram inwestycji** (D53, D77): jeden rekord per inwestycja z fazą `offer` → `execution` (zmiana fazy na tym samym rekordzie, bez kopii) + widok zbiorczy harmonogramów deali tej inwestycji.
 - Odświeżanie sum w `project_costing` przez komendę `refresh_schedule_totals` (DI) z subscribera tego modułu.
 
@@ -166,7 +166,8 @@ Mechanizm (potwierdzony przez Koordynatora 2026-10-20): **włącznik per organiz
 | `label` | `text` NOT NULL | |
 | `status` | `text` DEFAULT `'draft'` | `draft` \| `active` \| `locked` \| `archived` |
 | `baseline_captured_at` | `timestamptz` NULL | moment przechwycenia baseline |
-| `reopened_at` | `timestamptz` NULL | flaga „deal ponownie otwarty” dla `execution` (D72): ustawiana, gdy `closure_outcome` deala wraca do NULL; dane harmonogramu bez zmian i bez usuwania; czyszczona przy ponownym `customers.deal.won` (§1.2) |
+| `reopened_at` | `timestamptz` NULL | flaga „deal ponownie otwarty” dla `execution` (D72): ustawiana, gdy `closure_outcome` deala wraca do NULL; dane harmonogramu bez zmian i bez usuwania; czyszczona przy ponownym `customers.deal.won` (§1.2). Dla `schedule_scope = 'investment'` dotyczy deala z `execution_deal_id` |
+| `execution_deal_id` | `uuid` NULL | tylko `schedule_scope = 'investment'`: FK-id → `customers` deal (bez constraintu DB), z którym `create_execution` przełączył rekord inwestycji na `execution` (`dealId` w komendzie; deal musi należeć do tej inwestycji i mieć `closure_outcome = 'won'`, inaczej 422); NULL przy przełączeniu ręcznym bez deala; podstawa flagi D72 dla rekordu inwestycji (§1.2) |
 | `auto_scheduling_enabled` | `bool` NOT NULL DEFAULT true | gdy true: przesunięcie zadania propaguje daty successor-ów wg zależności (serwis); gdy false: daty ręczne |
 | `notes` | `text` NULL | |
 | `created_by` | `uuid` NULL | |
@@ -178,6 +179,8 @@ Constraints: `CHECK (schedule_type IN ('offer','execution'))`, `CHECK (schedule_
 Indeksy unikalne (rev 8b):
 - **Idempotencja harmonogramu wykonawczego:** `UNIQUE (organization_id, tenant_id, deal_id) WHERE schedule_type = 'execution' AND deal_id IS NOT NULL AND deleted_at IS NULL` — powtórzony `customers.deal.won` albo catch-up po D67 nie tworzy drugiego harmonogramu (komenda `create_execution` przy konflikcie zwraca istniejący).
 - **Harmonogram inwestycji (D53, D77):** `UNIQUE (organization_id, tenant_id, investment_id) WHERE schedule_scope = 'investment' AND deleted_at IS NULL` — klucz wymusza jeden główny rekord harmonogramu na inwestycję; `schedule_type` nie wchodzi do klucza, bo jest fazą tego rekordu (`offer` → `execution`). Przejście fazy: komenda `create_execution` wywołana dla rekordu inwestycji przechwytuje baseline (`baseline_start_at/end_at` zadań) i zmienia `schedule_type` na `execution` na tym samym rekordzie (bez kopii i bez `offer_schedule_id`); ponowne wywołanie jest no-opem.
+- **Wyścig na indeksach unikalnych:** sprawdzenie „czy istnieje” przed `INSERT` nie wyklucza wyścigu dwóch równoległych żądań (np. dwa dostarczenia `customers.deal.won`, dwa `POST /schedules` z tym samym `investmentId`). Komenda nie polega na samym pre-checku: naruszenie partial unique (PostgreSQL `23505`, nazwa indeksu rozpoznawana jawnie) jest łapane, transakcja wycofana, istniejący rekord odczytany po kluczu z filtrem `organization_id`/`tenant_id`, a API zwraca **409** `SCHEDULE_ALREADY_EXISTS` z `existingScheduleId` (nigdy 500). Sekwencyjne powtórzenie `create-execution` dla deala (pre-check znajduje istniejący) zwraca istniejący harmonogram (200, idempotencja bez zmian). Subscriber `dealWon` traktuje 409 jako no-op (i dalej czyści `reopened_at`). Zmiana fazy rekordu inwestycji to `UPDATE … WHERE schedule_type = 'offer'` pod lockiem nagłówka (`SELECT … FOR UPDATE`, poniżej); drugi równoległy wywołujący widzi już `execution` i dostaje no-op.
+- **Undo `create_execution`:** komenda zapisuje w `buildLog` `snapshotBefore` (nagłówek; dla inwestycji także `baseline_start_at/end_at` zadań i `baseline_captured_at`) i `updated_at` nagłówka po zapisie. Undo: (a) **deal** — soft delete utworzonego harmonogramu `execution` (z jego zadaniami, zależnościami i partiami), `offer` bez zmian; (b) **inwestycja** — przywraca `schedule_type = 'offer'`, poprzednie `baseline_start_at/end_at` zadań, `baseline_captured_at` i `execution_deal_id` (oraz czyści `reopened_at`). W obu przypadkach tylko, gdy `updated_at` nagłówka jest równy zapisanemu po komendzie (od zmiany fazy nikt nie zmienił harmonogramu); inaczej 409 `UNDO_CONFLICT` i dane bez zmian. Undo wywołania będącego no-opem (istniejący harmonogram, faza już `execution`) nic nie zmienia — komenda no-op loguje się z `replayable: false`.
 
 **Lock na nagłówku (rev 8b, Kod p12):** każda zmiana zadań, zależności i partii harmonogramu (w tym propagacja §3a) przyjmuje `updatedAt` nagłówka `ps_schedules` (optimistic locking → 409) i w transakcji robi `SELECT … FOR UPDATE` tylko na wierszu `ps_schedules`; po zapisie podbija `updated_at` nagłówka. Bez `SERIALIZABLE`.
 
@@ -569,7 +572,7 @@ DELETE    /api/project-schedule/schedules/:id   (tylko draft)
 
 POST .../activate | .../lock | .../duplicate
 POST .../capture-baseline   (offer → copies baseline_start/end do zadań)
-POST .../create-execution   (deal: tworzy execution schedule z offer jako kopię; idempotentne — partial unique per deal; inwestycja: zmiana fazy na tym samym rekordzie — D77, §2.2)
+POST .../create-execution   (deal: tworzy execution schedule z offer jako kopię; idempotentne — partial unique per deal, wyścig → 409 z existingScheduleId; inwestycja: zmiana fazy na tym samym rekordzie, opcjonalne dealId → execution_deal_id (D72) — D77, §2.2; undo §2.2)
 POST .../copy-calculation-batches   (jednorazowa kopia pc_ → ps_ po potwierdzeniu, §1.4)
 
 GET .../summary
@@ -578,7 +581,7 @@ GET .../export?format=xlsx|csv
 POST .../import
 ```
 
-**Harmonogram inwestycji (D53, D77)**: jeden rekord `ps_schedules` z `schedule_scope = 'investment'` na inwestycję (tworzony przez `POST /schedules` z `investmentId`; drugi → 409 z ID istniejącego; własne zadania, zależności i partie; faza `offer` → `execution` przez `create-execution`). Widok zbiorczy: `GET /api/project-schedule/investment-schedules?investmentId=` zwraca rekord inwestycji + harmonogramy deali powiązanych z inwestycją (tylko do odczytu; jedna encja inwestycji `pc_investments`). Zwraca tasks z `dealId` i `calculationId` per każde zadanie. API zawsze filtruje po stronie serwera (organizacja, ACL). UI: `/project-schedule/investments/:investmentId/gantt`.
+**Harmonogram inwestycji (D53, D77)**: jeden rekord `ps_schedules` z `schedule_scope = 'investment'` na inwestycję (tworzony przez `POST /schedules` z `investmentId`; drugi → 409 z ID istniejącego, także przy równoległym wyścigu — `23505` mapowany na 409, §2.2; własne zadania, zależności i partie; faza `offer` → `execution` przez `create-execution`). Widok zbiorczy: `GET /api/project-schedule/investment-schedules?investmentId=` zwraca rekord inwestycji + harmonogramy deali powiązanych z inwestycją (tylko do odczytu; jedna encja inwestycji `pc_investments`). Zwraca tasks z `dealId` i `calculationId` per każde zadanie. API zawsze filtruje po stronie serwera (organizacja, ACL). UI: `/project-schedule/investments/:investmentId/gantt`.
 
 ### 6.3 Zadania WBS
 
@@ -841,12 +844,12 @@ Tabela identyczna jak w costing §14 „Zakres zbiorczy”.
 | R7 | Wiele wersji formatu MS Project XML | Import (v2) | Niska | v2; v1 = XLSX/CSV | Niskie |
 | R8 | Kolizja zakładek deala (costing + schedule) | UI | Niska | Różne `groupId`, priorytet | Niskie |
 | R9 | Nieskończona propagacja przy cyklu | Algorytmy | Wysoka | Walidacja cykli przy zapisie (422 `DEPENDENCY_CYCLE`) + limit głębokości | Niskie |
-| R10 | `customers.deal.won` dostarczony więcej niż raz | Integracja | Niska | Partial unique `(org, tenant, deal_id) WHERE schedule_type = 'execution'` + `create-execution` zwraca istniejący; harmonogram inwestycji: klucz `(org, tenant, investment_id)` i zmiana fazy no-op (D77); subscriber persistent | Niskie |
+| R10 | `customers.deal.won` dostarczony więcej niż raz | Integracja | Niska | Partial unique `(org, tenant, deal_id) WHERE schedule_type = 'execution'` + `create-execution` zwraca istniejący; równoległy wyścig: `23505` → 409 `SCHEDULE_ALREADY_EXISTS`, subscriber traktuje jako no-op; harmonogram inwestycji: klucz `(org, tenant, investment_id)` i zmiana fazy no-op pod lockiem nagłówka (D77); undo zmiany fazy z kontrolą `updated_at` (§2.2); test integracyjny dwóch równoległych wywołań; subscriber persistent | Niskie |
 | R11 | Organizacja wyłącza moduł, a dane/subscribery dalej działają | Konfiguracja | Średnia | Guard API + no-op subscriberów + `isAvailable() = false` (§1.0); test integracyjny wyłączenia | Niskie |
 | R12 | Kill-switch tenanta wyłączony przez pomyłkę ukrywa harmonogramy wszystkich organizacji | Konfiguracja | Średnia | Toggle domyślnie włączony; dane nieusuwane | Niskie |
 | R13 | Zakres własnego Gantta większy niż zakładany (elementy, których nie ma w SVAR MIT) | Plan | Średnia | PoC Gantta na SVAR MIT przed budową widoku (§12 v1 pkt 4), w tym adapter dat; `@svar-ui` tylko jako PoC w v1, potem osobna decyzja (D74, D82); bez SVAR PRO (D21); lista własnych elementów zamknięta w §3.2 | Średnie (świadoma decyzja D21) |
 | R14 | Dwa źródła partii (`pc_` i `ps_`) dają różne liczby | Dane | Średnia | Prognoza czyta tylko aktywne źródło (costing §7a.3); kopia `pc_` → `ps_` jednorazowa po potwierdzeniu; UI oznacza nieaktywne partie | Niskie |
-| R15 | Deal ponownie otwarty po wygranej, a harmonogram wykonawczy wygląda na obowiązujący | Dane / UI | Niska | Flaga `reopened_at` + badge „deal ponownie otwarty”; dane bez usuwania (D72); wykrywanie przez własny stan modułu (§1.2); ponowne `won` czyści flagę; test integracyjny won → reopen → won | Niskie |
+| R15 | Deal ponownie otwarty po wygranej, a harmonogram wykonawczy wygląda na obowiązujący | Dane / UI | Niska | Flaga `reopened_at` + badge „deal ponownie otwarty”; dane bez usuwania (D72); wykrywanie przez własny stan modułu (§1.2); ponowne `won` czyści flagę; rekord inwestycji flagowany przez `execution_deal_id`; test integracyjny won → reopen → won dla harmonogramu deala i rekordu inwestycji | Niskie |
 
 ---
 
@@ -930,8 +933,8 @@ apps/mercato/src/modules/project_schedule/
 │   ├── calculationActivated.ts  # event project_costing.* (ten moduł = konsument)
 │   ├── calculationDeleted.ts    # nulluje calculation_id
 │   ├── scheduleChanged.ts       # → komenda costingu refresh_schedule_totals (kolejka, debounce)
-│   ├── dealWon.ts              # trigger offer→execution transition (persistent); czyści reopened_at
-│   └── dealReopened.ts         # customers.deal.updated: bieżący closure_outcome NULL + własny execution bez flagi → reopened_at (D72, persistent)
+│   ├── dealWon.ts              # trigger offer→execution transition (persistent); 409 = no-op; czyści reopened_at (deal + rekord inwestycji z execution_deal_id)
+│   └── dealReopened.ts         # customers.deal.updated: bieżący closure_outcome NULL + własny execution / rekord inwestycji z execution_deal_id bez flagi → reopened_at (D72, persistent)
 ├── widgets/DealScheduleTab.tsx
 └── lib/
     ├── schedule.service.ts
@@ -988,9 +991,9 @@ apps/mercato/src/modules/project_schedule/
 
 ---
 
-## 21. Decision traceability (rev 8c, D1–D82)
+## 21. Decision traceability (D1–D82)
 
-Zakres D1–D82: `.ai/decisions.md` (commit 72a63c9: D1–D74) i rozstrzygnięcia Koordynatora 2026-10-23 D75–D82 (do wpisania w `.ai/decisions.md`). Pełna tabela wszystkich aktywnych decyzji (z N/A i powodami) jest w costing §22. Poniżej decyzje realizowane w tej specyfikacji. Decyzje zastąpione nie są cytowane (lista „superseded by” w costing §22).
+Zakres D1–D82: `.ai/decisions.md`@b544719 (gałąź `develop_OM_CRM`). Pełna tabela wszystkich aktywnych decyzji (z N/A i powodami) jest w costing §22. Poniżej decyzje realizowane w tej specyfikacji. Decyzje zastąpione nie są cytowane (lista „superseded by” w costing §22).
 
 | D | Decyzja (skrót) | Sekcje tej specyfikacji |
 |---|---|---|
@@ -1017,9 +1020,9 @@ Zakres D1–D82: `.ai/decisions.md` (commit 72a63c9: D1–D74) i rozstrzygnięci
 | **D61** | Kalkulacja bez deala poza prognozą ważoną | §4.3 |
 | **D67** | Wyłączenie modułu: dane ukryte | §1.0, §2.2 |
 | **D68** | `employee` bez kosztów i marży | §9 |
-| **D72** | Flaga „deal ponownie otwarty”, bez usuwania danych | §1.2, §2.2 (`reopened_at`), §14 (R15) |
+| **D72** | Flaga „deal ponownie otwarty”, bez usuwania danych | §1.2, §2.2 (`reopened_at`, `execution_deal_id` — także rekord inwestycji), §6.1, §14 (R15) |
 | **D74** | Zależności: `exceljs` tak; siatka najpierw `packages/ui`; `@svar-ui` tylko PoC w v1, potem osobna decyzja; `xml2js` w v2; nic nie instalujemy na etapie speki | §3.2, §8.2, §12, §14 (R13) |
-| **D77** | Jeden rekord harmonogramu na inwestycję z fazą (najpierw ofertowa, potem wykonawcza); klucz wymusza jeden główny rekord na inwestycję | §1.2, §2.2 (indeks unikalny), §6.1, §7.3, §14 (R10) |
+| **D77** | Jeden rekord harmonogramu na inwestycję z fazą (najpierw ofertowa, potem wykonawcza); klucz wymusza jeden główny rekord na inwestycję | §1.2, §2.2 (indeks unikalny, wyścig → 409, undo zmiany fazy), §6.1, §7.3, §14 (R10) |
 | **D80** | Następnik kamienia milowego (FS) startuje tego samego dnia (`P.start + lag`) | §3a.1, §16 (A16) |
 | **D82** | §18a nie przesądza SVAR; `@svar-ui` zostaje PoC w v1 | §3.2, §14 (R13) |
 
@@ -1029,6 +1032,7 @@ Zakres D1–D82: `.ai/decisions.md` (commit 72a63c9: D1–D74) i rozstrzygnięci
 
 | Data | Zmiana |
 |------|--------|
+| 2026-10-23 | **rev 8d** — odbiór 8324f29. **Wyścig:** naruszenie partial unique (`23505`) mapowane na 409 `SCHEDULE_ALREADY_EXISTS` z `existingScheduleId`; zmiana fazy inwestycji pod lockiem nagłówka (§2.2, §6.1, R10). **Undo `create_execution`:** deal — soft delete harmonogramu `execution`; inwestycja — powrót do `offer` z poprzednim baseline; obie z kontrolą `updated_at` → 409 (§2.2). **D72 dla rekordu inwestycji:** kolumna `execution_deal_id`, flaga `reopened_at` ustawiana i czyszczona także na rekordzie inwestycji (§1.2, §2.2, R15). Źródło decyzji: `.ai/decisions.md`@b544719 (`develop_OM_CRM`), D1–D82 (§21). |
 | 2026-10-23 | **rev 8c** — decyzje D72, D74 (`.ai/decisions.md` 72a63c9) oraz D77, D80, D82 (Koordynator 2026-10-23); traceability D1–D82 (§21). **D77:** jeden rekord harmonogramu na inwestycję z fazą `offer` → `execution`, klucz `(org, tenant, investment_id)` (§2.2, §6.1, §7.3, R10, A15). **dealReopened:** wykrywanie przez bieżący `closure_outcome` i własny stan modułu, nie przez starą wartość z payloadu (§1.2). **D80:** następnik kamienia milowego tego samego dnia (§3a.1, A16). **D82:** SVAR tylko PoC w v1 (TLDR, §3.2, §12, R13). `project_schedule.admin` bez typów elementów (§9). Sformułowania bez liczby dni (kamień milowy, adapter dat, lag, miejsca po przecinku). |
 | 2026-10-23 | **rev 8b** — spójność, review P1/P2, decyzje (`.ai/decisions.md` d818aa2), wnioski z planu testów. **P11:** usunięte wszystkie estymaty w dniach (§12/§13 jako listy funkcji i encji; D21 bez kosztu w §3.2 i §15; R13 przeformułowane; starsze wiersze changelogu oczyszczone). **D53:** harmonogram inwestycji = osobny rekord (`schedule_scope`, `investment_id`, partial unique). **D54/D55:** §3a.1 przepisany — koniec włącznie, `E' = S' + (dur − 1)`, kamień milowy `E' = S'` (poprawka wzoru z rev 8a), FS = dzień po końcu + lag, start od najpóźniejszego poprzednika, tylko w przód, `pinned_conflict` + odpięcie, `earlier_possible` jako propozycja; `duration_days` = dni kalendarzowe; mapowanie końca do SVAR (koniec wyłącznie) przez adapter; walidacja zależności na podsumowaniach i rodzic–dziecko; lock na nagłówku `ps_schedules`; event `project_schedule.schedule.rescheduled` z listą ID. **D56:** import zastępuje dane po potwierdzeniu, błędne wiersze odrzucane z raportem. **D67:** dane ukryte po wyłączeniu, catch-up po włączeniu. **Spójność z costing:** jedno źródło partii (§1.4, kopia `pc_` → `ps_`), limity importu jak costing §6.4 (10 000 wierszy zamiast wcześniejszego limitu zadań), prognoza nieważona + ważona, idempotencja harmonogramu wykonawczego (partial unique per deal), zależności do akceptacji (costing §18a). **A7/A13:** `element_type_id` usunięte z `ps_schedule_tasks` → `element_type_code`; analytics `elementTypeId` → `elementTypeCode`. Brakujący nagłówek „## 4. Prognoza produkcji” dodany. **Założenia przenumerowane** (stary → nowy): A1–A6 bez zmian; A7 (nieaktualne) usunięte; A8→A7, A9→A8, A10→A9, A11→A10, A12→A11, A13→A12, A14→A13, A15→A14, A16→A15; nowe A16–A19. **Follow-up (spec-check):** §21 Decision traceability (decyzje realizowane w tej specyfikacji; pełna tabela w costing §22); Q9 (c) — flaga „deal ponownie otwarty” (§1.2, §2.2, subscriber `dealReopened`, R15) i Q11 (`@svar-ui` tylko PoC w v1, `xml2js` w v2) — rozstrzygnięcia Koordynatora 2026-10-23. |
 | 2026-10-20 | **rev 8a** — Review Kod (PR #10 rev 7) + decyzje Koordynatora/Marka. **P0-1:** kierunek odwrócony — `project_schedule` zależy od `project_costing` (baza) i rejestruje `InternalScheduleSource` w `scheduleSourceRegistry` (DI); usunięte HTTP (§5.2 `GET /api/project-costing/element-types` → `elementTypeService`; API konsumowane przez costing → kontrakty DI); join `ps_schedules.calculation_id → pc_calculations` opisany poprawnie (`calculationLookupService.listByInvestment`); subscriber `calculationActivated` po stronie tego modułu (konsumenta); odświeżanie sum costingu przez jego komendę `refresh_schedule_totals`; A3 poprawione; nowa §0 Architecture, §1.4, §5.4. **Decyzja (d) + potwierdzenie Koordynatora:** §1.0 — włącznik per organizacja = `schedule.enabled` w ModuleConfigService (`module_configs`) + feature'y ACL + blokady w menu, zakładce deala i API; `feature_toggles` wyłącznie jako globalny kill-switch per tenant (zweryfikowano w `feature-flag-check.ts` i `module-config-service.ts`; ModuleConfigService nie ma natywnego scope organizacji → klucz `org:{id}:settings`). **Pkt 20 zamknięte (D21):** Gantt własny na SVAR MIT, bez PRO (Application $1,899; Developer $749 zabrania SaaS; kontrola nad kodem); fakty SVAR: milestone'y w MIT (usunięte [niezwer.] i plan B), `wbs_code` własna kolumna, brak undo przy drag i linii „dziś” w MIT → własne. **P1-15:** cały moduł przeniesiony z MVP do v1. **P1-16:** wycena od zera z narzutem OM (estymaty usunięte w rev 8b — P11). `projectId` usunięte (jedna encja inwestycji). Role admin/employee (§9). Dodane: TLDR, Risks z ryzykiem rezydualnym, Final Compliance Report, Checklist compliance, `deleted_at`. Poza zakresem rev 8a (zrobione w rev 8b): Kod p12 (szczegóły algorytmu), A7/A13 (`element_type_id` w `ps_schedule_tasks`, `elementTypeId` w analytics), partie pc_/ps_, numeracja założeń. |
