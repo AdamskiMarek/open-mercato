@@ -6,7 +6,7 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-23 |
-| **Rewizja** | 2026-10-23 (rev 5c — D132 warunkowe (decyzja Marka w sprawie D31), zadanie Enki w costing §10.2; rev 5b — odbiór #20 runda 2 (P20-B2, wariant B): każda wygrana część przetargu to osobna inwestycja (D132), jeden projekt na deal i na inwestycję (D116), jedna faza projektu w harmonogramie inwestycji i flaga D72 na fazie (D131); rev 5a — odbiór #20: §0.4 zdarzenia quota zgodne z D118, jeden projekt na deal bez unikalności per inwestycja i faza projektu w harmonogramie inwestycji (D116, D131), dopłata za nadwyżkę (D118), oryginał ZIP jako archiwum dowodowe (D119), kopia B2 poza quota (D117); rev 5 — PR D: decyzje Koordynatora D116–D120 (zamykają O1, O11, O13, O14; ZIP przetargu jako dowód) i reguły speki przeniesione do rejestru jako D121–D130; odwołania w specu; rev 4a — D110: proces serwera HTTP zamiast „RAM aplikacji”, bufor RAM tylko w workerze; rev 4 — odbiór #18: bufor tylko w RAM, współbieżność 1 tylko dla kolejek `project_delivery`, parametry presji RAM (O13), PoC OVHcloud (R22, KA-7), kopia zapasowa przy jednej strefie (O14); rev 3 — uwagi z niezależnego planu testów (PR C), rozstrzygnięcia techniczne §5.12; rev 2 — D114 akceptacje, D115 worker na istniejącej kolejce, domyślny dostawca S3 wg tabeli §5.11; rev 1 — decyzje D98–D113, stan VPS na 23.10, warianty storage A/B, retencja, kryteria akceptacji) |
+| **Rewizja** | 2026-10-23 (rev 5d — PR 21: reguły speki przeniesione do rejestru (D133–D148) i rozstrzygnięcia techniczne (D149–D157), odwołania w specu, kody §7; rev 5c — D132 warunkowe (decyzja Marka w sprawie D31), zadanie Enki w costing §10.2; rev 5b — odbiór #20 runda 2 (P20-B2, wariant B): każda wygrana część przetargu to osobna inwestycja (D132), jeden projekt na deal i na inwestycję (D116), jedna faza projektu w harmonogramie inwestycji i flaga D72 na fazie (D131); rev 5a — odbiór #20: §0.4 zdarzenia quota zgodne z D118, jeden projekt na deal bez unikalności per inwestycja i faza projektu w harmonogramie inwestycji (D116, D131), dopłata za nadwyżkę (D118), oryginał ZIP jako archiwum dowodowe (D119), kopia B2 poza quota (D117); rev 5 — PR D: decyzje Koordynatora D116–D120 (zamykają O1, O11, O13, O14; ZIP przetargu jako dowód) i reguły speki przeniesione do rejestru jako D121–D130; odwołania w specu; rev 4a — D110: proces serwera HTTP zamiast „RAM aplikacji”, bufor RAM tylko w workerze; rev 4 — odbiór #18: bufor tylko w RAM, współbieżność 1 tylko dla kolejek `project_delivery`, parametry presji RAM (O13), PoC OVHcloud (R22, KA-7), kopia zapasowa przy jednej strefie (O14); rev 3 — uwagi z niezależnego planu testów (PR C), rozstrzygnięcia techniczne §5.12; rev 2 — D114 akceptacje, D115 worker na istniejącej kolejce, domyślny dostawca S3 wg tabeli §5.11; rev 1 — decyzje D98–D113, stan VPS na 23.10, warianty storage A/B, retencja, kryteria akceptacji) |
 | **Moduł** | `project_delivery` (`apps/mercato/src/modules/project_delivery`; nazwa i prefiks tabel `pd_`, D98) |
 | **Zależności upstream** | **`project_costing` (moduł bazowy)**, `customers`, `directory`, `auth`, `configs` (ModuleConfigService), `audit_logs`, `query_index`, `progress` (ProgressJob), `notifications`, `feature_toggles`, **`@open-mercato/storage-s3`** (klient S3, preset env, `endpoint-safety`; moduł `storage_s3` za `OM_ENABLE_STORAGE_S3`), `@open-mercato/queue` |
 | **Moduły powiązane** | `project_costing` (spec `.ai/specs/2026-10-19-project-costing-offer-calculator.md`) — baza, właściciel kontraktów DI; `project_schedule` (spec `.ai/specs/2026-10-19-project-schedule.md`) — opcjonalny dostawca harmonogramu wykonawczego, rejestruje się w rejestrze costingu; `project_delivery` nie importuje `project_schedule` i odwrotnie (D98, D100) |
@@ -60,7 +60,7 @@ Reguły (`packages/core/AGENTS.md` § Cross-Module Coupling; checklista Kod p1):
 - `project_costing` nie importuje, nie resolve'uje i nie wymaga `project_delivery`. Nie zna jego eventów, tras ani tabel. Hostuje tylko generyczny rejestr `executionScheduleRegistry`, który sam nie wie, kto się w nim rejestruje.
 - `project_delivery` ↔ `project_schedule`: **zero importów w obie strony**. Delivery pyta rejestr costingu („czy jest harmonogram wykonawczy inwestycji X, a jeśli nie, uruchom go”), a schedule rejestruje tam swojego providera. Gdy schedule jest nieobecny lub wyłączony w organizacji, rejestr zwraca `isAvailable = false` (D19, D47, D67).
 - Zero HTTP między modułami. Odczyt cudzych danych: serwisy DI (`tryResolve` dla opcjonalnych), query engine, enricher. Zapis cudzych encji: tylko jawna komenda właściciela. Jedyny przypadek to uruchomienie harmonogramu wykonawczego komendą `project_schedule` wywołaną przez providera w rejestrze (v1).
-- Brak relacji ORM i constraintów DB do `pc_*`, `ps_*`, `customers_*`. Pola `deal_id`, `investment_id`, `winning_offer_version_id`, `winning_offer_snapshot_id` i `calculation_line_id` to FK-id + snapshot.
+- Brak relacji ORM i constraintów DB do `pc_*`, `ps_*`, `customers_*`. Pola `deal_id`, `investment_id`, `winning_offer_version_id`, `winning_offer_snapshot_id` i `calculation_line_id` to FK-id + snapshot (D134).
 
 ### 0.2 Kontrakty DI
 
@@ -136,7 +136,7 @@ Payload = ID: `{ id, organizationId, tenantId, projectId?, dealId?, investmentId
 
 | Event | Reakcja w `project_delivery` |
 |---|---|
-| `customers.deal.updated` | odśwież `deal_snapshot`; gdy `closure_outcome` wraca z `won` do NULL → `deal_reopened_at = now()` + event `project.deal_reopened`; **bez usuwania** (analogia D72) |
+| `customers.deal.updated` | odśwież `deal_snapshot`; gdy `closure_outcome` wraca z `won` do NULL → `deal_reopened_at = now()` + event `project.deal_reopened`; **bez usuwania** (analogia D72; D141) |
 | `customers.deal.deleted` | snapshot `deleted: true`, banner na projekcie; bez usuwania |
 | `customers.deal.lost` | jak `deal_reopened` (flaga), bez usuwania |
 | `project_costing.offer_role.changed` | gdy oferta deala projektu przestała być `primary` → flaga `offer_role_mismatch_at`; projekt zostaje (decyzja użytkownika) |
@@ -150,7 +150,7 @@ Payload = ID: `{ id, organizationId, tenantId, projectId?, dealId?, investmentId
 - Per organizacja: `delivery.enabled` w ModuleConfigService (`org:{id}:settings`, D69) + feature'y ACL. Guard `isDeliveryEnabled` na każdej trasie (→ 404 `MODULE_DISABLED`), w menu, widgetach i zakładce deala.
 - `feature_toggles` to tylko globalny kill-switch per tenant (D47).
 - Wyłączenie ukrywa dane (D67): projekty i dokumenty znikają z UI i API. **Nic nie jest usuwane**, a obiekty w S3 zostają (D113). Ponowne włączenie przywraca widok.
-- Wymaganie środowiskowe: `storage_s3` włączony (`OM_ENABLE_STORAGE_S3`, `apps/mercato/src/modules.ts` l.117–118) i skonfigurowany bucket `projectDocs` (§5.1). Gdy konfiguracji brak, moduł działa bez dokumentów-plików (linki i metadane działają), a upload zwraca 422 `STORAGE_NOT_CONFIGURED`.
+- Wymaganie środowiskowe: `storage_s3` włączony (`OM_ENABLE_STORAGE_S3`, `apps/mercato/src/modules.ts` l.117–118) i skonfigurowany bucket `projectDocs` (§5.1). Gdy konfiguracji brak, moduł działa bez dokumentów-plików (linki i metadane działają), a upload zwraca 422 `STORAGE_NOT_CONFIGURED` (D143).
 
 ---
 
@@ -222,7 +222,7 @@ Wniosek (D110): jeden import dokumentacji budowlanej (setki MB) buforowany w RAM
 | `warranty_end_date`, `rekojmia_end_date` | `date` NULL | wpisywane ręcznie w MVP; źródło podpowiedzi retencji (D113); encja gwarancji — v2 (D108) |
 | `retention_until` | `date` NULL | data końca retencji (D113) |
 | `retention_basis` | `text` NULL | `warranty_end` \| `rekojmia_end` \| `later_of_both` \| `manual`; CHECK |
-| `deal_reopened_at`, `offer_role_mismatch_at`, `offer_deleted_at` | `timestamptz` NULL | flagi (§0.5); bez usuwania danych |
+| `deal_reopened_at`, `offer_role_mismatch_at`, `offer_deleted_at` | `timestamptz` NULL | flagi (§0.5, D141); bez usuwania danych |
 | `closed_at` | `timestamptz` NULL | |
 
 Indeksy (D116; D99 — zastąpiona przez D116):
@@ -282,7 +282,7 @@ Unique `(milestone_id, calculation_line_id) WHERE deleted_at IS NULL`. Link do s
 | `number` | `text` NULL | numer dokumentu/rysunku (rejestr rysunków — v1) |
 | `title` | `text` NOT NULL | |
 | `kind` | `text` NOT NULL | `file` \| `link`; CHECK |
-| `link_url` | `text` NULL | dla `link`: URL (walidacja `https:`; brak pobierania treści — D105) |
+| `link_url` | `text` NULL | dla `link`: URL (tylko `https:`, inny schemat → 422 — D138; brak pobierania treści — D105) |
 | `link_provider` | `text` NULL | `generic` \| `ezamowienia` \| `ted` \| `gdrive` (v1) \| `sharepoint`/`onedrive`/`nextcloud` (v2) |
 | `source` | `text` NOT NULL | `manual` \| `ezamowienia` \| `ted` \| `zip_import` |
 | `source_ref` | `text` NULL | np. identyfikator postępowania i numer dokumentu |
@@ -344,8 +344,8 @@ Sekwencje numeracji projektów (i od v1 transmittali, RFI, protokołów) per org
 | Faza | Tabela | Zakres |
 |---|---|---|
 | v1 | `pd_approval_tiers`, `pd_approval_reviews` | lekka tier-validation (§9) |
-| v1 | `pd_share_links` | `target_type` (`folder` \| `document` \| `revision`), `token_hash`, `expires_at` NOT NULL (D104), `revoked_at`, `created_by`, licznik pobrań |
-| v1 | `pd_transmittals` + `pd_transmittal_items` | wysłanie zestawu rewizji do odbiorcy (link udostępniania z datą wygaśnięcia), potwierdzenie odbioru |
+| v1 | `pd_share_links` | `target_type` (`folder` \| `document` \| `revision`), `token_hash`, `expires_at` NOT NULL (D104), `revoked_at`, `created_by`, licznik pobrań; reguły i kody: D142, D152 |
+| v1 | `pd_transmittals` + `pd_transmittal_items` | wysłanie zestawu rewizji do odbiorcy (link udostępniania z datą wygaśnięcia), potwierdzenie odbioru; lista pozycji niezmienna po wysłaniu (409 `TRANSMITTAL_SENT`, D155); wysłanie zablokowane, gdy dokumenty z wymaganą akceptacją jej nie mają (409 `APPROVAL_PENDING`, D157) |
 | v1 | `pd_correspondence` (typ `letter` \| `rfi`) | numer, nadawca/odbiorca, termin odpowiedzi, powiązane dokumenty |
 | v1 | `pd_protocols` + `pd_protocol_defects` | protokoły odbioru (częściowe i końcowy), usterki; odbiór → `milestones.accept` |
 | v1 | `pd_external_drive_links` | Google Drive w trybie linku (D105, D112) |
@@ -361,14 +361,14 @@ Sekwencje numeracji projektów (i od v1 transmittali, RFI, protokołów) per org
 
 **Walidacje w komendzie `create_from_won_deal` (jedna transakcja):**
 1. Moduł włączony w organizacji (§0.6), feature `project_delivery.projects.create`.
-2. Deal istnieje, `deleted_at IS NULL`, `closure_outcome = 'won'` → inaczej 422 `DEAL_NOT_WON`.
+2. Deal istnieje, `deleted_at IS NULL`, `closure_outcome = 'won'` → inaczej 422 `DEAL_NOT_WON` (D133).
 3. `calculationLookupService.getWinningOffer(dealId)`: gdy zwraca ofertę, musi to być oferta z rolą `primary` (D51, D65) ze snapshotem → inaczej 422 `OFFER_NOT_PRIMARY`; projekt dostaje ofertę, snapshot oferty i inwestycję. Gdy zwraca `null` (deal bez kalkulacji w OM), projekt powstaje bez oferty i bez inwestycji (bez `segmentCode` → 422 `SEGMENT_REQUIRED`), a wartość i walutę bierze z deala (`deal_snapshot.value_amount`, `value_currency`); kamienie milowe nie mają linków do oferty (D116).
 4. Brak aktywnego projektu dla deala (partial unique `pd_projects_one_per_deal`) i — gdy jest oferta — dla jej inwestycji (partial unique `pd_projects_one_per_investment`, D116). Istniejący projekt deala albo inwestycji, albo wyścig (`23505` na którymkolwiek indeksie) → 409 `PROJECT_EXISTS` z `existingProjectId`.
 5. Szablon: `templateCode` albo domyślny dla `segment_code` oferty (bez oferty: `segmentCode` z żądania). Brak szablonu → projekt z jednym etapem i folderem `00 Przetarg` (bez błędu).
 
 **Efekt:** projekt + etapy, zadania, kamienie milowe i foldery z szablonu. Snapshot deala i oferty, właściciel/kierownik, event `project_delivery.project.created`. Z UI opcjonalnie: start importu dokumentacji przetargowej (§5.6) i (v1) uruchomienie harmonogramu wykonawczego (§4.1).
 
-**Podpięcie kalkulacji później (D116):** `POST /api/project-delivery/projects/:id/winning-offer` `{ calculationId }` → komenda `link_winning_offer` (feature `project_delivery.projects.manage`, audyt). Projekt, który ma już ofertę → 409 `OFFER_ALREADY_LINKED` (zmiana podpiętej oferty nie jest w zakresie; undo komendy wg reguły wyżej). Wersja oferty musi należeć do deala projektu, mieć rolę `primary` i snapshot → inaczej 422 `OFFER_NOT_PRIMARY`. Gdy inwestycja tej oferty ma już inny projekt → 409 `PROJECT_EXISTS` z `existingProjectId` (`pd_projects_one_per_investment`, D116; wyścig `23505` tak samo). Po podpięciu działają linki kamieni (D101) i faza projektu w harmonogramie inwestycji (D131, v1).
+**Podpięcie kalkulacji później (D116):** `POST /api/project-delivery/projects/:id/winning-offer` `{ calculationId }` → komenda `link_winning_offer` (feature `project_delivery.projects.manage`, bez niego 403 — D135; audyt). Projekt, który ma już ofertę → 409 `OFFER_ALREADY_LINKED` (zmiana podpiętej oferty nie jest w zakresie; undo komendy wg reguły wyżej). Wersja oferty musi należeć do deala projektu, mieć rolę `primary` i snapshot → inaczej 422 `OFFER_NOT_PRIMARY`. Gdy inwestycja tej oferty ma już inny projekt → 409 `PROJECT_EXISTS` z `existingProjectId` (`pd_projects_one_per_investment`, D116; wyścig `23505` tak samo). Po podpięciu działają linki kamieni (D101) i faza projektu w harmonogramie inwestycji (D131, v1).
 
 **Nie robimy:** automatycznego tworzenia projektu przez subscriber `customers.deal.won` ani przez n8n (D116; wizja: n8n nie tworzy projektów). Projekt to świadoma decyzja handlowca.
 
@@ -436,14 +436,15 @@ Serwer nie widzi bajtów pliku. Moduł ma **własne trasy i własne feature'y** 
    - ACL: zapis do folderu (§6);
    - limit rozmiaru pliku: `docs.max_file_bytes` (parametr; podniesiony względem `attachments`, którego domyślny limit to 25 MB — `upload-limits.ts` l.1);
    - quota (§5.5) → rezerwacja w `pd_upload_sessions` pod advisory lockiem;
-   - klucz: `{prefix}/org_{orgId}/proj_{projectId}/{random}` (losowy, bez nazwy pliku; nazwa w metadanych). Segmenty jak w `key-scope.ts`;
+   - klucz: `{prefix}/org_{orgId}/proj_{projectId}/{random}` (losowy, bez nazwy pliku; nazwa w metadanych). Klucz generuje wyłącznie serwer; pole klucza albo `sha256` w body rezerwacji → 422 `FIELD_NOT_ALLOWED` (D144, D146). Segmenty jak w `key-scope.ts`;
    - `sizeBytes ≤ docs.multipart_threshold_bytes` → `mode: 'single'`: jeden presigned `PutObject` z `ContentType` i `ContentLength`, krótki TTL (parametr), z `If-None-Match: *` w podpisie tylko przy `CONDITIONAL_WRITES = true` (adapter B2: bez);
    - powyżej → `mode: 'multipart'`: serwer wywołuje `CreateMultipartUpload` (małe żądanie XML) i zwraca `uploadId` + partię presigned URL do `UploadPart` (pierwsze N części). Rozmiar części `docs.multipart_part_bytes` (parametr; minimum S3 5 MiB poza ostatnią, maksymalnie 10 000 części, więc rozmiar części dobierany do rozmiaru pliku).
-2. **Wysyłka** — przeglądarka wysyła bezpośrednio do S3 (tylko PUT, bez presigned POST — wspólny mianownik dostawców, R8), części równolegle z ograniczeniem (np. 3–4), z retry części. `POST /uploads/:id/parts` dokłada kolejne URL części (wygasają).
+2. **Wysyłka** — przeglądarka wysyła bezpośrednio do S3 (tylko PUT, bez presigned POST — wspólny mianownik dostawców, R8; trasy presigned POST nie ma → 404, D145), części równolegle z ograniczeniem (np. 3–4), z retry części. `POST /uploads/:id/parts` dokłada kolejne URL części (wygasają).
 3. **Zakończenie** — `POST /uploads/:id/complete` `{ parts: [{ partNumber, etag }] }`:
    - multipart: `CompleteMultipartUpload` (lista ETag, bez danych);
    - `HeadObject` → `size_bytes` z S3. Rozbieżność z deklaracją ponad tolerancję → 422 `UPLOAD_SIZE_MISMATCH`, rezerwacja zwolniona, obiekt traktowany jak osierocony i usuwany przez sweeper (D125, D121);
-   - komenda `documents.add_revision` (niemutowalna rewizja), sesja `completed`, rezerwacja zamieniona na zużycie.
+   - komenda `documents.add_revision` (niemutowalna rewizja), sesja `completed`, rezerwacja zamieniona na zużycie;
+   - sesja w stanie `expired` → 409 `UPLOAD_SESSION_EXPIRED`, bez rewizji (D149).
 4. **Przerwanie** — `POST /uploads/:id/abort` → `AbortMultipartUpload`, zwolnienie rezerwacji. Sweeper (worker, cyklicznie) robi to samo dla sesji po `expires_at`. Sweeper usuwa wyłącznie niedokończone uploady i obiekty osierocone (definicja i warunki: §5.12 pkt 4), **nigdy** obiektów rewizji (D113, D121).
 5. **Suma kontrolna** — worker `project_delivery:checksum` (kolejka niskiego priorytetu, concurrency 1) czyta obiekt strumieniem `GetObject` (bez buforowania), liczy sha256 i zapisuje go komendą. Pamięć jest stała, niezależna od rozmiaru pliku. Odczyt idzie z S3 do workera (egress u dostawcy — u OVHcloud bezpłatny, §5.11). Przeglądarka nie liczy sha256 w MVP; ewentualnie w v1 jako dodatkowa kontrola przy uploadzie (O7 zamknięte w §5.12 pkt 7; D124).
 
@@ -454,6 +455,7 @@ Serwer nie widzi bajtów pliku. Moduł ma **własne trasy i własne feature'y** 
 - `GET /api/project-delivery/revisions/:id/download` → ACL → **302** na presigned `GetObject` (krótki TTL, parametr) z `response-content-disposition=attachment; filename*=…`. Bajty idą z S3 do przeglądarki.
 - Podgląd PDF (MVP): `GET /revisions/:id/preview-url` → presigned `GetObject` z `inline` i `response-content-type=application/pdf`. Przeglądarka otwiera go we własnym czytniku PDF (iframe/nowa karta) — bez nowej zależności. pdf.js tylko jeśli UX tego wymaga (ask-first, Otwarte O8). CORS `GET` + `Range` na buckecie.
 - Obsługa nadpisań nagłówków odpowiedzi (`response-content-disposition`, `response-content-type`) w presigned GET: oficjalna dokumentacja żadnego z porównanych dostawców tego nie potwierdza wprost (§5.11; B2 dokumentuje `response-content-type`, ale nie `response-content-disposition`) → do potwierdzenia w PoC u wybranego dostawcy (R8). Fallback bez zależności od tej funkcji: `Content-Disposition` i `Content-Type` ustawiane w metadanych obiektu przy uploadzie (presigned PUT / `CreateMultipartUpload`).
+- Typ MIME z zawartości pliku (przy niezgodności z rozszerzeniem wygrywa zawartość); HTML, SVG i XML zawsze jako `attachment` z `X-Content-Type-Options: nosniff`, nigdy inline (D151).
 - Trasa `storage_s3` `GET /api/storage-providers/s3/download` (`download.ts` l.54 `driver.read`) **nie jest używana** — buforuje cały obiekt.
 
 ### 5.5 Quota per organizacja (D102, D112)
@@ -465,6 +467,7 @@ Serwer nie widzi bajtów pliku. Moduł ma **własne trasy i własne feature'y** 
   - powyżej 110% limitu (`> 1,1 × storage.quota_bytes`) → **413** `STORAGE_QUOTA_EXCEEDED` z `usedBytes`, `limitBytes`, `requestedBytes`; bez URL, bez obiektu w S3. Odczyt, pobieranie, podgląd i dokumenty-linki działają dalej; nic nie jest usuwane automatycznie.
 - **Alerty 80% i 100% (D118):** próg liczony od `used` = suma `size_bytes` rewizji do potwierdzonego purge (zużycie zatwierdzone, bez rezerwacji `reserved`, bo rezerwacja może zostać zwolniona). Sprawdzenie przy każdym zatwierdzeniu zużycia (`uploads.complete`, rewizja z importu, kopia oryginału ZIP) pod tym samym advisory lockiem: dla progu p ∈ {80%, 100%} event `project_delivery.storage.quota_threshold_reached` (ID organizacji i próg) i ostrzeżenie dla administratora organizacji powstają, gdy `used_przed < p × storage.quota_bytes ≤ used_po`. Jedno zatwierdzenie przez oba progi → dwa eventy. Ponowne uzbrojenie: gdy `used` spadnie poniżej progu (tylko po potwierdzonym purge, D122), kolejne przejście w górę daje nowy event. Bez osobnego stanu „alert wysłany”.
 - **Dopłata za nadwyżkę (D118):** moduł zapisuje szczytowe `used` organizacji w okresie rozliczeniowym (`pd_storage_usage_periods`: organizacja, okres, `peak_used_bytes`, `quota_bytes`; aktualizacja przy zatwierdzeniu pod tym samym lockiem). Nadwyżka okresu = `max(0, peak_used_bytes − quota_bytes)`; stawka i okres to parametry cennika bez wartości; fakturowanie jest poza modułem. Kopia B2 (v1, D117) nie wchodzi do `used`.
+- Wersje obiektów zapisane poza aplikacją wyłapuje rekoncyliacja w sweeperze (`ListObjectVersions`) i liczą się do quota (D153).
 - `storage.quota_bytes` nieustawiony (brak wartości z cennika) → upload zablokowany (fail-closed) z 422 `STORAGE_QUOTA_NOT_CONFIGURED` i komunikatem dla administratora. Linki i metadane działają.
 - Widok zużycia: ustawienia organizacji (zajęte/limit/rezerwacje, top projekty, nadwyżka bieżącego okresu); oryginały ZIP przetargów (`pd_imports.original_revision_id`, D119) wliczają się do quota bez wyjątków i są pokazane osobno jako pozycja „archiwum dowodowe”.
 
@@ -483,11 +486,11 @@ Serwer nie widzi bajtów pliku. Moduł ma **własne trasy i własne feature'y** 
 1. Pobranie pliku z e-Zamówień: `fetch` → `ReadableStream` → `Upload` z `@aws-sdk/lib-storage` (multipart, `partSize` i `queueSize` ograniczone parametrami; pamięć ≈ `partSize × queueSize`) do `staging/{importId}/…`. Bez `Buffer.concat`, bez pliku tymczasowego. Fallback bez nowej zależności: ręczny multipart komendami `client-s3` z tym samym ograniczeniem.
 2. Plik nie-ZIP → `CopyObject`/`UploadPartCopy` (po stronie S3, bez transferu przez worker) albo bezpośrednio docelowy klucz → `documents.add_revision` w folderze `00 Przetarg`.
 3. ZIP (najpierw w całości w `staging/`, bo katalog centralny jest na końcu pliku — uzasadnienie i alternatywa strumieniowa: §5.12 pkt 1) → oryginał ZIP kopiowany po stronie S3 (`CopyObject`/`UploadPartCopy`) jako niemutowalna rewizja dokumentu w folderze `00 Przetarg` (dowód; liczy się do quota bez wyjątków, w widoku zużycia jako „archiwum dowodowe”; retencja; purge tylko administrator — D119). Przed kopią: rezerwacja quota na rozmiar ZIP; gdy `used + reserved + rozmiar ZIP > 1,1 × storage.quota_bytes` (próg blokady 110%, D118) → import `failed` z powodem `quota`, bez kopii i bez rozpakowania. sha256 oryginału liczy worker importu w locie, zgodnie z D124: dla `ezamowienia` przy pobieraniu do `staging/` (pkt 1), dla `zip_upload` jednym strumieniowym `GetObject` ze `staging/` przed kopią. Rewizja oryginału z identycznym sha256 w `00 Przetarg` już istnieje → kopia pominięta (raport „pominięte: duplikat”, D123), rozpakowanie idzie dalej → czytanie katalogu centralnego i wpisów **zakresami** (`GetObject` z `Range`) przez `yauzl.fromRandomAccessReader` (losowy dostęp bez pobierania całości). Każdy wpis: `openReadStream` → sha256 w locie → `Upload` (multipart) do klucza docelowego → komenda `add_revision` z zachowaniem ścieżki katalogów jako folderów (zagnieżdżone foldery tworzone komendą). Odczyt zakresami, sha256 w locie: D124.
-4. Ochrony ZIP (parametry): maksymalna liczba wpisów, maksymalny łączny rozmiar po rozpakowaniu, maksymalny współczynnik kompresji (zip bomb), odrzucenie ścieżek `..`/absolutnych/symlinków, normalizacja nazw (UTF-8 i CP852/CP437 w polskich archiwach), zagnieżdżony ZIP zapisany jako plik (bez rozpakowywania), wpisy szyfrowane pominięte z powodem w raporcie.
+4. Ochrony ZIP (parametry): maksymalna liczba wpisów, maksymalny łączny rozmiar po rozpakowaniu, maksymalny współczynnik kompresji (zip bomb), odrzucenie ścieżek `..`/absolutnych/symlinków, normalizacja nazw (UTF-8 i CP852/CP437 w polskich archiwach), zagnieżdżony ZIP zapisany jako plik (bez rozpakowywania), wpisy szyfrowane pominięte z powodem w raporcie (D139). Niebezpieczna ścieżka → wpis pominięty z powodem `unsafe_path` (D148). Przekroczenie sumy po rozpakowaniu, liczby wpisów albo współczynnika kompresji → import `failed` z powodem `zip_limit_exceeded` i nazwą limitu, bez zapisu dalszych wpisów (D150).
 5. Quota: przed każdym wpisem rezerwacja (§5.5). Przekroczenie progu blokady (D118) → wpis pominięty z powodem `quota`, import kończy się statusem `partial`. Brak cichego przekroczenia.
 6. Po zakończeniu: usunięcie obiektów `staging/{importId}/` strzeżoną funkcją, na buckecie wersjonowanym ze wszystkimi wersjami (to nie są dokumenty; oryginał ZIP jest już zachowany jako dokument wg pkt 3; zakres usuwania: §5.12 pkt 1, D121, D119), raport w `pd_imports.report`, event `import.completed`. Anulowanie → abort multipartów, sprzątanie stagingu, rewizje już utworzone zostają.
 7. Idempotencja: ponowny import tego samego `ref` pomija pliki z identycznym `sha256` w tym samym folderze (raport „pominięte: duplikat”; D123).
-8. **Semantyka częściowego importu (bez „wszystko albo nic”):** jednostką atomową jest **wpis** (plik), nie import. Wpis kończy się albo rewizją (komenda `add_revision` po `CompleteMultipartUpload`), albo pominięciem z powodem w raporcie (`quota`, `too_large`, `encrypted`, `unsupported_method`, `duplicate`, `error`), a jego niedokończony multipart jest przerywany (`AbortMultipartUpload`). Status importu: `completed` (wszystkie wpisy przetworzone bez pominięć z błędu), `partial` (część pominięta), `failed` (błąd przed pierwszym wpisem albo timeout), `cancelled`. Utworzone rewizje są dokumentami i zostają w każdym statusie; usunąć je może tylko administrator przez purge (D113). Ponowny import uzupełnia brakujące wpisy (idempotencja z pkt 7). Dzięki temu worker nigdy nie potrzebuje `DeleteObject` na kluczach dokumentów (§5.12 pkt 10; D123).
+8. **Semantyka częściowego importu (bez „wszystko albo nic”):** jednostką atomową jest **wpis** (plik), nie import. Wpis kończy się albo rewizją (komenda `add_revision` po `CompleteMultipartUpload`), albo pominięciem z powodem w raporcie (`quota`, `too_large`, `encrypted`, `unsupported_method`, `duplicate`, `unsafe_path` — D148, `error`), a jego niedokończony multipart jest przerywany (`AbortMultipartUpload`). Status importu: `completed` (wszystkie wpisy przetworzone bez pominięć z błędu), `partial` (część pominięta), `failed` (błąd przed pierwszym wpisem, timeout albo przekroczenie limitów ZIP — `zip_limit_exceeded`, D150), `cancelled`; import z samymi duplikatami → `completed` z licznikiem `skipped_duplicates` (D150). Utworzone rewizje są dokumentami i zostają w każdym statusie; usunąć je może tylko administrator przez purge (D113). Ponowny import uzupełnia brakujące wpisy (idempotencja z pkt 7). Dzięki temu worker nigdy nie potrzebuje `DeleteObject` na kluczach dokumentów (§5.12 pkt 10; D123).
 
 Nowe zależności `@aws-sdk/lib-storage` i `yauzl` = „ask first” (D74, Otwarte O3); decyzja na etapie kodu. Alternatywy bez nowych zależności (sprawdzone w `yarn.lock` @0f0c6aa):
 - **Multipart bez `lib-storage`:** komendy `@aws-sdk/client-s3` — `CreateMultipartUpload`, `UploadPart`, `CompleteMultipartUpload`, `AbortMultipartUpload` (oraz `ListParts` przy wznowieniu) — i presigned `UploadPart` przez `@aws-sdk/s3-request-presigner`. Oba pakiety już są zależnościami `@open-mercato/storage-s3` (`yarn.lock` l.579 `@aws-sdk/client-s3@^3.1085.0`, l.941 `@aws-sdk/s3-request-presigner@^3.1085.0`, l.9383–9384). Worker sam tnie strumień na części stałego rozmiaru (bufor = jedna część), co daje ten sam limit pamięci co `Upload` z `lib-storage`.
@@ -634,7 +637,7 @@ Feature'y w `acl.ts`, granty w `setup.ts` (`defaultRoleFeatures`). Role OM: supe
 | `project_delivery.projects.manage` | ✅ | — | edycja projektu, członków, retencji, zamknięcie; kierownik projektu dostaje to w obrębie projektu przez rolę `manager` |
 | `project_delivery.documents.upload` | ✅ | ✅ | upload, linki, nowe rewizje (w folderach z prawem `write`) |
 | `project_delivery.documents.approve` | ✅ | — | MVP: ręczne zatwierdzenie rewizji (D103) |
-| `project_delivery.documents.delete` | ✅ | — | soft delete metadanych |
+| `project_delivery.documents.delete` | ✅ | — | soft delete metadanych (D136) |
 | `project_delivery.imports.run` | ✅ | ✅ | import e-Zamówień/ZIP/TED |
 | `project_delivery.templates.manage` | ✅ | — | szablony per segment |
 | `project_delivery.settings.manage` | ✅ | — | wariant storage, quota, retencja (§8) |
@@ -642,9 +645,9 @@ Feature'y w `acl.ts`, granty w `setup.ts` (`defaultRoleFeatures`). Role OM: supe
 | `project_delivery.share_links.manage` (v1) | ✅ | — | linki udostępniania |
 | `project_delivery.approvals.review` (v1) | ✅ | ✅ | udział w ścieżce akceptacji jako recenzent |
 
-Efektywny dostęp do dokumentu = feature modułu **i** (członkostwo w projekcie albo `view_all`) **i** ACL folderu (`inherit`: z roli w projekcie — `viewer` → read, `member` → write, `manager` → manage; `restricted`: tylko wpisy `pd_folder_acl`). Sprawdzanie po stronie serwera w każdym endpoincie i przy wydaniu presigned URL. Presigned URL jest krótki i wydawany per żądanie, nigdy zapisywany.
+Efektywny dostęp do dokumentu = feature modułu **i** (członkostwo w projekcie albo `view_all`) **i** ACL folderu (`inherit`: z roli w projekcie — `viewer` → read, `member` → write, `manager` → manage; `restricted`: tylko wpisy `pd_folder_acl`). Sprawdzanie po stronie serwera w każdym endpoincie i przy wydaniu presigned URL. Presigned URL jest krótki i wydawany per żądanie, nigdy zapisywany. Macierz feature'ów i granty: D137 (brak feature'a → 403). Brak dostępu w ACL do istniejącego zasobu → 404 jak dla zasobu nieistniejącego, bez ujawniania istnienia; po odebraniu dostępu nowy URL nie jest wydawany (D147).
 
-Linki udostępniania (v1, D104): token losowy (w bazie tylko hash), **obowiązkowe `expires_at`** (brak → 422 `SHARE_LINK_EXPIRY_REQUIRED`; maksimum z ustawień, parametr), odwołanie (`revoked_at`), licznik pobrań. Endpoint publiczny tokenu zwraca 302 na krótki presigned GET. Dostęp tylko do wskazanego celu, bez listowania folderów nadrzędnych.
+Linki udostępniania (v1, D104): token losowy (w bazie tylko hash), **obowiązkowe `expires_at`** (brak → 422 `SHARE_LINK_EXPIRY_REQUIRED`; maksimum z ustawień, parametr), odwołanie (`revoked_at`), licznik pobrań. Endpoint publiczny tokenu zwraca 302 na krótki presigned GET. Dostęp tylko do wskazanego celu, bez listowania folderów nadrzędnych (D142). Data w przeszłości → 422 `SHARE_LINK_EXPIRY_IN_PAST`, powyżej maksimum → 422 `SHARE_LINK_EXPIRY_TOO_LONG`; link wygasły → 410 `SHARE_LINK_EXPIRED`, odwołany → 410 `SHARE_LINK_REVOKED`, nieznany token → 404; link do dokumentu wskazuje rewizję aktualną w chwili pobrania; link do folderu respektuje ACL podfolderów i nie rozszerza dostępu (D152).
 
 Widoczność danych oferty: projekt pokazuje tylko pola niewrażliwe (numer, wersja, waluta, struktura). Koszt i marża nie trafiają do `pd_*`, indeksu, eventów ani audytu (checklista p3). Wartości billing % (v1) liczone z cen sprzedaży ze snapshotu, widoczne dla `project_delivery.projects.manage`.
 
@@ -681,7 +684,7 @@ GET/POST  /templates                                  (templates.manage)
 — v1: /share-links, /share/:token (publiczny, 302), /transmittals, /correspondence, /protocols, /approval-tiers
 ```
 
-Kody błędów (propozycje, do review): `MODULE_DISABLED`, `DEAL_NOT_WON`, `OFFER_NOT_PRIMARY`, `SEGMENT_REQUIRED` (422), `PROJECT_EXISTS` (409, per deal i per inwestycja), `PROJECT_PHASE_EXISTS` (409, schedule), `OFFER_ALREADY_LINKED` (409), `REVISION_IMMUTABLE` (409), `NEWER_REVISION_RELEASED` (409), `STORAGE_NOT_CONFIGURED`, `STORAGE_QUOTA_NOT_CONFIGURED`, `STORAGE_QUOTA_EXCEEDED` (413), `STORAGE_VARIANT_NOT_AVAILABLE`, `UPLOAD_SIZE_MISMATCH`, `FILE_TOO_LARGE` (413), `PURGE_CONFIRMATION_REQUIRED`, `SHARE_LINK_EXPIRY_REQUIRED` (v1).
+Kody błędów (propozycje, do review): `MODULE_DISABLED`, `DEAL_NOT_WON`, `OFFER_NOT_PRIMARY`, `SEGMENT_REQUIRED` (422), `PROJECT_EXISTS` (409, per deal i per inwestycja), `PROJECT_PHASE_EXISTS` (409, schedule), `OFFER_ALREADY_LINKED` (409), `REVISION_IMMUTABLE` (409), `NEWER_REVISION_RELEASED` (409), `STORAGE_NOT_CONFIGURED`, `STORAGE_QUOTA_NOT_CONFIGURED`, `STORAGE_QUOTA_EXCEEDED` (413), `STORAGE_VARIANT_NOT_AVAILABLE`, `UPLOAD_SIZE_MISMATCH`, `FILE_TOO_LARGE` (413), `PURGE_CONFIRMATION_REQUIRED`, `SHARE_LINK_EXPIRY_REQUIRED` (v1), `UPLOAD_SESSION_EXPIRED` (409, D149), `FIELD_NOT_ALLOWED` (422, D144, D146), `SHARE_LINK_EXPIRY_IN_PAST` i `SHARE_LINK_EXPIRY_TOO_LONG` (422, v1, D152), `SHARE_LINK_EXPIRED` i `SHARE_LINK_REVOKED` (410, v1, D152), `APPROVAL_LEVEL_OUT_OF_ORDER` i `TRANSMITTAL_SENT` (409, v1, D155), `REJECTION_COMMENT_REQUIRED` (422, v1, D156), `APPROVAL_PENDING` (409, v1, D157). Brak dostępu w ACL → 404 (D147); presigned POST → 404, trasy nie ma (D145). Import ZIP: powody w raporcie, nie kody HTTP — `unsafe_path` (D148), `zip_limit_exceeded` (D150).
 
 ---
 
@@ -711,6 +714,8 @@ Ustawienia nie dublują RBAC (checklista p4). Brak sekretów w ustawieniach (pr�
 **Decyzja (D114, odbiór Cezara 2026-10-23): własna walidacja progów w `project_delivery`** (`pd_approval_tiers`, `pd_approval_reviews`; wzór OCA `base_tier_validation` z analizy Odoo) za interfejsem `ApprovalEngine`. Moduł `workflows` OM wchodzi w v2 jako kolejna implementacja `ApprovalEngine`, zgodnie z D93.
 
 Model: poziom = (typ obiektu: `revision` | `transmittal` | `protocol`, kolejność, warunek: folder/dyscyplina/typ dokumentu, recenzent: użytkownik albo rola projektu, `required`). Przejście `draft → in_review → approved/rejected` przez komendy. Każda decyzja recenzenta to komenda z powodem w metadanych (audyt `audit_logs`, bez własnej tabeli audytu poza stanem recenzji). Ostatni poziom zatwierdza → `approve_revision` (D103).
+
+Reguły v1: decyzja na poziomie przed rozstrzygnięciem poziomów o niższej kolejności → 409 `APPROVAL_LEVEL_OUT_OF_ORDER` (D155); komentarz obowiązkowy tylko przy odrzuceniu (422 `REJECTION_COMMENT_REQUIRED`), przy akceptacji opcjonalny (D156); brak akceptacji blokuje wysłanie transmittala z dokumentami z wymaganą akceptacją (409 `APPROVAL_PENDING` z listą oczekujących dokumentów), a nie blokuje zamknięcia protokołu, który pokazuje listę dokumentów bez akceptacji (D157).
 
 Uzasadnienie:
 1. **Spójność z D93:** `workflows` nie jest włączony w forku, a decyzja dla costingu już odkłada go do v2. Włączenie go tylko dla dokumentów oznaczałoby nowy moduł z wieloma tabelami, silnik i UI do utrzymania.
@@ -876,6 +881,7 @@ Pytania biznesowe (a), (b), (c) są zamknięte przez D111, D112, D113. O5 zamkni
 - PoC zgodności OVHcloud (KA-7, R22): warunkowy PUT, presigned PUT/GET, multipart i wznowienie; przy porażce ścieżka B2 z adapterem.
 - Rozstrzygnięcia z §5.12 (uwagi PR C, pkt 1–12) do pokrycia scenariuszami: strażnik `DeleteObject` (tylko `staging/` i osierocone sesje `expired` bez rewizji, R20), wyścig `complete` ↔ sweeper, purge przez wszystkie wersje z potwierdzeniem pustym `ListObjectVersions` (R21, także na B2 w PoC), lifecycle tylko dla `staging/` i niedokończonych multipartów, import `partial` bez usuwania rewizji, daty gwarancji i rękojmi z ręcznego wpisu, własne trasy presign bez `storage_providers.manage`.
 - Pokrycie decyzji D98–D132 w planie testów — do dopisania (dziś brak, zgodnie z planem); D116–D132 są samodzielne w rejestrze, więc scenariusze pisze się z `decisions.md`.
+- D133–D157 (PR 21: reguły speki przeniesione do rejestru i rozstrzygnięcia techniczne) — TC doda niezależna sesja w osobnej rundzie, z `decisions.md`.
 
 ---
 
@@ -1027,6 +1033,31 @@ Brak punktów ⚠️. Ryzyka rezydualne: §12 (R1 do czasu pomiaru, R3, R11–R1
 | **D130** | §5.2, §5.12 pkt 11, §8, §13 O10 | poświadczenia bucketu klienta i brak sekretów w ustawieniach |
 | **D131** | §0.2, §4.1, §11 v1, §14 | jedna faza projektu (zadanie-podsumowanie WBS) w harmonogramie inwestycji, flaga D72 na fazie; `ensureExecution` idempotentne per inwestycja |
 | **D132** | TLDR, §2.2, §4.1, §5.12 pkt 6 | wygrana część przetargu = osobna inwestycja i osobny deal; wspólny numer ogłoszenia (costing §2.2); warunkowe — zależy od decyzji Marka w sprawie D31; kontrakt push per część — zadanie Enki (costing §10.2) |
+| **D133** | §3 pkt 2–3 | `DEAL_NOT_WON`, `OFFER_NOT_PRIMARY` bez fallbacku |
+| **D134** | §0.1, §2.1 | brak relacji ORM i FK do tabel innych modułów |
+| **D135** | §3 | `link_winning_offer` wymaga `projects.manage`, inaczej 403 |
+| **D136** | §5.8, §6 | soft delete dokumentu tylko z `documents.delete`; obiekty S3 w quota |
+| **D137** | §6 | macierz feature'ów i granty |
+| **D138** | §2.2 `link_url` | dokument-link tylko `https:` |
+| **D139** | §5.6 pkt 4, §8 | parametry ochrony ZIP, zagnieżdżony ZIP, `encrypted` |
+| **D140** | §4.1 (schedule §2.2, R15) | `reopened_at` czyszczona przy ponownym `won` |
+| **D141** | §0.5, §2.2 | flaga `deal_reopened_at`, event, `reopen_flag_clear` |
+| **D142** | §2.3, §6, §8 | link udostępniania: `expires_at` obowiązkowe, cel, bez listowania (v1) |
+| **D143** | §0.6, R17 | `STORAGE_NOT_CONFIGURED` |
+| **D144** | §5.3 pkt 1, §7 | klucz tylko z serwera; `FIELD_NOT_ALLOWED` |
+| **D145** | §5.3 pkt 2, §7 | brak presigned POST → 404 |
+| **D146** | §5.3 pkt 1, §7 | sha256 klienta → `FIELD_NOT_ALLOWED` |
+| **D147** | §6, §7 | brak dostępu w ACL → 404 |
+| **D148** | §5.6 pkt 4 i 8 | `unsafe_path` |
+| **D149** | §5.3 pkt 3, §7 | `UPLOAD_SESSION_EXPIRED` |
+| **D150** | §5.6 pkt 4 i 8 | `zip_limit_exceeded`, `too_large`, `skipped_duplicates` |
+| **D151** | §5.4 | MIME z zawartości; HTML/SVG/XML jako `attachment` + `nosniff` |
+| **D152** | §2.3, §6, §7 | kody linków udostępniania (v1) |
+| **D153** | §5.5 | rekoncyliacja wersji spoza aplikacji |
+| **D154** | §19 (costing §2.2) | warunkowe: przy D31 część = ta sama inwestycja |
+| **D155** | §2.3, §7, §9 | `APPROVAL_LEVEL_OUT_OF_ORDER`, `TRANSMITTAL_SENT` (v1) |
+| **D156** | §7, §9 | komentarz obowiązkowy przy odrzuceniu (v1) |
+| **D157** | §2.3, §7, §9 | `APPROVAL_PENDING` blokuje transmittal, nie protokół (v1) |
 
 ---
 
@@ -1043,3 +1074,4 @@ Brak punktów ⚠️. Ryzyka rezydualne: §12 (R1 do czasu pomiaru, R3, R11–R1
 | 2026-10-23 | **rev 5a** — odbiór #20 (Cezar) i dopisek Koordynatora: §0.4 `quota_threshold_reached` w MVP (D118), `quota_exceeded` usunięty (blokada > 110% = tylko 413); D118: alert od `used`, raz na przejście progu z ponownym uzbrojeniem po spadku, nadwyżka ponad 100% płatna w okresie rozliczeniowym (`storage.overage_rate`, `pd_storage_usage_periods`); D116: jedyna unikalność per wygrany deal, inwestycja może mieć wiele projektów (indeks `pd_projects_by_investment` bez UNIQUE), CHECK `pd_projects_offer_all_or_none` w SQL, kody 422 `SEGMENT_REQUIRED` i 409 `OFFER_ALREADY_LINKED`; D131: faza projektu w harmonogramie inwestycji, `findProjectPhase`, `ensureExecution` per projekt i faza; D119: próg 110%, sha256 oryginału w locie (D124), dedup oryginału (D123), „archiwum dowodowe” w widoku zużycia (`pd_imports.original_revision_id`); D117: kopia B2 poza quota klienta; KA-1 pkt 2 i 5. |
 | 2026-10-23 | **rev 5b** — odbiór #20 runda 2 (P20-B2, wariant B; Koordynator 2026-10-23 (bez potwierdzenia Marka)): każda wygrana część przetargu to osobna inwestycja i osobny deal (nowa D132; numer ogłoszenia wspólny dla części w costingu); D116: jeden projekt na deal i na inwestycję — nowy partial unique `pd_projects_one_per_investment` zamiast zwykłego indeksu, 409 `PROJECT_EXISTS` także przy podpięciu oferty do inwestycji z projektem (§2.2, §3, §7, §5.12 pkt 6); D131 uproszczona: jedna faza projektu w harmonogramie inwestycji, `findProjectPhase` usunięte (`findForInvestment` zwraca fazę), 409 `PROJECT_PHASE_EXISTS`, flaga D72 na fazie (§0.2, §4.1, §11, §14); usunięte wzmianki o wielu projektach i wielu fazach w jednej inwestycji (TLDR, §2.2, §3, §4.1, §14). Planów testów bez zmian. |
 | 2026-10-23 | **rev 5c** — Koordynator 2026-10-23: D132 oznaczone jako warunkowe (zależy od decyzji Marka w sprawie D31; D31 z adnotacją konfliktu, treść bez zmian) — TLDR, §19; zadanie Enki (n8n) na etap kodu — kontrakt push e-Zamówienia na deal per część razem ze zmianą kontraktu z D81 — wpisane w costing §10.2 (rev 8m), start po „implementujemy” i decyzji w sprawie D31. |
+| 2026-10-23 | **rev 5d** — PR 21 (tylko dokumentacja): reguły speki przeniesione do rejestru jako D133–D148 (odbiór #19 runda 2 i 3, Cezar) i rozstrzygnięcia techniczne D149–D155 (Cezar 2026-10-23, techniczne) oraz D156–D157 (B7, B8; Koordynator 2026-10-23, bez potwierdzenia Marka); odwołania w §0.1, §0.5, §0.6, §2.2, §2.3, §3, §5.3, §5.4, §5.5, §5.6 (powód `unsafe_path`, `zip_limit_exceeded`, `skipped_duplicates`), §6, §7 (nowe kody), §9, §14, §19. TC dla D133–D157 doda niezależna sesja w osobnej rundzie. |
