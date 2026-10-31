@@ -30,7 +30,12 @@ flowchart TD
 | 7 | Weryfikacja na TC | Weryfikator (QA) | TC zadania + środowisko testowe (instancja testowa open-mercato.pl, P7) ze zmergowanym kodem | werdykt per TC: spełnione / niespełnione, z dowodem |
 | 8 | Zamknięcie zadania (zrobione) | Koordynator | merge (krok 6) i werdykt Weryfikatora „spełnione” (krok 7) | zadanie zamknięte, story „zrobione” (P22) |
 
-Kolejność kroków 6–8 (zmiana 2026-10-31, spójnie z P22): merge → werdykt Weryfikatora → zamknięcie. Źródło: Cezar 2026-10-31 (techniczne), Z7.
+Kolejność kroków 6–8 (zmiana 2026-10-31, spójnie z P22): merge → werdykt Weryfikatora → zamknięcie. Źródło: Koordynator (proces, Z7) 2026-10-31.
+
+Warunki kolejności (P18, zmiana 2026-10-31; źródło: Koordynator (proces, Z7) 2026-10-31):
+
+1. Merge kodu do `develop_OM_CRM` nadal tylko po „merguj” od Marka (P5). Wdrożenie na produkcję dopiero po PASS Weryfikatora dla wszystkich story z danej paczki.
+2. Przy FAIL poprawka albo revert idzie kolejnym PR i nic z tej zmiany nie trafia na produkcję.
 
 ## Weryfikator (QA)
 
@@ -45,7 +50,7 @@ Kolejność kroków 6–8 (zmiana 2026-10-31, spójnie z P22): merge → werdykt
 - Układ: Epik > Story > Subtask. Epiki: kosztorys, harmonogram, projekty i dokumentacja, follow-upy v2. Tablicę prowadzi Organizator.
 - Cezar dzieli brief (5 pól, P14) na epik i tnie go na story. Story: kryteria akceptacji, numery D i TC, wersja (MVP / v1 / v2); na tyle małe, żeby Kod zbudował je w jednej świeżej sesji. Bez estymat w dniach (P11).
 - GitHub zostaje na kod i PR-y; każde story linkuje swój PR.
-- Story przechodzi do „zrobione” dopiero po merge PR (P5) i werdykcie PASS Weryfikatora („spełnione”, P18). Merge nie dostaje osobnego statusu: kolejność to merge PR → werdykt Weryfikatora → „zrobione”; do merge story zostaje w „w budowie”, po merge przechodzi do „weryfikacja”, a niespełnione TC wracają do „w budowie” (zmiana 2026-10-31; kolejność — Cezar 2026-10-31 (techniczne), Z7).
+- Story przechodzi do „zrobione” dopiero po merge PR (P5) i werdykcie PASS Weryfikatora („spełnione”, P18). Merge nie dostaje osobnego statusu: kolejność to merge PR → werdykt Weryfikatora → „zrobione”; do merge story zostaje w „w budowie”, po merge przechodzi do „weryfikacja”, a niespełnione TC wracają do „w budowie” (zmiana 2026-10-31; kolejność — Koordynator (proces, Z7) 2026-10-31). Merge tylko po „merguj” od Marka; produkcja dopiero po PASS Weryfikatora dla wszystkich story z paczki; przy FAIL poprawka albo revert kolejnym PR, bez wdrożenia na produkcję (P18, warunki (1)–(2)).
 - Speki, plany testów i PR doc-only nie wymagają story (`agent-rules.md` Z13).
 - Subtaski zakłada sam Kod jako kroki w ramach story. Jedyne statusy subtasków: „otwarte” i „zamknięte” (zmiana 2026-10-31; źródło: Koordynator 2026-10-31 (proces, Z7)).
 
