@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baseBranch": "develop",
+  "baseBranch": "develop_OM_CRM",
   "tracker": "github",
   "browser": {
     "provider": "playwright"
