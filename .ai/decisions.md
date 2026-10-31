@@ -114,6 +114,12 @@ Data „≤2026-10-20” oznacza decyzję obowiązującą na 2026-10-20, bez pot
 | P9 | ≤2026-10-20 | Kod robi niezależny przegląd architektury (lista kontrolna: `om-architecture-checklist.md`). | Marek | active |
 | P10 | 2026-10-20 | Pliki wizji i decyzji są aktualizowane, gdy zmienia się kierunek. | Marek | active |
 | P11 | 2026-10-20 | Nie wyceniamy w dniach: speki zawierają tylko podział zakresu MVP / v1 / v2, bez sekcji i tabel estymat dniowych; raporty i prompty też bez dni. | Marek (przez Koordynatora) | active |
+| P12 | 2026-10-31 | Proces zostaje przy BMAD v6.12; rezygnujemy ze Spec Kit. Jedno źródło prawdy: decyzje w `.ai/decisions.md`, zachowanie w spekach `.ai/specs/`; briefy, `.ai/architecture.md` i pliki procesu tylko odsyłają do numerów D/P i ich nie powielają. | Marek 2026-10-31 (przez Koordynatora) | active |
+| P13 | 2026-10-31 | Bramka gotowości (`.ai/process/readiness-gate.md`): przed „implementujemy” osobna sesja tylko do odczytu odpowiada, czy programista zbuduje moduł bez wymyślania niezapisanych decyzji; werdykt PASS / CONCERNS / FAIL z listą ustaleń, w stałym formacie raportu. | Marek 2026-10-31 (przez Koordynatora) | active |
+| P14 | 2026-10-31 | Briefy modułów (`.ai/briefs/<moduł>.md`): pięć pól — po co, co ma umieć (każda pozycja z warunkiem sukcesu), ograniczenia, czego nie robimy, po czym poznamy sukces; numery D bez zmian, tylko odesłania; brief nie jest speką i nie jest przekazywany do spec-check. | Marek 2026-10-31 (przez Koordynatora) | active |
+| P15 | 2026-10-31 | Format review (`.ai/process/review-format.md`): ustalenia w grupach „Do poprawy”, „Na później”, „Do decyzji człowieka”; trzecia grupa trafia do Marka wyłącznie przez Koordynatora. Reguła stopu: gdy 3. runda review nadal znajduje poważne problemy, poprawiamy spekę zamiast kolejnej rundy. | Marek 2026-10-31 (przez Koordynatora) | active |
+| P16 | 2026-10-31 | `.ai/architecture.md`: krótki opis właścicieli encji (deal, inwestycja, projekt, faza), przejść stanów (mermaid), granic modułów i kluczy (w tym postępowanie + część); każde twierdzenie z numerem D, brak D = luka zapisana w pliku, bez dopowiedzeń. | Marek 2026-10-31 (przez Koordynatora) | active |
+| P17 | 2026-10-31 | `.ai/agent-rules.md`: zasady dla agentów — każdy zakaz ma alternatywę („nie wdrażaj, przygotuj plan i poproś o zgodę”) oraz lista pułapek, które już się zdarzyły; bez map repo i ogólnych opisów systemu. | Marek 2026-10-31 (przez Koordynatora) | active |
 
 ## Rozstrzygnięcia pytań Q7–Q11 (rev 8b)
 
