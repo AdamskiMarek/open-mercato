@@ -3,7 +3,7 @@
 **Dokument**: SPEC ONLY (plan testów niezależny od specyfikacji PR #10, brak kodu)
 **Data**: 2026-10-19
 **Autor**: Copilot (plan testów na podstawie wymagań biznesowych Marka Adamskiego)
-**Rewizja**: rev 9 (2026-10-31) — nowe TC dla D185 (etapy lejka a kosztorys), D187 (status inwestycji), D189 (klucz push części, etap kodu), D190 (właściciel inwestycji) i D188 w części harmonogramu (`reopened_at` po usunięciu deala), rejestr decisions @730b77d (PR #35, `docs/arch-gaps-d185`); poprzednio rev 8e (2026-10-31) — meta: data rev 8d poprawiona na faktyczną; poprzednio rev 8d (2026-10-31) — TC-DEAL-017: priorytet P1 → P0 (spójnie z TC-PD-PRJ-012, reguła D31/D132); poprzednio rev 8c (2026-10-23) — TC-DEAL-016: lookup po postępowaniu + części (etap kodu, D32); poprzednio rev 8b (2026-10-23, rozstrzygnięcie D31) — wiersz D31 wg nowej treści (przetarg bez części = 1 deal, z częściami — deal i inwestycja na część), nowy TC-DEAL-017 (przetarg z częściami, D132); poprzednio rev 8a (2026-10-23, odbiór #20) — TC-CUR-012: usunięta zbędna linia „Krok 3: kurs ręczny nie odblokowuje…” (treść w linii kroku 3); poprzednio rev 8 (2026-10-23, runda PR D) — TC-CUR-012 i TC-CUR-014: wskazany krok zwracający 422 (samo ustawienie kursu ręcznego nie zwraca 422; 422 przy wysłaniu, odpowiednio przy powtórzeniu dodania pozycji); poprzednio runda rev 8h — waluta bez kursu w żadnej tabeli NBP: TC-CUR-012 przepisany (422 dla waluty oferty, kurs ręczny nie odblokowuje, CNY przechodzi), nowy TC-CUR-014 (v1, 422 dla waluty pozycji), wniosek 26 zamknięty, annex do D97; poprzednio runda rev 8g — TC-CUR-011: wyszukiwanie modułu Waluty o 00:30 czasu warszawskiego daje kurs z dnia poprzedniego, wysłanie oferty liczy datę w Europe/Warsaw, suma deali zaokrąglona do całości, godziny graniczne lato/zima; TC-CUR-001: zamrożony obraz bez źródła kursu; poprzednio rev 7 (runda rev 8f) — waluty przez moduł Waluty platformy (TC-CUR-002..007 przepisane, nowe TC-CUR-008..013), annex do D94; poprzednio rev 6 — zgodność z decyzjami koordynacyjnymi (`.ai/vision.md`, `.ai/decisions.md`, `.ai/om-architecture-checklist.md`) i rozstrzygnięciami Koordynatora z 2026-10-23; mapowanie scenariuszy na decyzje w załączniku „Traceability TC → D”
+**Rewizja**: rev 9a (2026-10-31) — asercje TC-DEAL-019 (D187), TC-DEAL-020 (D190), TC-DEAL-021 (D189), TC-EXEC-006 (D188) wg decisions @49384e6 (PR #35, runda 2: rozstrzygnięcia techniczne Cezara 2026-10-31); notatka przy TC-DEAL-009 (L3); poprzednio rev 9 (2026-10-31) — nowe TC dla D185 (etapy lejka a kosztorys), D187 (status inwestycji), D189 (klucz push części, etap kodu), D190 (właściciel inwestycji) i D188 w części harmonogramu (`reopened_at` po usunięciu deala), rejestr decisions @730b77d (PR #35, `docs/arch-gaps-d185`); poprzednio rev 8e (2026-10-31) — meta: data rev 8d poprawiona na faktyczną; poprzednio rev 8d (2026-10-31) — TC-DEAL-017: priorytet P1 → P0 (spójnie z TC-PD-PRJ-012, reguła D31/D132); poprzednio rev 8c (2026-10-23) — TC-DEAL-016: lookup po postępowaniu + części (etap kodu, D32); poprzednio rev 8b (2026-10-23, rozstrzygnięcie D31) — wiersz D31 wg nowej treści (przetarg bez części = 1 deal, z częściami — deal i inwestycja na część), nowy TC-DEAL-017 (przetarg z częściami, D132); poprzednio rev 8a (2026-10-23, odbiór #20) — TC-CUR-012: usunięta zbędna linia „Krok 3: kurs ręczny nie odblokowuje…” (treść w linii kroku 3); poprzednio rev 8 (2026-10-23, runda PR D) — TC-CUR-012 i TC-CUR-014: wskazany krok zwracający 422 (samo ustawienie kursu ręcznego nie zwraca 422; 422 przy wysłaniu, odpowiednio przy powtórzeniu dodania pozycji); poprzednio runda rev 8h — waluta bez kursu w żadnej tabeli NBP: TC-CUR-012 przepisany (422 dla waluty oferty, kurs ręczny nie odblokowuje, CNY przechodzi), nowy TC-CUR-014 (v1, 422 dla waluty pozycji), wniosek 26 zamknięty, annex do D97; poprzednio runda rev 8g — TC-CUR-011: wyszukiwanie modułu Waluty o 00:30 czasu warszawskiego daje kurs z dnia poprzedniego, wysłanie oferty liczy datę w Europe/Warsaw, suma deali zaokrąglona do całości, godziny graniczne lato/zima; TC-CUR-001: zamrożony obraz bez źródła kursu; poprzednio rev 7 (runda rev 8f) — waluty przez moduł Waluty platformy (TC-CUR-002..007 przepisane, nowe TC-CUR-008..013), annex do D94; poprzednio rev 6 — zgodność z decyzjami koordynacyjnymi (`.ai/vision.md`, `.ai/decisions.md`, `.ai/om-architecture-checklist.md`) i rozstrzygnięciami Koordynatora z 2026-10-23; mapowanie scenariuszy na decyzje w załączniku „Traceability TC → D”
 
 ---
 
@@ -623,6 +623,8 @@ Inwestycję zakłada handlowiec w module kalkulacji; n8n inwestycji nie tworzy. 
 
 #### TC-DEAL-009: Inwestycja — scalanie
 
+> Do przeglądu po decyzji o skutkach merge dla ofert, projektu i harmonogramu (luka L3, D187); kroki bez zmian.
+
 - **Priorytet**: P2 | **Etap**: v1 | **Poziom**: Integration + E2E
 - **Kroki**:
   1. Dwie inwestycje "Hala A" i "Hala B" (ta sama fizycznie, różne ID)
@@ -788,30 +790,44 @@ Inwestycję zakłada handlowiec w module kalkulacji; n8n inwestycji nie tworzy. 
 #### TC-DEAL-019: Status inwestycji — `active`/`archived` w MVP, `merged` od v1
 
 - **Priorytet**: P2 | **Etap**: MVP (`active`, `archived`), v1 (`merged`) | **Poziom**: Integration + API + `pg`
-- **Warunki wstępne**: Inwestycje I-A, I-B, I-C
+- **Warunki wstępne**: Inwestycje I-A, I-B; użytkownik U-I z feature `project_costing.manage_investments`, użytkownik U-N bez niego; deal D-N bez inwestycji
 - **Kroki**:
-  1. Zmień status I-C na `archived`, potem na `active`
-  2. MVP: spróbuj zapisać w I-C `status = 'merged'` oraz wartość spoza listy
-  3. v1: scal I-B do I-A (TC-DEAL-009); odczytaj `status` i `merged_into_id` I-B
+  1. Załóż inwestycję I-C; odczytaj `status`
+  2. Ustaw I-C na `archived`; spróbuj edytować I-C (nazwa)
+  3. Lista inwestycji bez filtra; potem z filtrem statusu `archived`
+  4. Spróbuj podpiąć deal D-N do I-C
+  5. Przywrócenie I-C do `active`: U-N; U-I; odczytaj `audit_logs`
+  6. MVP: spróbuj zapisać w I-C `status = 'merged'` oraz wartość spoza listy
+  7. v1: scal I-B do I-A (TC-DEAL-009); odczytaj `status` i `merged_into_id` I-B
 - **Oczekiwane wyniki**:
-  - Krok 1: oba zapisy przyjęte
-  - Krok 2: zapis odrzucony, rekord bez zmian
-  - Krok 3: I-B `status = 'merged'`, `merged_into_id` = ID I-A; I-A `active`
-  - Wartość statusu po założeniu i skutki `archived` — bez asercji (wniosek 29); skutki merge dla ofert, projektu i harmonogramu — bez asercji (luka L3, wniosek 30)
+  - Krok 1: `status = 'active'` (domyślny)
+  - Krok 2: `archived` zapisane; edycja odrzucona (tylko odczyt), dane bez zmian
+  - Krok 3: bez filtra I-C niewidoczna; z filtrem `archived` I-C na liście
+  - Krok 4: podpięcie odrzucone, D-N bez inwestycji
+  - Krok 5: U-N → odrzucone, I-C zostaje `archived`; U-I → `active`, wpis w `audit_logs` z autorem U-I
+  - Krok 6: zapis odrzucony, rekord bez zmian
+  - Krok 7: I-B `status = 'merged'`, `merged_into_id` = ID I-A; I-A `active`
+  - Kody błędów kroków 2, 4, 5 i uprawnienie do archiwizacji — bez asercji (wniosek 29); skutki merge dla ofert, projektu i harmonogramu — bez asercji (luka L3, wniosek 30)
 
-#### TC-DEAL-020: Właściciel inwestycji = `created_by`
+#### TC-DEAL-020: Właściciel inwestycji = `created_by`; zapis kluczem API
 
 - **Priorytet**: P2 | **Etap**: MVP | **Poziom**: Integration + API + `pg`
-- **Warunki wstępne**: Użytkownicy U1 i U2 z prawem zakładania i edycji inwestycji
+- **Warunki wstępne**: Użytkownicy U1 i U2 z prawem zakładania i edycji inwestycji; klucz API K-U należący do U1; klucz API K-0 bez użytkownika; administratorzy organizacji A1 i A2; integracja n8n
 - **Kroki**:
-  1. U1 zakłada inwestycję I-W; odczytaj ją przez API i `pg`
+  1. U1 zakłada inwestycję I-W w UI; odczytaj ją przez API i `pg`
   2. U2 edytuje I-W (nazwa); odczytaj ponownie
   3. `pg`: lista kolumn `pc_investments`
+  4. Załóż inwestycję I-K kluczem K-U; załóż inwestycję I-0 kluczem K-0
+  5. Wywołaj dla I-0 zdarzenie, które tworzy szkic albo powiadomienie dla właściciela inwestycji; sprawdź odbiorców
+  6. Push n8n postępowania bez pasującej inwestycji
 - **Oczekiwane wyniki**:
   - Krok 1: `created_by` = U1
   - Krok 2: `created_by` nadal U1
   - Krok 3: brak osobnej kolumny właściciela; API nie zwraca innego pola właściciela niż `created_by`
-  - Właściciel deala z n8n i `created_by` inwestycji zakładanej automatycznie — bez asercji (Q-ARCH-2, wniosek 31)
+  - Krok 4: I-K `created_by` = U1; I-0 `created_by` = NULL
+  - Krok 5: szkic albo powiadomienie trafia do administratorów organizacji (A1, A2)
+  - Krok 6: n8n nie zakłada inwestycji (D63); liczba rekordów `pc_investments` bez zmian
+  - Rodzaje szkiców i powiadomień inwestycji (reguła z `crm_followups`, PR #33, poza rejestrem) oraz właściciel deala z n8n (Q-ARCH-2) — bez asercji (wniosek 31)
 
 #### TC-DEAL-021: Klucz push części postępowania `ezamowienia:<tender_id>#<nr części>`
 
@@ -825,7 +841,7 @@ Inwestycję zakłada handlowiec w module kalkulacji; n8n inwestycji nie tworzy. 
 - **Oczekiwane wyniki**:
   - Krok 1: dwa deale z kluczami `ezamowienia:TP#1` i `ezamowienia:TP#2`
   - Krok 2: zaktualizowany tylko deal części 1; deal części 2 nietknięty; identyczny payload niczego nie zmienia (hash, D32)
-  - Krok 3: klucz T-S bez zmian; deal T-S zaktualizowany, nie powstaje nowy
+  - Krok 3: klucz T-S = `ezamowienia:<tender_id T-S>` (format bez części przyjęty w D189, do potwierdzenia przez Enkę przy kodzie), taki sam jak przed wdrożeniem; deal T-S zaktualizowany, nie powstaje nowy
   - Krok 4: klucze istniejących deali bez części identyczne z listą sprzed wdrożenia (bez migracji)
   - Powiązane kroki etapu kodu: TC-DEAL-016 krok 7, TC-PD-PRJ-011 krok 3, TC-PD-PRJ-012 krok 5
 
@@ -2023,21 +2039,27 @@ Automatyczne przejście w fazę wykonawczą, idempotentność, ponowne otwarcie,
   - Brak drugiego rekordu harmonogramu dla Deal B; kalkulacja i partie Deal B bez zmian
   - Deal B pozostaje "alternatywna" — brak automatycznych zmian
 
-#### TC-EXEC-006: Usunięcie deala z harmonogramem wykonawczym — `reopened_at` bez kaskady
+#### TC-EXEC-006: Usunięcie i przywrócenie deala z harmonogramem wykonawczym — `reopened_at` bez kaskady
 
-- **Priorytet**: P1 | **Etap**: v1 | **Poziom**: Integration + `pg`
-- **Warunki wstępne**: Organizacja z modułem harmonogramu; inwestycja I-1: harmonogram wykonawczy bez fazy projektu, deal X wygrany; inwestycja I-2: rekord z fazą projektu (zadanie `ps_schedule_tasks` z `execution_project_id`) włączoną z dealem Y (`execution_deal_id`), projekt P-Y
+- **Priorytet**: P1 | **Etap**: v1 | **Poziom**: Integration + API + `pg`
+- **Warunki wstępne**: Organizacja z modułem harmonogramu; inwestycja I-1: harmonogram wykonawczy bez fazy projektu, deal X wygrany; inwestycja I-2: rekord z fazą projektu (zadanie `ps_schedule_tasks` z `execution_project_id`) włączoną z dealem Y (`execution_deal_id`), projekt P-Y; inwestycja I-3: harmonogram wykonawczy bez fazy projektu, deal W wygrany; użytkownik U-E z feature `project_schedule.edit`, użytkownik U-R bez niego; subskrybent eventów
 - **Kroki**:
   1. Usuń deal X w UI OM (`customers.deal.deleted`)
   2. Usuń deal Y w UI OM
   3. `pg`: `ps_schedules.reopened_at`, `ps_schedule_tasks.reopened_at`, zadania, daty, baseline obu rekordów
   4. Wyślij kolejny push n8n dla postępowania deala X
+  5. Przywróć deale X i Y (`deleted_at` → NULL); odczytaj flagi i eventy
+  6. `project_schedule.schedules.reopen_flag_clear` dla I-1 i I-2: U-R; U-E; odczytaj `audit_logs`
+  7. Usuń deal W, przywróć go, potem oznacz W jako wygrany (`customers.deal.won`)
 - **Oczekiwane wyniki**:
   - Krok 1: I-1 — `reopened_at` na rekordzie harmonogramu
   - Krok 2: I-2 — `reopened_at` na zadaniu fazy projektu, nie na rekordzie (`ps_schedules.reopened_at` I-2 bez zmian); projekt P-Y z flagą deala (TC-PD-PRJ-015)
   - Krok 3: nic nie jest usuwane ani archiwizowane (bez kaskady); zadania, daty i baseline bez zmian
   - Krok 4: deal nie jest odtwarzany (D35); harmonogram bez zmian
-  - Przywrócenie usuniętego deala — bez asercji (wniosek 32)
+  - Krok 5: event `project_schedule.schedule.deal_restored` dla I-1 i I-2; flagi zostają (bez automatycznego czyszczenia)
+  - Krok 6: U-R → odrzucone, flagi zostają; U-E → flaga I-1 (rekord) i I-2 (zadanie fazy) = NULL, wpisy w `audit_logs` z autorem U-E
+  - Krok 7: po przywróceniu flaga I-3 zostaje; po `won` czyszczona automatycznie (D140 bez zmian)
+  - Kod odmowy dla U-R i wymóg powodu przy zdjęciu flagi harmonogramu — bez asercji (wniosek 32)
 
 ---
 
@@ -2506,14 +2528,14 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 
 27. **Kurs zapisany dla daty nie jest znajdowany dla tej samej daty** (TC-CUR-011) — opisane w specyfikacji kalkulacji (ryzyko daty kursu; konwencja daty wysłania w Europe/Warsaw; wyszukiwanie modułu Waluty o 00:00–02:00 latem i 00:00–01:00 zimą widzi dzień poprzedni); scenariusz regresyjny P0.
 
-### Nowe wnioski (rev 9 — D185, D187, D188, D189, D190; reguł brak w rejestrze @730b77d, nie zgadywano)
+### Nowe wnioski (rev 9 — D185, D187, D188, D189, D190; reguł brak w rejestrze @730b77d, nie zgadywano; rozstrzygnięcia rev 9a z rejestru @49384e6)
 
 28. **Znaczenie etapu `rejected`** (TC-DEAL-018) — otwarte (Q-ARCH-1, Marek); TC bez asercji.
-29. **Status inwestycji po założeniu i skutki `archived`** (TC-DEAL-019) — D187 nie podaje wartości domyślnej ani wpływu `archived` na dopasowanie, nowe oferty i prognozę.
+29. **Status inwestycji — kody i archiwizacja** (TC-DEAL-019) — częściowo ✅ (D187 @49384e6): domyślnie `active`, `archived` tylko do odczytu, ukryta w listach (filtr ją pokazuje), bez podpięcia nowego deala, przywrócenie z `project_costing.manage_investments` i audytem. Otwarte: kody błędów (edycja, podpięcie, przywrócenie bez feature'a) i uprawnienie do archiwizacji.
 30. **Skutki merge inwestycji (luka L3)** (TC-DEAL-009, TC-DEAL-019) — skutki dla ofert (primary, D51, D65), projektu (D116) i harmonogramu (D23) nierozstrzygnięte do v1. TC-DEAL-009 nie jest unieważniony (nie ma asercji o ofertach, projekcie i harmonogramie), ale po decyzji wymaga uzupełnienia.
-31. **Właściciel przy zakładaniu automatycznym** (TC-DEAL-020) — właściciel deala z n8n otwarty (Q-ARCH-2); `created_by` inwestycji zakładanej bez użytkownika nieokreślone.
-32. **Przywrócenie usuniętego deala** (TC-EXEC-006) — D140 czyści `reopened_at` tylko przy ponownym `won`; zachowanie po przywróceniu usuniętego deala nie jest w rejestrze.
-33. **Format istniejącego klucza bez części** (TC-DEAL-021) — rejestr podaje tylko format klucza części; TC sprawdza, że istniejące klucze się nie zmieniają.
+31. **Właściciel przy zakładaniu automatycznym** (TC-DEAL-020) — częściowo ✅ (D190 @49384e6): klucz API z użytkownikiem → ten użytkownik, bez użytkownika → `created_by = NULL`, szkice i powiadomienia do administratorów; n8n inwestycji nie zakłada (D63). Otwarte: właściciel deala z n8n (Q-ARCH-2) i lista szkiców/powiadomień inwestycji (reguła `crm_followups`, PR #33, poza rejestrem).
+32. ~~**Przywrócenie usuniętego deala**~~ — ✅ **ROZSTRZYGNIĘTE (D188 @49384e6)**: event `project_schedule.schedule.deal_restored`, flaga zostaje, zdjęcie `project_schedule.schedules.reopen_flag_clear` (feature `project_schedule.edit`) z audytem; czyszczenie przy `won` bez zmian. Scenariusz: TC-EXEC-006. Otwarte drobne: kod odmowy i wymóg powodu.
+33. ~~**Format istniejącego klucza bez części**~~ — ✅ **ROZSTRZYGNIĘTE warunkowo (D189 @49384e6)**: `ezamowienia:<tender_id>`, do potwierdzenia przez Enkę przy kodzie. Scenariusz: TC-DEAL-021 krok 3.
 ---
 
 ## 23. Podsumowanie
@@ -2524,7 +2546,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 **Status**: SPEC ONLY — bez kodu, bez testów wykonywalnych
 
 **Kolejne kroki**:
-1. Sprecyzować odpowiedzi na otwarte wnioski (9, 10, 11, 12, 13, 15, 20–25 i 28–33 w sekcji 22)
+1. Sprecyzować odpowiedzi na otwarte wnioski (9, 10, 11, 12, 13, 15, 20–25, 28–31 w sekcji 22; 29 i 31 częściowo rozstrzygnięte)
 2. Zatwierdzić dokument (review przez Marka + PO)
 3. Przejść do fazy implementacji
 
@@ -2626,10 +2648,10 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 | D97 | Poprawka platformy dla jednej waluty bazowej pobrana z pierwszym PR modułu | N/A | zależność etapu kodu, brak zachowania modułu |
 | D132 | Postępowanie z częściami: inwestycja i deal na część, wspólny `tender_notice_number` (tylko do odczytu, bez unikalności, poza dopasowaniem); primary per inwestycja; v1 identyfikator `bzp_notice_part` `{numer}#{część}`, bez `bzp_notice_number` | TC-DEAL-017, TC-DEAL-016 (krok 7) | decisions @develop (po PR #30); aktywna bez warunku |
 | D185 | n8n zmienia etap deala tylko na `result_lead` i `cancelled` (z D34), nie zmienia `closure_outcome` (D42); inne zmiany etapu w UI nie wpływają na kosztorys, etap tylko grupuje prognozę; `rejected` otwarte (Q-ARCH-1) | TC-DEAL-018 | MVP; rejestr @730b77d (PR #35); wniosek 28 |
-| D187 | Status inwestycji: MVP `active`/`archived`, v1 `merged` z `merged_into_id`; skutki merge nierozstrzygnięte (L3) | TC-DEAL-019 | MVP, v1; rejestr @730b77d; wnioski 29, 30 |
-| D188 | Usunięcie deala z harmonogramem wykonawczym: bez kaskady, `reopened_at` na rekordzie albo na zadaniu fazy projektu (D72, D131); n8n deala nie odtwarza (D35); część projektu — plan `project_delivery` (TC-PD-PRJ-015) | TC-EXEC-006 | v1 (harmonogram); rejestr @730b77d; wniosek 32 |
-| D189 | Klucz push części `ezamowienia:<tender_id>#<nr części>`; istniejące klucze bez części bez zmian, bez migracji; wdrożenie n8n — Enka, etap kodu (D32) | TC-DEAL-021 | etap kodu kontraktu push; rejestr @730b77d; wniosek 33 |
-| D190 | Właściciel inwestycji = `created_by`, bez osobnego pola; właściciel deala z n8n otwarty (Q-ARCH-2) | TC-DEAL-020 | MVP; rejestr @730b77d; wniosek 31 |
+| D187 | Status inwestycji: domyślnie `active`; MVP `active`/`archived` (tylko odczyt, ukryta w listach, filtr pokazuje, bez podpięcia nowego deala, przywrócenie z `project_costing.manage_investments` i audytem); v1 `merged` z `merged_into_id`; skutki merge nierozstrzygnięte (L3) | TC-DEAL-019, TC-DEAL-009 (notatka L3) | MVP, v1; rejestr @49384e6; wnioski 29 (częściowo), 30 |
+| D188 | Usunięcie deala z harmonogramem wykonawczym: bez kaskady, `reopened_at` na rekordzie albo na zadaniu fazy projektu (D72, D131); flagi zostają; przywrócenie → `project_schedule.schedule.deal_restored`, zdjęcie `project_schedule.schedules.reopen_flag_clear` (`project_schedule.edit`) z audytem; czyszczenie przy `won` bez zmian; n8n deala nie odtwarza (D35); część projektu — plan `project_delivery` (TC-PD-PRJ-015) | TC-EXEC-006 | v1 (harmonogram); rejestr @49384e6 |
+| D189 | Klucz push części `ezamowienia:<tender_id>#<nr części>`; klucz bez części `ezamowienia:<tender_id>` bez zmian (do potwierdzenia przez Enkę), bez migracji; wdrożenie n8n — Enka, etap kodu (D32) | TC-DEAL-021 | etap kodu kontraktu push; rejestr @49384e6 |
+| D190 | Właściciel inwestycji = `created_by`, bez osobnego pola; klucz API z użytkownikiem → ten użytkownik, bez użytkownika → NULL i powiadomienia do administratorów; n8n inwestycji nie zakłada (D63); właściciel deala z n8n otwarty (Q-ARCH-2) | TC-DEAL-020 | MVP; rejestr @49384e6; wniosek 31 (częściowo) |
 
 **Decyzje zastąpione — nie testujemy:**
 - D3 — zastąpione przez D4
@@ -2644,6 +2666,17 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 ---
 
 ## Changelog
+
+### Rev 9a — 2026-10-31 (rozstrzygnięcia Cezara do D187–D190; rejestr @49384e6, PR #35)
+
+- Niezależna sesja planu (P4): jedyne źródło — `.ai/decisions.md` @49384e6; bez speki i bez briefów
+- TC-DEAL-019 (D187): domyślny `active`, `archived` tylko do odczytu, ukrycie w listach i filtr, blokada podpięcia deala, przywrócenie z `project_costing.manage_investments` i audytem
+- TC-DEAL-009: notatka o przeglądzie po decyzji o skutkach merge (L3); kroki bez zmian
+- TC-DEAL-020 (D190): klucz API z użytkownikiem i bez (`created_by = NULL`), szkice i powiadomienia do administratorów, n8n nie zakłada inwestycji (D63)
+- TC-DEAL-021 (D189): klucz bez części `ezamowienia:<tender_id>` (do potwierdzenia przez Enkę, etap kodu)
+- TC-EXEC-006 (D188): przywrócenie deala (event `project_schedule.schedule.deal_restored`, flagi zostają), ręczne zdjęcie z audytem, czyszczenie przy `won` po przywróceniu
+- §22: wnioski 32, 33 rozstrzygnięte, 29 i 31 częściowo; załącznik — wiersze D187, D188, D189, D190
+- Liczba scenariuszy bez zmian: 148
 
 ### Rev 9 — 2026-10-31 (D185, D187, D188, D189, D190; rejestr @730b77d, PR #35)
 
