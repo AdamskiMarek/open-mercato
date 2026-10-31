@@ -5,6 +5,8 @@ description: Open Mercato repo-local extension of the shared `om-pr-autopilot` s
 
 # PR Autopilot — Open Mercato extension
 
+> **Base required (fork; zmiana 2026-10-31 — źródło: Koordynator (proces, Z7) 2026-10-31).** This file only extends the shared `om-pr-autopilot` skill. Before acting, read the base at `.agents/skills/om-pr-autopilot/SKILL.md`, or at `.claude/skills/om-pr-autopilot/SKILL.md`, where `yarn install-skills` puts external skills by default (`--agent claude-code`). If neither exists, run `yarn install-skills`; if the base is still missing, STOP and report `missing base skill om-pr-autopilot` — never apply this override on its own. Check: `node .ai/cezar/check-skill-bases.mjs`.
+
 This file extends the shared `om-pr-autopilot` skill from [open-mercato/skills](https://github.com/open-mercato/skills) (installed at `.agents/skills/om-pr-autopilot/SKILL.md`). Follow the shared skill's full workflow — agentic setup, PR resolution, outer claim, the ten diagnosis signals, the state matrix, chain execution, the summary report, lock release — with the repo-specific rules below layered on top.
 
 The shared skill's own references (`references/diagnose.md`, `references/state-matrix.md`, `references/report-templates.md`, `references/claim-pr.md`, …) live next to it under `.agents/skills/om-pr-autopilot/`; they are not committed here. When the shared skill or any companion it dispatches to is missing, run `yarn install-skills` and re-enter — never improvise a substitute procedure for the claim, worktree, diagnosis, or setup mechanics.
@@ -14,7 +16,7 @@ The shared skill's own references (`references/diagnose.md`, `references/state-m
 The shared `references/diagnose.md` signal 4 asks for the diff's scope. In this repository, classify against:
 
 - **spec-only** — only `.ai/specs/` or `.ai/specs/enterprise/` (the config's `paths.specs`). A spec-only PR gets the specification review and must never grow into implementation here.
-- **docs-only** — `apps/docs/`, root markdown, `AGENTS.md` files, `.ai/skills/`, `.ai/runs/`.
+- **docs-only** — `apps/docs/`, root markdown, `AGENTS.md` files, `.ai/skills/`, `.ai/runs/`. This lane only picks the review path; it never makes a PR doc-only for merge in this fork (see the merge-step fork guard below).
 - **UI-touching** — `packages/ui/`, any module's `backend/` or `frontend/` pages and components, and the customer-portal surfaces. This is what drives `needs-qa`.
 - **migration/schema** — `migrations/`, `.snapshot-open-mercato.json`, ORM entities under `data/entities.ts`.
 - **contract surface** — anything enumerated in `BACKWARD_COMPATIBILITY.md`: auto-discovery files, exported types and signatures, import paths, event IDs, widget spot IDs, API routes, DB schema, DI keys, ACL feature IDs, notification IDs, CLI commands, generated registries. A touch here forces `risk-high` and deeper review.
@@ -26,6 +28,7 @@ The label vocabulary, the mutual-exclusion groups, and the priority/risk inferen
 - **The QA-approval merge gate is hard.** A PR carrying `needs-qa` without `qa-approved` MUST NOT merge, even when everything else is green. `skip-qa` is the explicit opt-out; never combine it with `needs-qa`/`qa-approved`.
 - **Never set the `qa` pipeline label.** It means "manual QA in progress" and is applied by QA reviewers only. This skill and everything it dispatches request QA with `needs-qa` alone.
 - **`qa-failed`, `blocked`, and `do-not-merge` are hard blocks** — matrix row 0c stops on them.
+- **Merge step — fork guard (zmiana 2026-10-31 — reguła merge: Marek, stała zasada (P5, Z2, P23 (6)); strażnik: Koordynator 2026-10-31 (proces, Z7; review #40)).** In this fork (PRs to `develop_OM_CRM`) and in every Cezar run, the chain never dispatches `om-approve-merge-pr` and never merges, enables auto-merge or queues a PR without Marek's explicit „merguj” for that exact PR — `--allow-merge`, green CI, `qa-approved` or `skip-qa` do not replace it. Without „merguj” the chain stops at merge-ready and the report says „gotowe do »merguj«”. Whether a PR is doc-only (merged by Cezar outside this chain, P23 (6)) is decided only by `.ai/process/workflow.md` → „PR doc-only — definicja” (source: Koordynator 2026-10-31 (proces, Z7; review #40 R2-3)), never by the docs-only lane above.
 
 ## When the active account lacks triage rights
 

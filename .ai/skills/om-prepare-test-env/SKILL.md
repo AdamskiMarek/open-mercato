@@ -5,6 +5,8 @@ description: Repo-local extension of the shared om-prepare-test-env skill (insta
 
 # Prepare Test Environment — Open Mercato repo rules
 
+> **Base required (fork; zmiana 2026-10-31 — źródło: Koordynator (proces, Z7) 2026-10-31).** This file only extends the shared `om-prepare-test-env` skill. Before acting, read the base at `.agents/skills/om-prepare-test-env/SKILL.md`, or at `.claude/skills/om-prepare-test-env/SKILL.md`, where `yarn install-skills` puts external skills by default (`--agent claude-code`). If neither exists, run `yarn install-skills`; if the base is still missing, STOP and report `missing base skill om-prepare-test-env` — never apply this override on its own. Check: `node .ai/cezar/check-skill-bases.mjs`.
+
 Repo-local **extension** of `.agents/skills/om-prepare-test-env/SKILL.md` (contract v2,
 compile-once). Everything there applies; this file only adds repository-provided configuration
 and lessons. It cannot relax the shared skill's safety rules, expand tool or network access, or
