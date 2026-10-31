@@ -3,7 +3,7 @@
 **Dokument**: SPEC ONLY (plan testów niezależny od specyfikacji PR #10, brak kodu)
 **Data**: 2026-10-19
 **Autor**: Copilot (plan testów na podstawie wymagań biznesowych Marka Adamskiego)
-**Rewizja**: rev 9f (2026-10-31) — poprawki z review #33 (rev 4): etap `contact` zamiast spoza D33 w TC-DEAL-023 i TC-DEAL-025, definicja U4 w TC-DEAL-022; poprzednio rev 9e (2026-10-31) — nowe TC-DEAL-023 do TC-DEAL-027 (D192: etap `rejected`, powód i wynik, „Oznacz jako przegrany”, ścieżka masowa, seed, okno UI na etapie kodu); TC-DEAL-018 wg D185 rev 4d (`rejected` poza sumą inwestycji); D41 przez TC D192; wniosek 28 zamknięty; rejestr @0bff741 (PR #33); poprzednio rev 9d (2026-10-31) — TC-DEAL-018 i TC-FCST-007 wg doprecyzowań D185/D191 (prognoza wyklucza etap `rejected` niezależnie od `closure_outcome`); nowy TC-DEAL-022 (D193: domyślny opiekun deala z n8n); zapis `403 FORBIDDEN` w TC-EXEC-006; rejestr @0be9356 (PR #33); poprzednio rev 9c (2026-10-31) — nowy TC-FCST-007 (D191: deal `lost` → otwarty wraca do prognozy, bez reakcji modułów własnych); asercje TC-DEAL-019 (D187: 403 `FORBIDDEN`, 422 `INVESTMENT_ARCHIVED`, kto archiwizuje, CHECK) i TC-EXEC-006 (D188: 403 bez `project_schedule.edit`, bez powodu, audyt); decisions @fa3c15d (PR #36, doprecyzowania D186–D188 „zmiana 2026-10-31”, nowa D191); poprzednio rev 9b (2026-10-31) — meta (P21): numery D w TC-DEAL-018..021 i TC-EXEC-006; poprzednio rev 9a (2026-10-31) — asercje TC-DEAL-019 (D187), TC-DEAL-020 (D190), TC-DEAL-021 (D189), TC-EXEC-006 (D188) wg decisions @49384e6 (PR #35, runda 2: rozstrzygnięcia techniczne Cezara 2026-10-31); notatka przy TC-DEAL-009 (L3); poprzednio rev 9 (2026-10-31) — nowe TC dla D185 (etapy lejka a kosztorys), D187 (status inwestycji), D189 (klucz push części, etap kodu), D190 (właściciel inwestycji) i D188 w części harmonogramu (`reopened_at` po usunięciu deala), rejestr decisions @730b77d (PR #35, `docs/arch-gaps-d185`); poprzednio rev 8e (2026-10-31) — meta: data rev 8d poprawiona na faktyczną; poprzednio rev 8d (2026-10-31) — TC-DEAL-017: priorytet P1 → P0 (spójnie z TC-PD-PRJ-012, reguła D31/D132); poprzednio rev 8c (2026-10-23) — TC-DEAL-016: lookup po postępowaniu + części (etap kodu, D32); poprzednio rev 8b (2026-10-23, rozstrzygnięcie D31) — wiersz D31 wg nowej treści (przetarg bez części = 1 deal, z częściami — deal i inwestycja na część), nowy TC-DEAL-017 (przetarg z częściami, D132); poprzednio rev 8a (2026-10-23, odbiór #20) — TC-CUR-012: usunięta zbędna linia „Krok 3: kurs ręczny nie odblokowuje…” (treść w linii kroku 3); poprzednio rev 8 (2026-10-23, runda PR D) — TC-CUR-012 i TC-CUR-014: wskazany krok zwracający 422 (samo ustawienie kursu ręcznego nie zwraca 422; 422 przy wysłaniu, odpowiednio przy powtórzeniu dodania pozycji); poprzednio runda rev 8h — waluta bez kursu w żadnej tabeli NBP: TC-CUR-012 przepisany (422 dla waluty oferty, kurs ręczny nie odblokowuje, CNY przechodzi), nowy TC-CUR-014 (v1, 422 dla waluty pozycji), wniosek 26 zamknięty, annex do D97; poprzednio runda rev 8g — TC-CUR-011: wyszukiwanie modułu Waluty o 00:30 czasu warszawskiego daje kurs z dnia poprzedniego, wysłanie oferty liczy datę w Europe/Warsaw, suma deali zaokrąglona do całości, godziny graniczne lato/zima; TC-CUR-001: zamrożony obraz bez źródła kursu; poprzednio rev 7 (runda rev 8f) — waluty przez moduł Waluty platformy (TC-CUR-002..007 przepisane, nowe TC-CUR-008..013), annex do D94; poprzednio rev 6 — zgodność z decyzjami koordynacyjnymi (`.ai/vision.md`, `.ai/decisions.md`, `.ai/om-architecture-checklist.md`) i rozstrzygnięciami Koordynatora z 2026-10-23; mapowanie scenariuszy na decyzje w załączniku „Traceability TC → D”
+**Rewizja**: rev 9g (2026-10-31) — doprecyzowanie D192 (rejestr @cdf27dc, PR #38): nowe TC-DEAL-028 („Oznacz jako przegrany” i `status = lost` bez powodu → 422 `REASON_REQUIRED`) i TC-DEAL-029 (masowa zmiana na `rejected` → `failedItems`); zapis `403 FORBIDDEN` w asercjach braku uprawnień; poprzednio rev 9f (2026-10-31) — poprawki z review #33 (rev 4): etap `contact` zamiast spoza D33 w TC-DEAL-023 i TC-DEAL-025, definicja U4 w TC-DEAL-022; poprzednio rev 9e (2026-10-31) — nowe TC-DEAL-023 do TC-DEAL-027 (D192: etap `rejected`, powód i wynik, „Oznacz jako przegrany”, ścieżka masowa, seed, okno UI na etapie kodu); TC-DEAL-018 wg D185 rev 4d (`rejected` poza sumą inwestycji); D41 przez TC D192; wniosek 28 zamknięty; rejestr @0bff741 (PR #33); poprzednio rev 9d (2026-10-31) — TC-DEAL-018 i TC-FCST-007 wg doprecyzowań D185/D191 (prognoza wyklucza etap `rejected` niezależnie od `closure_outcome`); nowy TC-DEAL-022 (D193: domyślny opiekun deala z n8n); zapis `403 FORBIDDEN` w TC-EXEC-006; rejestr @0be9356 (PR #33); poprzednio rev 9c (2026-10-31) — nowy TC-FCST-007 (D191: deal `lost` → otwarty wraca do prognozy, bez reakcji modułów własnych); asercje TC-DEAL-019 (D187: 403 `FORBIDDEN`, 422 `INVESTMENT_ARCHIVED`, kto archiwizuje, CHECK) i TC-EXEC-006 (D188: 403 bez `project_schedule.edit`, bez powodu, audyt); decisions @fa3c15d (PR #36, doprecyzowania D186–D188 „zmiana 2026-10-31”, nowa D191); poprzednio rev 9b (2026-10-31) — meta (P21): numery D w TC-DEAL-018..021 i TC-EXEC-006; poprzednio rev 9a (2026-10-31) — asercje TC-DEAL-019 (D187), TC-DEAL-020 (D190), TC-DEAL-021 (D189), TC-EXEC-006 (D188) wg decisions @49384e6 (PR #35, runda 2: rozstrzygnięcia techniczne Cezara 2026-10-31); notatka przy TC-DEAL-009 (L3); poprzednio rev 9 (2026-10-31) — nowe TC dla D185 (etapy lejka a kosztorys), D187 (status inwestycji), D189 (klucz push części, etap kodu), D190 (właściciel inwestycji) i D188 w części harmonogramu (`reopened_at` po usunięciu deala), rejestr decisions @730b77d (PR #35, `docs/arch-gaps-d185`); poprzednio rev 8e (2026-10-31) — meta: data rev 8d poprawiona na faktyczną; poprzednio rev 8d (2026-10-31) — TC-DEAL-017: priorytet P1 → P0 (spójnie z TC-PD-PRJ-012, reguła D31/D132); poprzednio rev 8c (2026-10-23) — TC-DEAL-016: lookup po postępowaniu + części (etap kodu, D32); poprzednio rev 8b (2026-10-23, rozstrzygnięcie D31) — wiersz D31 wg nowej treści (przetarg bez części = 1 deal, z częściami — deal i inwestycja na część), nowy TC-DEAL-017 (przetarg z częściami, D132); poprzednio rev 8a (2026-10-23, odbiór #20) — TC-CUR-012: usunięta zbędna linia „Krok 3: kurs ręczny nie odblokowuje…” (treść w linii kroku 3); poprzednio rev 8 (2026-10-23, runda PR D) — TC-CUR-012 i TC-CUR-014: wskazany krok zwracający 422 (samo ustawienie kursu ręcznego nie zwraca 422; 422 przy wysłaniu, odpowiednio przy powtórzeniu dodania pozycji); poprzednio runda rev 8h — waluta bez kursu w żadnej tabeli NBP: TC-CUR-012 przepisany (422 dla waluty oferty, kurs ręczny nie odblokowuje, CNY przechodzi), nowy TC-CUR-014 (v1, 422 dla waluty pozycji), wniosek 26 zamknięty, annex do D97; poprzednio runda rev 8g — TC-CUR-011: wyszukiwanie modułu Waluty o 00:30 czasu warszawskiego daje kurs z dnia poprzedniego, wysłanie oferty liczy datę w Europe/Warsaw, suma deali zaokrąglona do całości, godziny graniczne lato/zima; TC-CUR-001: zamrożony obraz bez źródła kursu; poprzednio rev 7 (runda rev 8f) — waluty przez moduł Waluty platformy (TC-CUR-002..007 przepisane, nowe TC-CUR-008..013), annex do D94; poprzednio rev 6 — zgodność z decyzjami koordynacyjnymi (`.ai/vision.md`, `.ai/decisions.md`, `.ai/om-architecture-checklist.md`) i rozstrzygnięciami Koordynatora z 2026-10-23; mapowanie scenariuszy na decyzje w załączniku „Traceability TC → D”
 
 ---
 
@@ -13,7 +13,7 @@
 |--------|-------------------|
 | Kalkulacja kosztów (TC-COST) | 24 |
 | Import/eksport (TC-IMP) | 8 |
-| Powiązania deal/projekt/inwestycja (TC-DEAL) | 27 |
+| Powiązania deal/projekt/inwestycja (TC-DEAL) | 29 |
 | Wersje i oferta (TC-VER) | 12 |
 | Cenniki (TC-PRICE) | 5 |
 | Widoczność i uprawnienia (TC-PERM) | 12 |
@@ -27,7 +27,7 @@
 | Bezpieczeństwo plików (TC-SEC) | 6 |
 | Izolacja multi-tenant (TC-TEN) | 7 |
 | Edycja równoległa (TC-CONC) | 5 |
-| **Razem** | **155** |
+| **Razem** | **157** |
 
 ---
 
@@ -511,14 +511,14 @@ Podstawowe operacje kalkulacji, arytmetyka finansowa, zaokrąglenia, jednostki, 
   - Kodowanie UTF-8
   - Polskie znaki: "Śruba" wyświetla się poprawnie
   - Sekcje, sumy, nie tylko dane (opcjonalnie formatowanie)
-  - Użytkownik bez `project_costing.export`: brak przycisku, API 403; użytkownik bez `project_costing.view_margin`: kolumny kosztu i marży pominięte
+  - Użytkownik bez `project_costing.export`: brak przycisku, API `403 FORBIDDEN`; użytkownik bez `project_costing.view_margin`: kolumny kosztu i marży pominięte
 
 ---
 
 
 ---
 
-## 5. Scenariusze testowe: Powiązania (Deal / Projekt / Inwestycja) — 27 TC
+## 5. Scenariusze testowe: Powiązania (Deal / Projekt / Inwestycja) — 29 TC
 
 Kalkulacja bez deala, podpięcie deala i inwestycji, rozpoznawanie inwestycji, wybór oferty głównej, migracja starej encji projektu.
 
@@ -682,7 +682,7 @@ Inwestycję zakłada handlowiec w module kalkulacji; n8n inwestycji nie tworzy. 
   - Przy inwestycji z kilkoma identyfikatorami podpowiedź pokazuje identyfikator o najwyższym priorytecie (e-Zamówienia przed własnym kodem)
   - Nic nie jest przypisywane automatycznie: powiązanie powstaje dopiero po wyborze i zapisie
   - Podobna nazwa to tylko podpowiedź wymagająca potwierdzenia
-  - Nowa inwestycja zakładana ręcznie przez użytkownika (handlowca); bez `project_costing.manage_investments` brak przycisku i 403 w API
+  - Nowa inwestycja zakładana ręcznie przez użytkownika (handlowca); bez `project_costing.manage_investments` brak przycisku i `403 FORBIDDEN` w API
 
 #### TC-DEAL-013: Import starej encji projektu — przebieg próbny nic nie zapisuje
 
@@ -915,25 +915,25 @@ Inwestycję zakłada handlowiec w module kalkulacji; n8n inwestycji nie tworzy. 
 - **Oczekiwane wyniki**:
   - Krok 1: DL1 i DL2 → `closureOutcome = lost` z podanym powodem; mapowanie etapu `rejected` nie bierze udziału (etap nie przechodzi na `rejected` z powodu tej ścieżki)
   - Krok 2: każde żądanie → 422 `INVALID_LOSS_REASON` (`no_result` i wpis bez mapowania); DL3 bez zmian, `closure_outcome` NULL
-  - Krok 3: wynik bez asercji kodu — wniosek 37
+  - Krok 3: 422 `REASON_REQUIRED` (doprecyzowanie D192 2026-10-31) — TC-DEAL-028
   - Krok 4: `closure_outcome = lost` występuje tylko z powodem typu `lost`
   - Okno UI z listą tylko powodów `lost` — TC-DEAL-027 (etap kodu)
 
 #### TC-DEAL-025: Zmiana etapu na `rejected` z widoku lejka i masowo — ten sam interceptor
 
-> Decyzje: D192, D45.
+> Decyzje: D192 (z doprecyzowaniem 2026-10-31: ścieżka masowa bez `lossReasonId`), D45.
 
 - **Priorytet**: P0 | **Etap**: MVP | **Poziom**: Integration + API (worker masowej zmiany etapu → `customers.deals.update`) + E2E (widok lejka)
-- **Warunki wstępne**: Seed D192 wykonany; deale otwarte DB1–DB3 na etapie `offer`, deal DB4 na `contact`; powody PZ (`lost`) i PN (`no_result`)
+- **Warunki wstępne**: Seed D192 wykonany; deale otwarte DB1–DB3 na etapie `offer`, deal DB4 na `contact`
 - **Kroki**:
   1. W widoku lejka przeciągnij DB1 na `rejected` bez powodu
   2. Masowa zmiana etapu DB2, DB3 i DB4 na `rejected` bez powodu
-  3. Masowa zmiana etapu DB2 (z PZ) i DB3 (z PN) na `rejected`, jeśli ścieżka masowa przyjmuje powód
+  3. Odczytaj payload i podsumowanie joba masowej zmiany z kroku 2
   4. `pg`: etapy i `closure_outcome` DB1–DB4
 - **Oczekiwane wyniki**:
   - Krok 1: żądanie zmiany etapu → 422 `REASON_REQUIRED`; DB1 zostaje na `offer`
-  - Krok 2: żaden z deali nie przechodzi na `rejected` bez powodu (worker wywołuje `customers.deals.update`, ten sam interceptor); forma raportu błędów per deal — wniosek 38
-  - Krok 3: DB2 `closureOutcome = lost`, DB3 `closure_outcome` NULL — wynik jak w TC-DEAL-023; czy ścieżka masowa przyjmuje powód — wniosek 38
+  - Krok 2: żaden z deali nie przechodzi na `rejected` bez powodu (worker wywołuje `customers.deals.update`, ten sam interceptor)
+  - Krok 3: payload joba niesie tylko `pipelineStageId` (bez `lossReasonId`), więc ścieżka masowa nie ustawi `rejected`; `failedItems` per deal — TC-DEAL-029; przejście na `rejected` z powodem tylko pojedynczo (TC-DEAL-023)
   - Bez zmian w `packages/core` — TC-DEAL-027
 
 #### TC-DEAL-026: Seed powodów i mapowania `outcome` — bez duplikatów
@@ -969,6 +969,37 @@ Inwestycję zakłada handlowiec w module kalkulacji; n8n inwestycji nie tworzy. 
   - Krok 2: DU1 `closureOutcome = lost`
   - Krok 3: brak zmian w `packages/core` (D45); interceptory w module aplikacji forka
   - Do czasu wdrożenia mechanizmu reguła działa po stronie API — TC-DEAL-024
+
+#### TC-DEAL-028: „Oznacz jako przegrany” i `status = lost` bez powodu → 422 `REASON_REQUIRED`
+
+> Decyzje: D192 (doprecyzowanie 2026-10-31), D41.
+
+- **Priorytet**: P0 | **Etap**: MVP | **Poziom**: Integration + API (`customers.deals.update`) + `pg`
+- **Warunki wstępne**: Seed D192 wykonany; powody PL `price_too_high` (`lost`) i PN `not_bid` (`no_result`); deale otwarte DQ1–DQ5 na etapie `offer`, `closure_outcome` NULL
+- **Kroki**:
+  1. Ścieżka „Oznacz jako przegrany” dla DQ1 bez `lossReasonId`
+  2. `customers.deals.update` dla DQ2: `status = lost` bez `lossReasonId` i bez `closureOutcome` (wynik wyprowadzany ze statusu)
+  3. `customers.deals.update` dla DQ3: `closureOutcome = lost` bez `lossReasonId`
+  4. `customers.deals.update` dla DQ4: `status = lost` z PN
+  5. `customers.deals.update` dla DQ5: `status = lost` z PL
+- **Oczekiwane wyniki**:
+  - Krok 1–3: każde → 422 `REASON_REQUIRED` (ten sam kod co przy `rejected`); DQ1–DQ3 bez zmian, `closure_outcome` NULL
+  - Krok 4: 422 `INVALID_LOSS_REASON`; DQ4 bez zmian
+  - Krok 5: DQ5 `closureOutcome = lost` z powodem PL
+
+#### TC-DEAL-029: Masowa zmiana etapu na `rejected` — 422 `REASON_REQUIRED` per deal w `failedItems`, reszta przetwarzana
+
+> Decyzje: D192 (doprecyzowanie 2026-10-31), D45.
+
+- **Priorytet**: P0 | **Etap**: MVP | **Poziom**: Integration (worker masowej zmiany etapu, job postępu) + `pg`
+- **Warunki wstępne**: Seed D192 wykonany; deale otwarte DM1, DM2, DM3 na etapie `offer`
+- **Kroki**:
+  1. Masowa zmiana etapu DM1, DM2, DM3 na `rejected`; poczekaj na zakończenie joba
+  2. Odczytaj podsumowanie joba postępu (`failedItems`) i etapy deali
+  3. Masowa zmiana etapu DM1, DM2, DM3 na `contact` (kontrola)
+- **Oczekiwane wyniki**:
+  - Krok 2: `failedItems` zawiera wpis dla każdego z DM1, DM2, DM3 (`id` deala, `message` z 422 `REASON_REQUIRED`); job nie przerywa się na pierwszym błędzie — przetworzone wszystkie pozycje; etapy i `closure_outcome` bez zmian
+  - Krok 3: wszystkie trzy deale na `contact`, `failedItems` pusty (interceptor blokuje tylko przejście na `rejected` bez powodu)
 
 ---
 
@@ -1024,7 +1055,7 @@ Numeracja wersji, statusy, zamrożenie, PDF, porównanie wersji, wysłanie (blok
   3. Sprawdź listę wersji i wpis audytu
   4. Spróbuj osobnej akcji „Odblokuj” (UI i API)
 - **Oczekiwane wyniki**:
-  - Employee: brak przycisku, API 403
+  - Employee: brak przycisku, API `403 FORBIDDEN`
   - Admin: jedna akcja tworzy wersję 1.1 jako roboczą kopię 1.0; 1.0 pozostaje zamrożona (status „Zastąpiona”); brak pośredniego stanu „odblokowana”
   - Nie istnieje osobna akcja „Odblokuj” — ani w UI, ani w API
   - Powód zapisany w metadanych akcji we wpisie audytu (kto, kiedy, powód); wpis nie zawiera wartości kosztu ani marży
@@ -1073,7 +1104,7 @@ Numeracja wersji, statusy, zamrożenie, PDF, porównanie wersji, wysłanie (blok
   - Krok 1: wartość deala bez zmian (brak automatycznej synchronizacji)
   - Krok 2: wartość deala = 125 000.00, zmieniona standardowym mechanizmem CRM; zmiana widoczna w historii deala (stara → nowa)
   - Krok 3: przycisk nieaktywny; API odrzuca żądanie (422, wersja nieaktywna); wartość deala bez zmian
-  - Krok 4: brak przycisku, API 403
+  - Krok 4: brak przycisku, API `403 FORBIDDEN`
   - Krok 5: wartość wraca do 100 000.00; historia deala odnotowuje cofnięcie
 
 #### TC-VER-008: Wysłanie — macierz blokad i ostrzeżeń
@@ -1168,9 +1199,9 @@ Numeracja wersji, statusy, zamrożenie, PDF, porównanie wersji, wysłanie (blok
   7. Wyślij wersję; spróbuj cofnąć lub ponowić zmianę kosztu
 - **Oczekiwane wyniki**:
   - Krok 3: koszt wraca do 100.00; sumy i marża przeliczone; wpis audytu bez wartości (pole wrażliwe, TC-PERM-012)
-  - Krok 4: 403; koszt bez zmian (100.00)
+  - Krok 4: `403 FORBIDDEN`; koszt bez zmian (100.00)
   - Krok 5: koszt = 120.00; sumy i marża przeliczone
-  - Krok 6: 403; koszt bez zmian (120.00)
+  - Krok 6: `403 FORBIDDEN`; koszt bez zmian (120.00)
   - Kroki 4 i 6: R nie widzi wartości kosztu nigdzie — odpowiedź API, historia akcji, wyszukiwarka, payloady zdarzeń
   - Krok 7: po wysłaniu wersji cofnięcie i ponowienie zmian kosztu są niedostępne (brak akcji w UI, API odrzuca)
 
@@ -1292,7 +1323,7 @@ Role w scenariuszach: `superadmin`, `admin`, `employee` i role własne z fixture
   1. Każdy użytkownik otwiera pozycję i próbuje zmienić narzut sekcji z 20% na 30%
 - **Oczekiwane wyniki**:
   - Admin i R3: pole „Narzut %” edytowalne, zapis przyjęty
-  - Employee: pole narzutu tylko do odczytu lub ukryte; API 403 przy zmianie narzutu; pozostałe pola edytowalne dzięki `project_costing.edit`
+  - Employee: pole narzutu tylko do odczytu lub ukryte; API `403 FORBIDDEN` przy zmianie narzutu; pozostałe pola edytowalne dzięki `project_costing.edit`
 
 #### TC-PERM-004: Uprawnienia — wszystkie deale vs tylko własne
 
@@ -1316,7 +1347,7 @@ Role w scenariuszach: `superadmin`, `admin`, `employee` i role własne z fixture
   3. Spróbuj /kalkulacje?ids=id_firmy_b_1,id_firmy_b_2
   4. (od v1) Eksport wszystkich kalkulacji
 - **Oczekiwane wyniki**:
-  - 403 Forbidden dla Firmy B
+  - `403 FORBIDDEN` dla Firmy B
   - Filtrowanie: tylko Firmy A
   - Eksport: tylko dane Firmy A
   - **Luka spec**: czy organization filter na DB czy w aplikacji?
@@ -1353,7 +1384,7 @@ Role w scenariuszach: `superadmin`, `admin`, `employee` i role własne z fixture
   2. Employee z `project_costing.view_margin` otwiera ranking
   3. Admin otwiera ranking; employee bez `view_margin` otwiera ranking
 - **Oczekiwane wyniki**:
-  - Ranking marż widoczny tylko dla ról z `project_costing.view_margin` (bez feature'a: brak widgetu, API 403)
+  - Ranking marż widoczny tylko dla ról z `project_costing.view_margin` (bez feature'a: brak widgetu, API `403 FORBIDDEN`)
   - Zakres deali w rankingu zgodny z widocznością deali (wszystkie albo tylko własne — od v1, TC-PERM-004)
   - Admin: agregat wszystkich deali organizacji
 
@@ -1373,7 +1404,7 @@ Role w scenariuszach: `superadmin`, `admin`, `employee` i role własne z fixture
   2. Rola własna bez danego feature'a wykonuje akcję
   3. Sprawdź domyślne przypisanie employee przez API ról
 - **Oczekiwane wyniki**:
-  - Wyniki zgodne z macierzą; brak feature'a = brak przycisku w UI i 403 w API
+  - Wyniki zgodne z macierzą; brak feature'a = brak przycisku w UI i `403 FORBIDDEN` w API
   - Domyślnie employee nie ma: `project_costing.view_costs`, `view_margin`, `view_margin_after_close`, `edit_markup`, `apply_to_deal`, `admin`, `new_revision`, `view_actual_costs`, `edit_actual_costs`, ani `project_schedule.admin`; pozostałe feature'y ma
   - Organizacja może zmienić domyślne przypisanie przez edycję roli
 
@@ -1440,7 +1471,7 @@ Rejestracja wydatków, budżet vs realizacja, marża rzeczywista. Etap v1; dost�
   - Koszty powiązane z kalkulacją (opcjonalnie z dealem)
   - Tabelka: data | kategoria | kwota | źródło (np. "FV-1234")
   - Sumy per kategoria
-  - Użytkownik bez `project_costing.edit_actual_costs`: brak przycisku dodawania, API 403; bez `project_costing.view_actual_costs`: brak zakładki, API 403
+  - Użytkownik bez `project_costing.edit_actual_costs`: brak przycisku dodawania, API `403 FORBIDDEN`; bez `project_costing.view_actual_costs`: brak zakładki, API `403 FORBIDDEN`
 
 #### TC-REAL-002: Raport budżet vs koszty rzeczywiste
 
@@ -1837,8 +1868,8 @@ Waluty i kursy pochodzą z modułu Waluty platformy (lista walut aktywnych, walu
 - **Oczekiwane wyniki**:
   - Krok 1: wybór pokazuje PLN, EUR, JPY; PLN oznaczony jako bazowa
   - Krok 2: lista tylko aktywnych walut z kodem, nazwą, liczbą miejsc i oznaczeniem waluty bazowej; bez kursów
-  - Krok 3: ekran i API modułu Waluty niedostępne (403) — rola nie dostała uprawnień modułu Waluty
-  - Krok 4: 403
+  - Krok 3: ekran i API modułu Waluty niedostępne (`403 FORBIDDEN`) — rola nie dostała uprawnień modułu Waluty
+  - Krok 4: `403 FORBIDDEN`
   - Tenant istniejący przed wdrożeniem: ten sam wynik bez synchronizacji ról
 
 #### TC-CUR-011: Kurs zapisany dla daty D znajdowany dla tej samej daty, także w sumach deali w EUR; godziny graniczne
@@ -2521,7 +2552,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 - **Ścieżka**: `apps/mercato/src/modules/<moduł>/__integration__/TC-<ID>.spec.ts`, np. `apps/mercato/src/modules/project_costing/__integration__/TC-COST-021.spec.ts`; wzorzec: `packages/core/src/modules/sync_excel/__integration__/` (TC-SX-001..008 + `helpers/` + `meta.ts`)
 - **Discovery**: `.ai/qa/tests/playwright.config.ts` automatycznie zbiera specy z folderów `__integration__` modułów; `.ai/qa/tests` zawiera tylko współdzielony config
 - **Warstwa danych (Integration)**: powiązania deal/inwestycja i import CLI (TC-DEAL-*), import/eksport (TC-IMP-*), wersje (TC-VER-*), cenniki (TC-PRICE-*), prognoza (TC-FCST-*), harmonogram wykonawczy (TC-EXEC-*), bezpieczeństwo plików (TC-SEC-*), edycja równoległa (TC-CONC-*) — setup i asercje przez API (`getAuthToken`, `apiRequest`), w razie potrzeby bezpośrednio na DB (`pg`) i kolejce (`drainIntegrationQueue`)
-- **Warstwa kontraktu HTTP (API)**: CRUD kalkulacji, filtrowanie multi-tenant (`organization_id`, TC-TEN-*, TC-PERM-005), ukrywanie marży/kosztu w odpowiedziach, kody błędów (400, 403, 404, 409 concurrent edit)
+- **Warstwa kontraktu HTTP (API)**: CRUD kalkulacji, filtrowanie multi-tenant (`organization_id`, TC-TEN-*, TC-PERM-005), ukrywanie marży/kosztu w odpowiedziach, kody błędów (400, `403 FORBIDDEN`, 404, 409 concurrent edit)
 - **Warstwa UI (E2E/UI)**: siatka kalkulacji (TC-COST-021, TC-COST-022, TC-COST-024), drag-drop Gantta (TC-GANTT-001), kreator mapowania importu (TC-IMP-001), generowanie i pobranie PDF (TC-VER-006, TC-PERM-007) — logowanie przez `@open-mercato/core/helpers/integration/auth`
 - **Komendy** (z `package.json` w root):
   - `yarn test:integration` — Playwright na działającym dev serverze (`BASE_URL`, domyślnie `http://localhost:3000`)
@@ -2654,7 +2685,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 ### Nowe wnioski (rev 5)
 
 21. **Cofnięcie zmiany kosztu** (TC-VER-012) — ✅ **ROZSTRZYGNIĘTE (Koordynator 2026-10-23)**
-    - **Decyzja**: Undo komendy na wersji roboczej; bez prawa do pola kosztu 403 i brak wartości w API, historii, wyszukiwarce i zdarzeniach; po wysłaniu niedostępne.
+    - **Decyzja**: Undo komendy na wersji roboczej; bez prawa do pola kosztu `403 FORBIDDEN` i brak wartości w API, historii, wyszukiwarce i zdarzeniach; po wysłaniu niedostępne.
 
 22. **Zależność SF** (TC-GANTT-002, krok 6) — ✅ **ROZSTRZYGNIĘTE (Koordynator 2026-10-23)**
     - **Decyzja**: Przy końcu wliczonym następnik kończy się najpóźniej dzień przed startem poprzednika + lag.
@@ -2681,7 +2712,7 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 29. **Status inwestycji — kody i archiwizacja** (TC-DEAL-019) — ✅ prawie w całości (D187, zmiana 2026-10-31 @fa3c15d): archiwizuje i przywraca użytkownik z `project_costing.manage_investments`, bez niego 403 `FORBIDDEN`; podpięcie deala do `archived` → 422 `INVESTMENT_ARCHIVED`; CHECK na listę wartości fazy. Otwarte: kod błędu edycji inwestycji `archived`.
 30. **Skutki merge inwestycji (luka L3)** (TC-DEAL-009, TC-DEAL-019) — skutki dla ofert (primary, D51, D65), projektu (D116) i harmonogramu (D23) nierozstrzygnięte do v1. TC-DEAL-009 nie jest unieważniony (nie ma asercji o ofertach, projekcie i harmonogramie), ale po decyzji wymaga uzupełnienia.
 31. **Właściciel przy zakładaniu automatycznym** (TC-DEAL-020) — częściowo ✅ (D190 @49384e6): klucz API z użytkownikiem → ten użytkownik, bez użytkownika → `created_by = NULL`, szkice i powiadomienia do administratorów; n8n inwestycji nie zakłada (D63). Otwarte: właściciel deala z n8n (Q-ARCH-2); zakres szkiców i powiadomień inwestycji — do rozstrzygnięcia w PR #33 (`crm_followups`).
-32. ~~**Przywrócenie usuniętego deala**~~ — ✅ **ROZSTRZYGNIĘTE (D188, zmiana 2026-10-31 @fa3c15d)**: event `project_schedule.schedule.deal_restored`, flaga zostaje; `project_schedule.schedules.reopen_flag_clear` bez `project_schedule.edit` → 403, bez powodu, wpis w `audit_logs` z autorem; czyszczenie przy `won` bez zmian. Scenariusz: TC-EXEC-006. Do etapu kodu: event `customers` przywrócenia deala.
+32. ~~**Przywrócenie usuniętego deala**~~ — ✅ **ROZSTRZYGNIĘTE (D188, zmiana 2026-10-31 @fa3c15d)**: event `project_schedule.schedule.deal_restored`, flaga zostaje; `project_schedule.schedules.reopen_flag_clear` bez `project_schedule.edit` → `403 FORBIDDEN`, bez powodu, wpis w `audit_logs` z autorem; czyszczenie przy `won` bez zmian. Scenariusz: TC-EXEC-006. Do etapu kodu: event `customers` przywrócenia deala.
 33. ~~**Format istniejącego klucza bez części**~~ — ✅ **ROZSTRZYGNIĘTE warunkowo (D189 @49384e6)**: `ezamowienia:<tender_id>`, do potwierdzenia przez Enkę przy kodzie. Scenariusz: TC-DEAL-021 krok 3.
 
 ### Nowe wnioski (rev 9d — D193; reguł brak w rejestrze @0be9356, nie zgadywano)
@@ -2692,19 +2723,19 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 ### Nowe wnioski (rev 9e — D192, D185 rev 4d; reguł brak w rejestrze @0bff741, nie zgadywano)
 
 36. **Definicja „sumy inwestycji” przy ofercie głównej na `rejected`** (TC-DEAL-018 krok 6) — D185 wyklucza `rejected` z sumy; rejestr nie mówi, czy deal na `rejected` z ofertą `primary` traci rolę oferty głównej ani co wtedy pokazuje widget inwestycji.
-37. **„Oznacz jako przegrany” bez powodu** (TC-DEAL-024 krok 3) — D192 wymaga powodu tylko przy `rejected` i ogranicza powody tej ścieżki do `lost`; kod przy braku powodu nieokreślony.
-38. **Ścieżka masowa z powodem i raport błędów** (TC-DEAL-025 kroki 2–3) — czy masowa zmiana etapu przyjmuje `loss_reason_id` i jak raportuje 422 per deal; także czy zmiana powodu na etapie `rejected` albo wyjście z `rejected` przelicza `closure_outcome` (mapowanie „tylko przy przejściu”).
+37. ~~**„Oznacz jako przegrany” bez powodu**~~ — ✅ **ROZSTRZYGNIĘTE (D192, zmiana 2026-10-31 @cdf27dc)**: każda komenda z `closureOutcome = lost` (także ze `status = lost`) bez powodu → 422 `REASON_REQUIRED` (TC-DEAL-028).
+38. **Ścieżka masowa z powodem i raport błędów** (TC-DEAL-025, TC-DEAL-029) — częściowo ✅ (D192, zmiana 2026-10-31 @cdf27dc): ścieżka masowa nie przenosi `lossReasonId`, każdy deal → 422 `REASON_REQUIRED` w `failedItems` (`id`, `message`), reszta przetwarzana. Otwarte: czy zmiana powodu na etapie `rejected` albo wyjście z `rejected` przelicza `closure_outcome` (mapowanie „tylko przy przejściu”).
 ---
 
 ## 23. Podsumowanie
 
 **Dokument**: Niezależny plan testów — spec only
-**Liczba scenariuszy**: 155 (rev 9e: +5; rev 9d: +1; rev 9c: +1; rev 9: +5; rev 8b: +1; runda rev 8h: +1; rev 7: +6; rev 6: +1; rev 5: +25; rev 2–4: 109; rev 1: 72)
+**Liczba scenariuszy**: 157 (rev 9g: +2; rev 9e: +5; rev 9d: +1; rev 9c: +1; rev 9: +5; rev 8b: +1; runda rev 8h: +1; rev 7: +6; rev 6: +1; rev 5: +25; rev 2–4: 109; rev 1: 72)
 **Liczba wniosków do speki**: 38 (15 oryginalnych + 5 z rev 2 + 5 z rev 5 + 2 z rev 7 + 6 z rev 9 + 2 z rev 9d + 3 z rev 9e)
 **Status**: SPEC ONLY — bez kodu, bez testów wykonywalnych
 
 **Kolejne kroki**:
-1. Sprecyzować odpowiedzi na otwarte wnioski (9, 10, 11, 12, 13, 15, 20–25, 30, 31, 34–38 w sekcji 22; 29 i 31 częściowo rozstrzygnięte)
+1. Sprecyzować odpowiedzi na otwarte wnioski (9, 10, 11, 12, 13, 15, 20–25, 30, 31, 34–36, 38 w sekcji 22; 29 i 31 częściowo rozstrzygnięte)
 2. Zatwierdzić dokument (review przez Marka + PO)
 3. Przejść do fazy implementacji
 
@@ -2807,11 +2838,11 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 | D132 | Postępowanie z częściami: inwestycja i deal na część, wspólny `tender_notice_number` (tylko do odczytu, bez unikalności, poza dopasowaniem); primary per inwestycja; v1 identyfikator `bzp_notice_part` `{numer}#{część}`, bez `bzp_notice_number` | TC-DEAL-017, TC-DEAL-016 (krok 7) | decisions @develop (po PR #30); aktywna bez warunku |
 | D185 | n8n zmienia etap deala tylko na `result_lead` i `cancelled` (z D34), nie zmienia `closure_outcome` (D42); inne zmiany etapu w UI nie wpływają na kosztorys; etap grupuje prognozę, a prognoza wyklucza etap `rejected` niezależnie od `closure_outcome` (zmiana 2026-10-31); `rejected` poza aktywnym lejkiem, także poza sumą inwestycji (rev 4d) | TC-DEAL-018 | MVP; rejestr @0bff741 (PR #33, rev 4b/4d); kroki 5–6; wniosek 28 zamknięty, 36 |
 | D187 | Status inwestycji: domyślnie `active`; MVP `active`/`archived` (tylko odczyt, ukryta w listach, filtr pokazuje); archiwizacja i przywrócenie z `project_costing.manage_investments` (bez niego 403 `FORBIDDEN`), przywrócenie z audytem; podpięcie deala do `archived` → 422 `INVESTMENT_ARCHIVED`; CHECK na listę wartości fazy; v1 `merged` z `merged_into_id`; skutki merge nierozstrzygnięte (L3) | TC-DEAL-019, TC-DEAL-009 (notatka L3) | MVP, v1; rejestr @fa3c15d (zmiana 2026-10-31); wnioski 29 (kod edycji), 30 |
-| D188 | Usunięcie deala z harmonogramem wykonawczym: bez kaskady, `reopened_at` na rekordzie albo na zadaniu fazy projektu (D72, D131); flagi zostają; przywrócenie → `project_schedule.schedule.deal_restored`; zdjęcie `project_schedule.schedules.reopen_flag_clear` — bez `project_schedule.edit` 403, bez powodu, audyt z autorem; event `customers` przywrócenia — etap kodu; czyszczenie przy `won` bez zmian; n8n deala nie odtwarza (D35); część projektu — plan `project_delivery` (TC-PD-PRJ-015) | TC-EXEC-006 | v1 (harmonogram); rejestr @fa3c15d (zmiana 2026-10-31) |
+| D188 | Usunięcie deala z harmonogramem wykonawczym: bez kaskady, `reopened_at` na rekordzie albo na zadaniu fazy projektu (D72, D131); flagi zostają; przywrócenie → `project_schedule.schedule.deal_restored`; zdjęcie `project_schedule.schedules.reopen_flag_clear` — bez `project_schedule.edit` `403 FORBIDDEN`, bez powodu, audyt z autorem; event `customers` przywrócenia — etap kodu; czyszczenie przy `won` bez zmian; n8n deala nie odtwarza (D35); część projektu — plan `project_delivery` (TC-PD-PRJ-015) | TC-EXEC-006 | v1 (harmonogram); rejestr @fa3c15d (zmiana 2026-10-31) |
 | D189 | Klucz push części `ezamowienia:<tender_id>#<nr części>`; klucz bez części `ezamowienia:<tender_id>` bez zmian (do potwierdzenia przez Enkę), bez migracji; wdrożenie n8n — Enka, etap kodu (D32) | TC-DEAL-021 | etap kodu kontraktu push; rejestr @49384e6 |
 | D190 | Właściciel inwestycji = `created_by`, bez osobnego pola; klucz API z użytkownikiem → ten użytkownik, bez użytkownika → NULL i powiadomienia do administratorów; n8n inwestycji nie zakłada (D63); właściciel deala z n8n otwarty (Q-ARCH-2) | TC-DEAL-020 | MVP; rejestr @49384e6; wniosek 31 (częściowo) |
 | D191 | Ponowne otwarcie deala po przegranej (`lost` → NULL) — zachowanie `customers` OM core, fork go nie zmienia (D45); deal wraca do prognozy, chyba że jest na etapie `rejected` (zmiana 2026-10-31); bez reakcji modułów własnych (flagi D72/D141 tylko dla deala, który był `won`) | TC-FCST-007 | MVP; rejestr @0be9356 (PR #33, rev 4b) |
-| D192 | Etap `rejected` = każde odrzucenie; powód z `sales.deal_loss_reason` wymagany (422 `REASON_REQUIRED`); seed bez duplikatów (12 wpisów, 9 `lost`, 3 `no_result`); tabela mapująca, unikalność per organizacja, domyślne `no_result` dla nowych wpisów; mapowanie tylko przy `rejected` (`lost` → `closureOutcome = lost`, `no_result` → NULL, enum bez zmian); „Oznacz jako przegrany” tylko powody `lost` (422 `INVALID_LOSS_REASON`), UI tylko powody `lost`; interceptor create/update obejmuje widok lejka i ścieżkę masową; n8n nie ustawia `rejected` ani powodu | TC-DEAL-023, TC-DEAL-024, TC-DEAL-025, TC-DEAL-026, TC-DEAL-027; prognoza: TC-DEAL-018, TC-FCST-007 | MVP; TC-DEAL-027 etap kodu (mechanizm forka dla okna UI); reguła metryk skuteczności bez TC (D192); rejestr @0bff741; wnioski 37, 38 |
+| D192 | Etap `rejected` = każde odrzucenie; powód z `sales.deal_loss_reason` wymagany (422 `REASON_REQUIRED`); seed bez duplikatów (12 wpisów, 9 `lost`, 3 `no_result`); tabela mapująca, unikalność per organizacja, domyślne `no_result` dla nowych wpisów; mapowanie tylko przy `rejected` (`lost` → `closureOutcome = lost`, `no_result` → NULL, enum bez zmian); „Oznacz jako przegrany” tylko powody `lost` (422 `INVALID_LOSS_REASON`), UI tylko powody `lost`; interceptor create/update obejmuje widok lejka i ścieżkę masową; „Oznacz jako przegrany” i `status = lost` bez powodu → 422 `REASON_REQUIRED`; masowo na `rejected` → 422 per deal w `failedItems`, reszta przetwarzana (zmiana 2026-10-31); n8n nie ustawia `rejected` ani powodu | TC-DEAL-023, TC-DEAL-024, TC-DEAL-025, TC-DEAL-026, TC-DEAL-027, TC-DEAL-028, TC-DEAL-029; prognoza: TC-DEAL-018, TC-FCST-007 | MVP; TC-DEAL-027 etap kodu (mechanizm forka dla okna UI); reguła metryk skuteczności bez TC (D192); rejestr @0bff741, doprecyzowanie @cdf27dc (PR #38); wniosek 37 rozstrzygnięty, 38 częściowo |
 | D193 | Ustawienie `crm.n8n_default_deal_owner_user_id` (domyślnie `null` → deal bez opiekuna, szkice do administratorów); ustawione → opiekun deali tworzonych pushem n8n; walidacja 422 (aktywny, w organizacji); nieaktywny przy imporcie → bez opiekuna i ostrzeżenie w logu (tylko ID); tylko przy tworzeniu, bez zmian jawnego opiekuna, bez wstecz, pushe nie zmieniają opiekuna | TC-DEAL-022 | MVP; rejestr @0be9356 (PR #33); routing szkiców — plan `crm_followups` (TC-FU-ACL-001); wnioski 34, 35 |
 
 **Decyzje zastąpione — nie testujemy:**
@@ -2827,6 +2858,15 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 ---
 
 ## Changelog
+
+### Rev 9g — 2026-10-31 (doprecyzowanie D192; zapis `403 FORBIDDEN`; rejestr @cdf27dc, PR #38)
+
+- Niezależna sesja planu (P4): jedyne źródło — `.ai/decisions.md` @cdf27dc; bez speki i bez briefów
+- Nowe TC: TC-DEAL-028 (D192, P0, MVP — „Oznacz jako przegrany” i `status = lost` bez powodu → 422 `REASON_REQUIRED`, powód `no_result` → 422 `INVALID_LOSS_REASON`), TC-DEAL-029 (D192, P0, MVP — masowa zmiana na `rejected`: 422 `REASON_REQUIRED` per deal w `failedItems`, reszta przetwarzana)
+- TC-DEAL-024 krok 3: kod zamiast luki (odesłanie do TC-DEAL-028); TC-DEAL-025 krok 3: zamiast warunku „jeśli ścieżka masowa przyjmuje powód” — payload joba bez `lossReasonId` (odesłanie do TC-DEAL-029)
+- Zapis `403 FORBIDDEN` (D187 i pozostałe asercje braku uprawnień): 17 linii w TC, strategii i wnioskach; bez zmian: „Brak 403” w TC izolacji (asercja 404), stare wpisy changelogu
+- §22: wniosek 37 rozstrzygnięty, 38 częściowo; §23; załącznik — wiersz D192
+- Liczba scenariuszy: 155 → 157 (TC-DEAL 27 → 29)
 
 ### Rev 9f — 2026-10-31 (review #33, rev 4 @700cc63)
 

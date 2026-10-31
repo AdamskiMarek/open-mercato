@@ -4,7 +4,7 @@
 **Docelowa ścieżka w repo**: `.ai/specs/2026-10-23-project-delivery-docs-test-plan.md`
 **Data**: 2026-10-23
 **Autor**: Grok Bot (runner planu testów; specyfikacji modułu nie czytał); rev 4–7 — niezależna sesja testerska, wyłącznie na podstawie `.ai/decisions.md` (rev 4: commit 865714e, rev 5: b0e097f, rev 5a: a75dc9f, rev 6: 932fac6, rev 6a: 35b305a, rev 7: f81c58c, rev 7a: ea6a101, rev 8: 82c4ec3) i plików recenzji, bez dostępu do spek
-**Rewizja**: rev 9c (2026-10-31) — TC-PD-PRJ-014 wg doprecyzowania D186: `projects.close` z powodem (422 `REASON_REQUIRED`, `audit_logs` z powodem), `projects.set_status` bez powodu, archiwizacja v2 ze złego statusu → 422 `INVALID_STATUS_TRANSITION`; decisions @fa3c15d (PR #36, doprecyzowania D186–D188 „zmiana 2026-10-31”, nowa D191); poprzednio rev 9b (2026-10-31) — meta (P21): numery D w TC-PD-PRJ-014 i TC-PD-PRJ-015, kod `INVALID_STATUS_TRANSITION` wielkimi literami; poprzednio rev 9a (2026-10-31) — asercje TC-PD-PRJ-014 (D186: `projects.set_status`, rola `manager`, 422 `INVALID_STATUS_TRANSITION`, archiwizacja v2) i TC-PD-PRJ-015 (D188: `deal_restored`, flaga zostaje, ręczne zdjęcie z audytem) wg decisions @49384e6 (PR #35, runda 2: rozstrzygnięcia techniczne Cezara 2026-10-31); poprzednio rev 9 (2026-10-31) — nowe TC dla D186 (statusy projektu i przejścia) i D188 w części projektu (usunięcie deala: `deal_reopened_at`, event `project_delivery.project.deal_reopened`), rejestr decisions @730b77d (PR #35, `docs/arch-gaps-d185`); poprzednio rev 8c (2026-10-31) — meta: data rev 8b poprawiona na faktyczną; poprzednio rev 8b (2026-10-31) — nity Cezara po r8: §27 wstęp bez „poza wnioskiem 34” (rozstrzygnięty), TC-PD-PRJ-012 P0 spójnie z TC-DEAL-017; poprzednio rev 8a (2026-10-23) — inputy Cezara do r8: PRJ-012 z asercją aktualizacji deala części (etap kodu, D32), podstawa = decisions @develop, TC-DEAL-016 z lookupem postępowanie + część; poprzednio rev 8 (2026-10-23) — rozstrzygnięcie D31 przez Marka (przetarg z częściami: deal i inwestycja na część, wspólny `tender_notice_number`; bez części: jeden deal), D132 bez warunku, D154 zastąpiona przez D132; TC-PD-PRJ-012 zwykły, TC-PD-PRJ-013 usunięty; poprzednio rev 7a (2026-10-23) — wpisy `project_role` przodka `restricted` w podfolderach `inherit` wg D169 (rejestr z commita ea6a101, PR #29); poprzednio rev 7 (2026-10-23) — dopasowanie do D166–D169 (rejestr z commita f81c58c, po merge #27): dolna granica retencji z polityki, rola `manager` bez `view`, `read` dla `projects.view_all` bez roli, dziedziczenie ACL pod folderem `restricted`; poprzednio rev 6a (2026-10-23) — poprawki odbioru PR #26 i dopasowanie do rejestru z commita 35b305a (po merge #25): dostęp U-A w TC-PD-PRJ-008, `Content-Length` w TC-PD-WRK-009, flaga tagu stagingu i status `degraded` w TC-PD-STOR-010; poprzednio rev 6 (2026-10-23) — dopasowanie do D159–D165 i zmienionych D121, D129, D144, D158 (rejestr z commita 932fac6): role projektu i prawa folderu, rola `manager`, automatyczne zdjęcie flagi deala, usuwanie folderu i projektu, niemutowalność rewizji, limit pliku, granty pracownika, klucze i staging z segmentem tenanta, lifecycle wariant (c); poprzednio rev 5a (2026-10-23) — limit paczki ZIP wg D158 (rejestr z commita a75dc9f, po merge #22): wartość domyślna, zmiana przez administratora, komunikat z dwiema drogami; poprzednio rev 5 (2026-10-23) — dopasowanie do D133–D157 (rejestr z commita b0e097f, po merge #19 i #21): kody błędów zamiast „albo”, macierz feature'ów, flaga ponownego otwarcia deala na projekcie, MIME z zawartości, rekoncyliacja wersji spoza aplikacji, limity ZIP, kody linków i akceptacji, wariant D154 (warunkowy); poprzednio rev 4a (2026-10-23) — poprawki odbioru rundy 3 (`STORAGE_NOT_CONFIGURED`, jednoznaczne kody, warunkowy TC-PD-QUOTA-009); poprzednio rev 4 (2026-10-23) — dopasowanie do D116–D132 (rejestr z commita 865714e, po merge #20): projekt bez oferty i podpięcie oferty, jeden projekt na deal i na inwestycję, limit miękki quota z alertami 80/100% i blokadą od 110%, oryginał ZIP jako dowód, strzeżona funkcja usuwania i purge po potwierdzeniu, wpis atomowy importu, worker checksum, progi pomiaru RAM, faza projektu w harmonogramie; postępowania z częściami — warunkowo; poprzednio rev 3 — rejestr z commita 4f83bd4: bufor tylko w RAM (partSize × queueSize), zero plików tymczasowych także w workerze, współbieżność 1 tylko dla kolejki modułu, dwa parametry presji RAM; PoC dostawcy domyślnego jako kryterium akceptacji etapu kodu z fallbackiem na B2; poprzednio rev 2 — rejestr finalny (akceptacje, worker, linki, dostawca storage, warianty, retencja)
+**Rewizja**: rev 9d (2026-10-31) — zapis `403 FORBIDDEN` w asercjach braku uprawnień (D122, D135, D136, D147, D160, D161, D168, zmiana 2026-10-31 @cdf27dc, PR #38); poprzednio rev 9c (2026-10-31) — TC-PD-PRJ-014 wg doprecyzowania D186: `projects.close` z powodem (422 `REASON_REQUIRED`, `audit_logs` z powodem), `projects.set_status` bez powodu, archiwizacja v2 ze złego statusu → 422 `INVALID_STATUS_TRANSITION`; decisions @fa3c15d (PR #36, doprecyzowania D186–D188 „zmiana 2026-10-31”, nowa D191); poprzednio rev 9b (2026-10-31) — meta (P21): numery D w TC-PD-PRJ-014 i TC-PD-PRJ-015, kod `INVALID_STATUS_TRANSITION` wielkimi literami; poprzednio rev 9a (2026-10-31) — asercje TC-PD-PRJ-014 (D186: `projects.set_status`, rola `manager`, 422 `INVALID_STATUS_TRANSITION`, archiwizacja v2) i TC-PD-PRJ-015 (D188: `deal_restored`, flaga zostaje, ręczne zdjęcie z audytem) wg decisions @49384e6 (PR #35, runda 2: rozstrzygnięcia techniczne Cezara 2026-10-31); poprzednio rev 9 (2026-10-31) — nowe TC dla D186 (statusy projektu i przejścia) i D188 w części projektu (usunięcie deala: `deal_reopened_at`, event `project_delivery.project.deal_reopened`), rejestr decisions @730b77d (PR #35, `docs/arch-gaps-d185`); poprzednio rev 8c (2026-10-31) — meta: data rev 8b poprawiona na faktyczną; poprzednio rev 8b (2026-10-31) — nity Cezara po r8: §27 wstęp bez „poza wnioskiem 34” (rozstrzygnięty), TC-PD-PRJ-012 P0 spójnie z TC-DEAL-017; poprzednio rev 8a (2026-10-23) — inputy Cezara do r8: PRJ-012 z asercją aktualizacji deala części (etap kodu, D32), podstawa = decisions @develop, TC-DEAL-016 z lookupem postępowanie + część; poprzednio rev 8 (2026-10-23) — rozstrzygnięcie D31 przez Marka (przetarg z częściami: deal i inwestycja na część, wspólny `tender_notice_number`; bez części: jeden deal), D132 bez warunku, D154 zastąpiona przez D132; TC-PD-PRJ-012 zwykły, TC-PD-PRJ-013 usunięty; poprzednio rev 7a (2026-10-23) — wpisy `project_role` przodka `restricted` w podfolderach `inherit` wg D169 (rejestr z commita ea6a101, PR #29); poprzednio rev 7 (2026-10-23) — dopasowanie do D166–D169 (rejestr z commita f81c58c, po merge #27): dolna granica retencji z polityki, rola `manager` bez `view`, `read` dla `projects.view_all` bez roli, dziedziczenie ACL pod folderem `restricted`; poprzednio rev 6a (2026-10-23) — poprawki odbioru PR #26 i dopasowanie do rejestru z commita 35b305a (po merge #25): dostęp U-A w TC-PD-PRJ-008, `Content-Length` w TC-PD-WRK-009, flaga tagu stagingu i status `degraded` w TC-PD-STOR-010; poprzednio rev 6 (2026-10-23) — dopasowanie do D159–D165 i zmienionych D121, D129, D144, D158 (rejestr z commita 932fac6): role projektu i prawa folderu, rola `manager`, automatyczne zdjęcie flagi deala, usuwanie folderu i projektu, niemutowalność rewizji, limit pliku, granty pracownika, klucze i staging z segmentem tenanta, lifecycle wariant (c); poprzednio rev 5a (2026-10-23) — limit paczki ZIP wg D158 (rejestr z commita a75dc9f, po merge #22): wartość domyślna, zmiana przez administratora, komunikat z dwiema drogami; poprzednio rev 5 (2026-10-23) — dopasowanie do D133–D157 (rejestr z commita b0e097f, po merge #19 i #21): kody błędów zamiast „albo”, macierz feature'ów, flaga ponownego otwarcia deala na projekcie, MIME z zawartości, rekoncyliacja wersji spoza aplikacji, limity ZIP, kody linków i akceptacji, wariant D154 (warunkowy); poprzednio rev 4a (2026-10-23) — poprawki odbioru rundy 3 (`STORAGE_NOT_CONFIGURED`, jednoznaczne kody, warunkowy TC-PD-QUOTA-009); poprzednio rev 4 (2026-10-23) — dopasowanie do D116–D132 (rejestr z commita 865714e, po merge #20): projekt bez oferty i podpięcie oferty, jeden projekt na deal i na inwestycję, limit miękki quota z alertami 80/100% i blokadą od 110%, oryginał ZIP jako dowód, strzeżona funkcja usuwania i purge po potwierdzeniu, wpis atomowy importu, worker checksum, progi pomiaru RAM, faza projektu w harmonogramie; postępowania z częściami — warunkowo; poprzednio rev 3 — rejestr z commita 4f83bd4: bufor tylko w RAM (partSize × queueSize), zero plików tymczasowych także w workerze, współbieżność 1 tylko dla kolejki modułu, dwa parametry presji RAM; PoC dostawcy domyślnego jako kryterium akceptacji etapu kodu z fallbackiem na B2; poprzednio rev 2 — rejestr finalny (akceptacje, worker, linki, dostawca storage, warianty, retencja)
 **Podstawa**: rejestr decyzji (`.ai/decisions.md` @develop (develop_OM_CRM po merge PR #30: nowa treść D31, D132 bez warunku, D154 zastąpiona przez D132; sekcja modułu `project_delivery` D98–D169 oraz decyzje kontekstowe)), research `om-project-docs-research.md`, `odoo-project-docs.md`, `om-overlap-audit.md`, dokumentacja Backblaze B2 S3-Compatible API (stan na X 2026; dotyczy dostawcy zapasowego). Numery decyzji występują w załączniku pokrycia, w changelogu oraz w adnotacjach scenariuszy warunkowych (od rev 8 brak scenariuszy warunkowych).
 **Dostawca storage**: „dostawca domyślny” = najtańszy w UE dostawca w pełni kompatybilny z `storage_s3` i multipartem (wg rejestru: OVHcloud Object Storage, region i klasa jako parametry wdrożenia); „dostawca zapasowy” = Backblaze B2 EU Central z adapterem bez `If-None-Match` (wyłącznie unikalne klucze). Scenariusze storage przechodzą dla obu; różnice opisane w scenariuszu.
 
@@ -206,7 +206,7 @@ Zasady:
 - **Oczekiwane wyniki**:
   - Krok 2: P1, P2, P3 mają ustawione `deal_reopened_at`; event `project_delivery.project.deal_reopened` dla każdego; dane projektów bez zmian, nic nie jest usuwane ani archiwizowane
   - Krok 3: P1 i P3 — `deal_reopened_at` = NULL (subscriber persistent); powtórne zdarzenie niczego nie zmienia (idempotentnie, bez drugiego wpisu historii); komenda → 409 `PROJECT_EXISTS` z ID P1 (jak TC-PD-PRJ-002)
-  - Krok 4: U-B → 403; U-M bez powodu albo z pustym → 422 `REASON_REQUIRED`, flaga zostaje; U-M z powodem → NULL; U-X → 404 (feature mówi „co”, brak członkostwa i `projects.view_all` — projekt niewidoczny, jak TC-PD-ACL-007 krok 5), flaga zostaje; U-A → NULL (`projects.manage` + `projects.view_all`)
+  - Krok 4: U-B → `403 FORBIDDEN`; U-M bez powodu albo z pustym → 422 `REASON_REQUIRED`, flaga zostaje; U-M z powodem → NULL; U-X → 404 (feature mówi „co”, brak członkostwa i `projects.view_all` — projekt niewidoczny, jak TC-PD-ACL-007 krok 5), flaga zostaje; U-A → NULL (`projects.manage` + `projects.view_all`)
   - Krok 5: każde zdjęcie flagi w `audit_logs`: automatyczne — autor `system`, powód `deal_won`; ręczne — autor = użytkownik, powód z komendy; dane projektów bez zmian
 
 #### TC-PD-PRJ-009: Wygrany deal bez kalkulacji → projekt bez oferty
@@ -240,7 +240,7 @@ Zasady:
   - Krok 2: 200; trzy kolumny oferty ustawione razem, `investment_id` = I3; wpis w `audit_logs` (komenda `projects.link_winning_offer`)
   - Krok 3: 409 `OFFER_ALREADY_LINKED`
   - Krok 4: 409 `PROJECT_EXISTS` z ID P1; w wyścigu jedno podpięcie się udaje, drugie 409 `PROJECT_EXISTS` z ID zwycięzcy (`23505` → 409)
-  - Krok 5: 403
+  - Krok 5: `403 FORBIDDEN`
 
 #### TC-PD-PRJ-011: Postępowanie bez części = jeden deal; kolejne ogłoszenia aktualizują deal; z częściami — deal danej części
 
@@ -290,10 +290,10 @@ Zasady:
   7. v2: archiwizacja projektu (proces z TC-PD-RET-006) dla P1 (`active` po kroku 5), P2 (`active`), P8 (`on_hold`), P9 (`completed`), P10 (`cancelled`)
 - **Oczekiwane wyniki**:
   - Krok 1: status `active` (domyślny); zapis `archived` odrzucony przez CHECK, rekord bez zmian
-  - Krok 2: brak powodu nie blokuje `projects.set_status`; U-B → 403 (brak `projects.manage`); U-X → 404 (brak członkostwa i `projects.view_all`, jak TC-PD-PRJ-008); U-M i U-A → przejścia przyjęte (rola `manager` ma `projects.manage` w swoim projekcie, D160), status zgodny po każdym kroku
+  - Krok 2: brak powodu nie blokuje `projects.set_status`; U-B → `403 FORBIDDEN` (brak `projects.manage`); U-X → 404 (brak członkostwa i `projects.view_all`, jak TC-PD-PRJ-008); U-M i U-A → przejścia przyjęte (rola `manager` ma `projects.manage` w swoim projekcie, D160), status zgodny po każdym kroku
   - Krok 3: bez powodu i z pustym powodem → 422 `REASON_REQUIRED`, P1 zostaje `active`; z powodem → P1 `completed` (rola `manager` zamyka swój projekt, D160), P2 `cancelled`, P3 `cancelled`
   - Krok 4: każde przejście → 422 `INVALID_STATUS_TRANSITION`, status bez zmian
-  - Krok 5: U-B → 403, P1 zostaje `completed`; U-M → P1 `active`; U-A → P2 `active`
+  - Krok 5: U-B → `403 FORBIDDEN`, P1 zostaje `completed`; U-M → P1 `active`; U-A → P2 `active`
   - Krok 6: każde przejście `projects.set_status` (`active` ⇄ `on_hold` i powroty do `active`) w `audit_logs` z autorem (U-M, U-A); każde zamknięcie `projects.close` (P1, P2, P3) w `audit_logs` z autorem i powodem; odrzucone próby z kroków 3 i 4 nie zmieniają statusu; dane projektów bez zmian
   - Krok 7: archiwizacja P9 i P10 przyjęta; P1, P2 i P8 → 422 `INVALID_STATUS_TRANSITION`, status i dane bez zmian
   - Soft delete projektu bez zmian (TC-PD-RET-010, D162); ręczne zdjęcie flagi deala nadal z powodem (D161, TC-PD-PRJ-015 krok 5)
@@ -315,7 +315,7 @@ Zasady:
   - Krok 2: `deal_reopened_at` ustawione; event `project_delivery.project.deal_reopened` dla P5; projekt nie jest usunięty (bez kaskady, D134); `deal_id` i `deal_snapshot` bez zmian; status projektu bez zmian; etapy, zadania, kamienie, foldery i dokumenty bez zmian (asercja przez `pg`)
   - Krok 3: deal nie jest odtwarzany (D35); P5 bez zmian
   - Krok 4: event `project_delivery.project.deal_restored` dla P5; `deal_reopened_at` zostaje (bez automatycznego czyszczenia); dane projektu bez zmian
-  - Krok 5: U-B → 403, flaga zostaje; U-M bez powodu → 422 `REASON_REQUIRED`, flaga zostaje; U-M z powodem → `deal_reopened_at` = NULL, wpis w `audit_logs` z autorem U-M i powodem (D161)
+  - Krok 5: U-B → `403 FORBIDDEN`, flaga zostaje; U-M bez powodu → 422 `REASON_REQUIRED`, flaga zostaje; U-M z powodem → `deal_reopened_at` = NULL, wpis w `audit_logs` z autorem U-M i powodem (D161)
   - Krok 6: po przywróceniu flaga P7 zostaje; po `won` flaga = NULL automatycznie, wpis w `audit_logs`: autor `system`, powód `deal_won` (D161 bez zmian)
 
 ---
@@ -468,7 +468,7 @@ Zasady:
   - Krok 1: do produkcji R0; R1 oznaczona „niezatwierdzona”
   - Krok 2: do produkcji R1; R0 oznaczona „zastąpiona” (status, nie zmiana pliku)
   - Krok 3: odrzucone albo bez wpływu — do produkcji pozostaje najnowsza zatwierdzona R1
-  - Krok 4: 403
+  - Krok 4: `403 FORBIDDEN`
   - Zatwierdzenie zapisane w `audit_logs` (kto, kiedy, która rewizja)
 
 #### TC-PD-REV-004: Audyt operacji na rewizjach
@@ -593,7 +593,7 @@ Zasady:
   - Krok 1: domyślnie A; opcja B niedostępna (wyszarzona z opisem); API 422
   - Krok 2: dokumenty jako linki do Drive; nowe pliki nie trafiają do naszego bucketu; quota wariantu A nie rośnie
   - Krok 3: nowe obiekty w buckecie klienta; poświadczenia poza repo i ustawieniami (TC-PD-EXT-003)
-  - Krok 4: 403
+  - Krok 4: `403 FORBIDDEN`
   - Zmiana wariantu nie przenosi ani nie usuwa istniejących plików
 
 #### TC-PD-STOR-008: Sweeper — wygasłe sesje uploadu, obiekty osierocone i wyścig z `complete`
@@ -781,7 +781,7 @@ Zasady:
   2. Zapisuje regułę domyślną; employee próbuje ją zmienić
 - **Oczekiwane wyniki**:
   - Domyślnie zaznaczona podpowiedź „do końca gwarancji i rękojmi”, potem archiwum; opis zaznacza, że okresy wymagają weryfikacji prawnej
-  - Employee: 403
+  - Employee: `403 FORBIDDEN`
   - Ustawienie per organizacja (TC-PD-TEN-002)
 
 #### TC-PD-RET-002: Ręczne daty gwarancji i rękojmi na projekcie
@@ -795,7 +795,7 @@ Zasady:
 - **Oczekiwane wyniki**:
   - Krok 1: daty zapisane tak, jak wpisano — moduł ich nie wylicza (brak dat wyliczonych z deala, umowy ani przepisów); podpowiedź retencji wg reguły organizacji, wpis w `audit_logs`
   - Krok 2: zmiana zapisana w `audit_logs`
-  - Krok 3: 403
+  - Krok 3: `403 FORBIDDEN`
   - Krok 4: brak podpowiedzi `retention_until`; lista pokazuje „retencja nieustalona”; brak błędu
 
 #### TC-PD-RET-003: Upływ daty retencji niczego nie usuwa
@@ -816,8 +816,8 @@ Zasady:
   3. Admin wywołuje purge bez potwierdzenia, z błędnym kodem projektu, z poprawnym kodem projektu
   4. Sprawdź role domyślne
 - **Oczekiwane wyniki**:
-  - Krok 1: admin — soft delete, dokument ukryty, obiekt i wszystkie wersje w S3, rewizje dalej w quota; employee bez grantu → 403; przywrócenie działa. Usuwanie folderu i projektu — TC-PD-RET-010
-  - Krok 2: 403; zero DeleteObject
+  - Krok 1: admin — soft delete, dokument ukryty, obiekt i wszystkie wersje w S3, rewizje dalej w quota; employee bez grantu → `403 FORBIDDEN`; przywrócenie działa. Usuwanie folderu i projektu — TC-PD-RET-010
+  - Krok 2: `403 FORBIDDEN`; zero DeleteObject
   - Krok 3: bez potwierdzenia i z błędnym kodem → 422 `PURGE_CONFIRMATION_REQUIRED`, zero DeleteObject; z poprawnym kodem → żądanie przyjęte do kolejki purge, żadnego DeleteObject w procesie serwera HTTP (usuwa worker, TC-PD-RET-008)
   - Krok 4: `project_delivery.storage.purge` poza `defaultRoleFeatures` pracownika; ma go administrator
 
@@ -906,8 +906,8 @@ Zasady:
   3. Odczytaj `pg`, quota i proxy S3; undo usunięcia projektu
   4. Static: `defaultRoleFeatures` pracownika
 - **Oczekiwane wyniki**:
-  - Krok 1: F-pusty usunięty (soft delete); E-W → 403 (folder widoczny bez `manage`); E-N → 403; F-pełny i F-pod → 409 `FOLDER_NOT_EMPTY`, bez kaskady
-  - Krok 2: E-M → 403 (rola `manager` nie daje `projects.delete`); admin → soft delete kaskadowo w jednej transakcji: etapy, zadania, kamienie, foldery i dokumenty projektu
+  - Krok 1: F-pusty usunięty (soft delete); E-W → `403 FORBIDDEN` (folder widoczny bez `manage`); E-N → `403 FORBIDDEN`; F-pełny i F-pod → 409 `FOLDER_NOT_EMPTY`, bez kaskady
+  - Krok 2: E-M → `403 FORBIDDEN` (rola `manager` nie daje `projects.delete`); admin → soft delete kaskadowo w jednej transakcji: etapy, zadania, kamienie, foldery i dokumenty projektu
   - Krok 3: obiekty i wszystkie wersje w S3, zero DeleteObject, quota bez zmian (fizycznie usuwa tylko purge, TC-PD-RET-008); undo przywraca całość
   - Krok 4: `projects.delete` poza grantami pracownika; zwykły użytkownik zamiast usuwać zamyka projekt ze statusem `cancelled` (`projects.close`, TC-PD-ACL-007)
 ---
@@ -1157,9 +1157,9 @@ Import ZIP i multipart po stronie serwera idą przez istniejącą kolejkę OM (P
   3. Dodaj U-B drugi raz do P1 z inną rolą
 - **Oczekiwane wyniki**:
   - U2: 404 na projekt i dokumenty (bez ujawniania istnienia); brak wydanych URL; dokumentów P1 brak w wyszukiwarce U2
-  - U-V: `read` — lista i pobranie, upload → 403; U-B: `write` — upload, dokument-link i nowa rewizja; U-M: `manage` — dodatkowo podfoldery; U-ALL widzi projekt dzięki `projects.view_all` i ma w F-top prawo `read`: lista i pobranie działają; upload, dokument-link i podfolder → 403 (powyżej `read` potrzebna rola albo grant ACL), mimo feature'a `documents.upload`
+  - U-V: `read` — lista i pobranie, upload → `403 FORBIDDEN`; U-B: `write` — upload, dokument-link i nowa rewizja; U-M: `manage` — dodatkowo podfoldery; U-ALL widzi projekt dzięki `projects.view_all` i ma w F-top prawo `read`: lista i pobranie działają; upload, dokument-link i podfolder → `403 FORBIDDEN` (powyżej `read` potrzebna rola albo grant ACL), mimo feature'a `documents.upload`
   - Krok 3: odrzucone (unique `(project_id, user_id)`, jedna rola na użytkownika w projekcie)
-  - Role projektu nie zastępują RBAC: U-B0 (`member`, bez `documents.upload`) → 403 na upload mimo prawa `write`
+  - Role projektu nie zastępują RBAC: U-B0 (`member`, bez `documents.upload`) → `403 FORBIDDEN` na upload mimo prawa `write`
 
 #### TC-PD-ACL-002: ACL folderu `restricted` i dziedziczenie w podfolderach `inherit`
 
@@ -1172,11 +1172,11 @@ Import ZIP i multipart po stronie serwera idą przez istniejącą kolejkę OM (P
   4. „Ogólne” (najwyższy poziom): U4 i U-ALL; przenieś dokument z „Umowa” do „Ogólne”
   5. „Aneksy”: U5 (`viewer`, objęty wpisem `project_role` `viewer` = `read` w „Umowa”) listuje, pobiera, wgrywa, tworzy podfolder; kontrola negatywna: U4 (`member`) i U-M (`manager`) — role bez wpisu w „Umowa” — listują i pobierają
 - **Oczekiwane wyniki**:
-  - Krok 1: U1 — `read`, upload → 403 (folder widoczny bez `write`); U3 → 201; U-M2 — `read`, upload → 403; U5 — `read` (wpis `project_role` w samym folderze `restricted`); U4, U-M, U-ALL → 404 (bez ujawniania istnienia)
-  - Krok 2: oba foldery biorą wpisy najbliższego przodka `restricted` („Umowa”): U1 — `read`, upload → 403; U3 — `write`, upload → 201, tworzenie podfolderu → 403 (brak `manage`); U-M2 — tylko `read` (upload → 403, podfolder → 403 — rola `manager` nie poszerza); U4, U-M i U-ALL → 404 (role i `projects.view_all` nie poszerzają; ograniczenie nie wycieka do podfolderów)
-  - Krok 3: „Sub” bierze wpisy „Poufne” (najbliższy przodek `restricted`), nie „Umowa”: U3 — `read`, upload → 403; U1 → 404
+  - Krok 1: U1 — `read`, upload → `403 FORBIDDEN` (folder widoczny bez `write`); U3 → 201; U-M2 — `read`, upload → `403 FORBIDDEN`; U5 — `read` (wpis `project_role` w samym folderze `restricted`); U4, U-M, U-ALL → 404 (bez ujawniania istnienia)
+  - Krok 2: oba foldery biorą wpisy najbliższego przodka `restricted` („Umowa”): U1 — `read`, upload → `403 FORBIDDEN`; U3 — `write`, upload → 201, tworzenie podfolderu → `403 FORBIDDEN` (brak `manage`); U-M2 — tylko `read` (upload → `403 FORBIDDEN`, podfolder → `403 FORBIDDEN` — rola `manager` nie poszerza); U4, U-M i U-ALL → 404 (role i `projects.view_all` nie poszerzają; ograniczenie nie wycieka do podfolderów)
+  - Krok 3: „Sub” bierze wpisy „Poufne” (najbliższy przodek `restricted`), nie „Umowa”: U3 — `read`, upload → `403 FORBIDDEN`; U1 → 404
   - Krok 4: w „Ogólne” obowiązuje mapowanie ról: U4 (`member`) — `write`; U-ALL — `read`; przeniesiony dokument ma uprawnienia folderu docelowego
-  - Krok 5: U5 — `read` (wpis `project_role` najbliższego przodka `restricted` działa w podfolderze `inherit`): lista i pobranie działają, upload i podfolder → 403 (brak `write`); U4 i U-M → 404 (rola bez wpisu nie poszerza praw)
+  - Krok 5: U5 — `read` (wpis `project_role` najbliższego przodka `restricted` działa w podfolderze `inherit`): lista i pobranie działają, upload i podfolder → `403 FORBIDDEN` (brak `write`); U4 i U-M → 404 (rola bez wpisu nie poszerza praw)
 
 #### TC-PD-ACL-003: Presigned URL wydawany dopiero po sprawdzeniu uprawnień i krótko ważny
 
@@ -1185,7 +1185,7 @@ Import ZIP i multipart po stronie serwera idą przez istniejącą kolejkę OM (P
   1. Zażądaj URL; odbierz U1 dostęp; zażądaj ponownie
   2. Sprawdź parametr ważności w URL
 - **Oczekiwane wyniki**:
-  - Po usunięciu z członków projektu albo odebraniu wpisu w ACL folderu `restricted` nowy URL nie jest wydawany: 404 (jak dla zasobu nieistniejącego i innej organizacji); po odebraniu feature'a modułu: 403; wcześniej wydany URL wygasa po krótkiej ważności (parametr)
+  - Po usunięciu z członków projektu albo odebraniu wpisu w ACL folderu `restricted` nowy URL nie jest wydawany: 404 (jak dla zasobu nieistniejącego i innej organizacji); po odebraniu feature'a modułu: `403 FORBIDDEN`; wcześniej wydany URL wygasa po krótkiej ważności (parametr)
   - URL nie pojawia się w zdarzeniach, wyszukiwarce i odpowiedziach list
 
 #### TC-PD-ACL-004: Upload bez uprawnienia administracji storage
@@ -1196,7 +1196,7 @@ Import ZIP i multipart po stronie serwera idą przez istniejącą kolejkę OM (P
   2. Ten sam employee woła ogólną trasę signed-url modułu `storage_s3`
 - **Oczekiwane wyniki**:
   - Krok 1: działa przez trasy modułu projektów
-  - Krok 2: 403 (ogólne trasy storage nadal tylko dla administracji storage)
+  - Krok 2: `403 FORBIDDEN` (ogólne trasy storage nadal tylko dla administracji storage)
 
 #### TC-PD-ACL-005: Macierz 14 feature'ów modułu i domyślne granty
 
@@ -1209,7 +1209,7 @@ Import ZIP i multipart po stronie serwera idą przez istniejącą kolejkę OM (P
   - Krok 1: 14 feature'ów `project_delivery.`: `view`, `projects.view_all`, `projects.create`, `projects.manage`, `projects.delete`, `documents.upload`, `documents.approve`, `documents.delete`, `imports.run`, `templates.manage`, `settings.manage`, `storage.purge`, v1: `share_links.manage`, `approvals.review`
   - Admin ma wszystkie 14. Pracownik ma dokładnie: `view`, `projects.create`, `documents.upload`, `imports.run`, v1 `approvals.review`; nie ma: `projects.view_all`, `projects.manage`, `projects.delete`, `documents.approve`, `documents.delete`, `templates.manage`, `settings.manage`, `storage.purge`, v1 `share_links.manage`
   - Daty gwarancji i rękojmi — `projects.manage`; pobranie i podgląd — `view`
-  - Krok 2: przy spełnionym członkostwie i ACL (warunki wstępne) każda operacja bez swojego feature'a → 403; rola własna wykonuje tylko operację swojego feature'a (oraz podgląd z `view`); żaden wynik nie jest 404, bo projekt i folder są widoczne
+  - Krok 2: przy spełnionym członkostwie i ACL (warunki wstępne) każda operacja bez swojego feature'a → `403 FORBIDDEN`; rola własna wykonuje tylko operację swojego feature'a (oraz podgląd z `view`); żaden wynik nie jest 404, bo projekt i folder są widoczne
   - Przypisania może zmienić organizacja przez role OM; test na rolach domyślnych
 
 #### TC-PD-ACL-006: Upload, pobranie i podgląd wyłącznie przez trasy modułu
@@ -1223,7 +1223,7 @@ Import ZIP i multipart po stronie serwera idą przez istniejącą kolejkę OM (P
   5. Static: użycia tras `storage_s3` (`signed-url`, `signed-upload`, `download`) i metod drivera `store`, `read`, `putObject`, `toLocalPath` w kodzie modułu
 - **Oczekiwane wyniki**:
   - Krok 1: upload — presigned PUT; pobranie — 302 na presigned GET; podgląd — presigned GET inline
-  - Krok 2: U2 → 403 na upload (brak feature'a); U3 → 404 na każdej trasie (bez wydanego URL, bez ujawniania istnienia); U5 → 403 na upload, pobranie i podgląd działają
+  - Krok 2: U2 → `403 FORBIDDEN` na upload (brak feature'a); U3 → 404 na każdej trasie (bez wydanego URL, bez ujawniania istnienia); U5 → `403 FORBIDDEN` na upload, pobranie i podgląd działają
   - Krok 3: każde żądanie dostaje nowy presigned URL z krótkim TTL (parametr), podpisany przez moduł po sprawdzeniu ACL; URL nigdzie nie zapisany (zero `X-Amz-Signature` w `pg`)
   - Krok 4: 404 (brak trasy presigned POST w API modułu) — tylko presigned PUT
   - Krok 5: zero użyć dla plików projektu
@@ -1242,13 +1242,13 @@ Import ZIP i multipart po stronie serwera idą przez istniejącą kolejkę OM (P
   6. U-M w F2: lista i upload
   7. U-M0: lista projektów, otwarcie P1, lista F, edycja P1
 - **Oczekiwane wyniki**:
-  - Krok 1: U-V — `read`: lista i pobranie, pozostałe → 403; U-B — `write`: dodatkowo upload, dokument-link i nowa rewizja, podfoldery i ACL → 403; U-M — `manage`: wszystko, w tym podfoldery i `folders.set_acl`
-  - Krok 2: upload → 403 (folder widoczny bez `write`); `folders.set_acl` → 403
+  - Krok 1: U-V — `read`: lista i pobranie, pozostałe → `403 FORBIDDEN`; U-B — `write`: dodatkowo upload, dokument-link i nowa rewizja, podfoldery i ACL → `403 FORBIDDEN`; U-M — `manage`: wszystko, w tym podfoldery i `folders.set_acl`
+  - Krok 2: upload → `403 FORBIDDEN` (folder widoczny bez `write`); `folders.set_acl` → `403 FORBIDDEN`
   - Krok 3: wszystko przechodzi bez feature'a `projects.manage` (rola `manager` daje jego uprawnienia w obrębie swojego projektu — jedyny wyjątek od zasady „feature AND członkostwo AND ACL”); wpisy w `audit_logs`
-  - Krok 4: każda operacja → 403 (wymaga feature'a)
+  - Krok 4: każda operacja → `403 FORBIDDEN` (wymaga feature'a)
   - Krok 5: 404 (brak członkostwa; rola działa tylko w swoim projekcie)
   - Krok 6: 404 — rola `manager` nie nadaje grantów `pd_folder_acl`, a `manage` działa tylko w folderach `inherit` bez przodka `restricted`
-  - Krok 7: 403 na każdej operacji — rola `manager` nie zastępuje `view`; bez `view` brak dostępu do modułu i projektu
+  - Krok 7: `403 FORBIDDEN` na każdej operacji — rola `manager` nie zastępuje `view`; bez `view` brak dostępu do modułu i projektu
 ---
 
 ## 14. Scenariusze testowe: Linki udostępniania (TC-PD-SHARE) — 3 TC
@@ -1264,7 +1264,7 @@ Import ZIP i multipart po stronie serwera idą przez istniejącą kolejkę OM (P
   - Data w przeszłości: 422 `SHARE_LINK_EXPIRY_IN_PAST`
   - Ponad maksimum: 422 `SHARE_LINK_EXPIRY_TOO_LONG`
   - Poprawny: token losowy, zapisany autor, zakres, data wygaśnięcia; wpis w `audit_logs`
-  - Krok 2: 403
+  - Krok 2: `403 FORBIDDEN`
 
 #### TC-PD-SHARE-002: Link po wygaśnięciu i odwołaniu
 
@@ -1759,7 +1759,7 @@ Akceptacje v1 (rewizje dokumentów, transmittale, protokoły): własna walidacja
 | **Quota** | Limit miękki: alerty 80%/100% od `used`, blokada nowych bajtów od 110% (413), odczyt bez blokady, brak auto-usuwania, ledger per organizacja; bajty wersji spoza aplikacji z rekoncyliacji w `used` (TC-PD-QUOTA-001..007, TC-PD-QUOTA-009) | TBD |
 | **Niemutowalność** | Rewizje i ich obiekty niezmienne (TC-PD-REV-001, -002) | TBD |
 | **Projekt** | Tylko jawna komenda; jeden projekt na deal i na inwestycję, drugi → 409 `PROJECT_EXISTS` z ID; projekt bez oferty i późniejsze podpięcie (TC-PD-PRJ-002, -004, -009, -010) | TBD |
-| **Izolacja** | 404 dla cudzych ID, projektów bez członkostwa i zasobów niewidocznych w ACL, 403 tylko przy braku feature'a albo `write`/`manage` w widocznym folderze; klucze `{prefix}/org_…/tenant_…/…` generowane przez serwer, staging tylko pod pełnym prefiksem (TC-PD-TEN-*, TC-PD-ACL-001, -002, -006, -007, TC-PD-REV-002, TC-PD-RET-007) | TBD |
+| **Izolacja** | 404 dla cudzych ID, projektów bez członkostwa i zasobów niewidocznych w ACL, `403 FORBIDDEN` tylko przy braku feature'a albo `write`/`manage` w widocznym folderze; klucze `{prefix}/org_…/tenant_…/…` generowane przez serwer, staging tylko pod pełnym prefiksem (TC-PD-TEN-*, TC-PD-ACL-001, -002, -006, -007, TC-PD-REV-002, TC-PD-RET-007) | TBD |
 | **Sekrety** | Zero sekretów w repo i ustawieniach (TC-PD-STOR-006) | TBD |
 | **Typ pliku** | MIME z zawartości (worker), HTML/SVG/XML nigdy inline, podgląd tylko rozpoznanego PDF (TC-PD-SEC-001) | TBD |
 | **Pokrycie tras API** | Każda trasa modułu ma test Playwright w `__integration__` | TBD |
@@ -1810,9 +1810,9 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka; jedyna d
 
 25. ~~**Wygrany deal z wersją roboczą bez snapshotu**~~ — ✅ **ROZSTRZYGNIĘTE (D133)**: 422 `OFFER_NOT_PRIMARY` bez fallbacku; deal niewygrany → 422 `DEAL_NOT_WON`. Scenariusz: TC-PD-PRJ-003.
 26. ~~**Brak FK DB w `pd_projects`**~~ — ✅ **ROZSTRZYGNIĘTE (D134)**: zero relacji ORM i FK DB z `pd_*` do `pc_*`/`ps_*`/`customers_*`; FK-id + snapshot. Scenariusz: TC-PD-PRJ-005.
-27. ~~**Feature komendy podpięcia oferty**~~ — ✅ **ROZSTRZYGNIĘTE (D135)**: `project_delivery.projects.manage`, inaczej 403. Scenariusz: TC-PD-PRJ-010.
+27. ~~**Feature komendy podpięcia oferty**~~ — ✅ **ROZSTRZYGNIĘTE (D135)**: `project_delivery.projects.manage`, inaczej `403 FORBIDDEN`. Scenariusz: TC-PD-PRJ-010.
 28. ~~**Kod błędu `complete` po `expired`**~~ — ✅ **ROZSTRZYGNIĘTE (D149)**: 409 `UPLOAD_SESSION_EXPIRED`, bez rewizji, rezerwacja już zwolniona. Scenariusz: TC-PD-STOR-008.
-29. ~~**Kto może wykonać soft delete**~~ — ✅ **ROZSTRZYGNIĘTE (D136)** dla dokumentów: `project_delivery.documents.delete`, domyślnie admin, employee → 403. Folder i projekt — D162 (wniosek 38, TC-PD-RET-010). Scenariusz: TC-PD-RET-004.
+29. ~~**Kto może wykonać soft delete**~~ — ✅ **ROZSTRZYGNIĘTE (D136)** dla dokumentów: `project_delivery.documents.delete`, domyślnie admin, employee → `403 FORBIDDEN`. Folder i projekt — D162 (wniosek 38, TC-PD-RET-010). Scenariusz: TC-PD-RET-004.
 30. ~~**Limity ZIP spoza rejestru**~~ — ✅ **ROZSTRZYGNIĘTE (D139, D150)**: parametry `import.zip_max_bytes` (domyślnie 250 MB, D158 — wniosek 40), `import.zip_max_entries`, `import.zip_max_uncompressed_bytes`, `import.zip_max_ratio`; przekroczenie → `failed`, `zip_limit_exceeded` z nazwą limitu; wpis ponad `import.max_file_bytes` → `too_large`. Scenariusze: TC-PD-WRK-003, TC-PD-SEC-002.
 31. ~~**Status przy samych pominięciach `duplicate`**~~ — ✅ **ROZSTRZYGNIĘTE (D150)**: `completed` z licznikiem `skipped_duplicates` (także nowe pliki + duplikaty). Scenariusze: TC-PD-WRK-008, TC-PD-IMP-005.
 32. ~~**Czyszczenie `reopened_at` po ponownym `won`**~~ — ✅ **ROZSTRZYGNIĘTE (D140)**: czyszczone przy ponownym `customers.deal.won` (v1). Scenariusz: TC-PD-NOSCHED-005.
@@ -1831,7 +1831,7 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka; jedyna d
 
 ### Luki rev 6–6a (rozstrzygnięcia rev 7 z rejestru @f81c58c)
 
-42. ~~**Rola `manager` bez feature'a `view`**~~ — ✅ **ROZSTRZYGNIĘTE (D167)**: rola `manager` nie zastępuje `view` (bez niego 403), daje tylko zakres `projects.manage` w swoim projekcie i `manage` w folderach `inherit`; żadnych innych feature'ów ani grantów ACL. Scenariusz: TC-PD-ACL-007.
+42. ~~**Rola `manager` bez feature'a `view`**~~ — ✅ **ROZSTRZYGNIĘTE (D167)**: rola `manager` nie zastępuje `view` (bez niego `403 FORBIDDEN`), daje tylko zakres `projects.manage` w swoim projekcie i `manage` w folderach `inherit`; żadnych innych feature'ów ani grantów ACL. Scenariusz: TC-PD-ACL-007.
 43. ~~**Wartości `retention.policy`**~~ — ✅ **ROZSTRZYGNIĘTE (D166)**: `later_of_both` (tylko przy obu datach), `warranty_end`, `rekojmia_end`, `manual`; brak wskazanej daty → brak granicy, wtedy D160 (bez skracania ustawionej). Scenariusz: TC-PD-RET-009.
 44. ~~**Prawa folderu `inherit` przy `projects.view_all` bez roli projektu**~~ — ✅ **ROZSTRZYGNIĘTE (D168)**: `read` w folderach `inherit` bez przodka `restricted`; powyżej `read` — rola albo grant ACL. Scenariusz: TC-PD-ACL-001.
 45. ~~**Podfolder `inherit` pod folderem `restricted`**~~ — ✅ **ROZSTRZYGNIĘTE (D169)**: wpisy `pd_folder_acl` najbliższego przodka `restricted`; role i `projects.view_all` nie poszerzają; folder najwyższego poziomu — mapowanie ról z D159. Scenariusz: TC-PD-ACL-002.
@@ -1893,7 +1893,7 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka; jedyna d
 | **D119** | Oryginał ZIP = dowód: kopia po stronie S3 jako niemutowalna rewizja w „00 Przetarg” przed rozpakowaniem; w quota („archiwum dowodowe”); sha256 w locie; duplikat → kopia pominięta; brak quota (110%) → `failed`/`quota` bez kopii i rozpakowania; staging w `{prefix}/org_{orgId}/tenant_{tenantId}/staging/{importId}/` usuwany strzeżoną funkcją | TC-PD-IMP-002, TC-PD-IMP-005, TC-PD-IMP-006, TC-PD-QUOTA-003, TC-PD-QUOTA-008, TC-PD-RET-005 | MVP; wniosek 1 rozstrzygnięty; rev 6: prefiks stagingu z segmentem tenanta |
 | **D120** | Progi pomiaru RAM dla ZIP 250 MB: RSS workera ≤ 256 MB, `MemAvailable` ≥ 300 MB, zero OOM i restartów, swap ≤ 512 MB; przekroczenie = FAIL → osobny kontener | TC-PD-PERF-003 | etap kodu; wniosek 23 rozstrzygnięty; rev 5a: warunek podniesienia domyślnego `import.zip_max_bytes` (D158) — TC-PD-PERF-003, TC-PD-WRK-009 |
 | **D121** | Usuwanie poza purge wyłącznie strzeżoną funkcją: klucze pod `{prefix}/org_{orgId}/tenant_{tenantId}/staging/{importId}/` importu tej organizacji i tenanta albo klucz sesji `expired` bez rewizji; klucz stagingu bez `org_…/tenant_…` i każdy inny → wyjątek; listowanie i usuwanie stagingu przez `assertS3ListPrefixScopedToTenant`; sweeper i `reserved → expired` pod advisory lockiem; log każdego usunięcia; wersjonowany bucket — wszystkie wersje; nic nie usuwa rewizji | TC-PD-RET-003, TC-PD-RET-005, TC-PD-RET-007, TC-PD-STOR-008, TC-PD-WRK-004, TC-PD-WRK-008, TC-PD-IMP-002, TC-PD-IMP-006 | MVP; wniosek 4 rozstrzygnięty; rev 6: pełny prefiks stagingu; rev 6a: skrót „`staging/`” = zawsze pełny prefiks |
-| **D122** | Purge tylko po potwierdzeniu: feature `project_delivery.storage.purge` (bez → 403), kod projektu (bez → 422 `PURGE_CONFIRMATION_REQUIRED`); worker purge (współbieżność 1): wszystkie wersje i markery, pusta lista = `purged`, dopiero wtedy poza quota; niepełne → `purge_failed`; audyt + event `project_delivery.storage.purged` z ID | TC-PD-RET-004, TC-PD-RET-008, TC-PD-QUOTA-005, TC-PD-ACL-005 | MVP; wniosek 3 rozstrzygnięty; luka 29 |
+| **D122** | Purge tylko po potwierdzeniu: feature `project_delivery.storage.purge` (bez → `403 FORBIDDEN`), kod projektu (bez → 422 `PURGE_CONFIRMATION_REQUIRED`); worker purge (współbieżność 1): wszystkie wersje i markery, pusta lista = `purged`, dopiero wtedy poza quota; niepełne → `purge_failed`; audyt + event `project_delivery.storage.purged` z ID | TC-PD-RET-004, TC-PD-RET-008, TC-PD-QUOTA-005, TC-PD-ACL-005 | MVP; wniosek 3 rozstrzygnięty; luka 29 |
 | **D123** | Import: wpis atomowy (rewizja albo pominięcie z powodem `quota`/`too_large`/`encrypted`/`unsupported_method`/`duplicate`/`error`); statusy `completed`/`partial`/`failed`/`cancelled`; rewizje zostają; duplikat sha256 w folderze pominięty; wznowienie od ostatniego pełnego wpisu | TC-PD-WRK-003, TC-PD-WRK-004, TC-PD-WRK-005, TC-PD-WRK-008, TC-PD-IMP-005, TC-PD-QUOTA-003 | MVP; wnioski 14, 15 rozstrzygnięte; luki 30, 31; rev 5: powód `unsafe_path` (D148), `zip_limit_exceeded` → `failed` (D150), duplikaty nie liczą się do `partial` — TC-PD-SEC-002, TC-PD-WRK-008 |
 | **D124** | sha256: przeglądarka nie liczy (MVP); worker checksum (`project_delivery:checksum`, współbieżność 1, strumieniowo) — NULL do czasu ustawienia, potem niezmienny; import w locie; ZIP czytany zakresami (`Range`) | TC-PD-REV-006, TC-PD-DOC-001, TC-PD-DOC-004, TC-PD-IMP-001, TC-PD-IMP-002 | MVP; wnioski 1, 7 rozstrzygnięte |
 | **D125** | `complete`: rozmiar z HeadObject; rozbieżność ponad tolerancję → 422 `UPLOAD_SIZE_MISMATCH`, bez rewizji, rezerwacja zwolniona, obiekt usuwa sweeper | TC-PD-REV-002, TC-PD-STOR-009, TC-PD-QUOTA-004 | MVP |
@@ -1906,8 +1906,8 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka; jedyna d
 | **D132** | Części postępowania: osobna inwestycja i deal na część, wspólny `tender_notice_number` (tylko do odczytu, zwykły indeks, bez unikalności, nie bierze udziału w dopasowaniu); kolejne ogłoszenie aktualizuje deal swojej części (klucz push postępowanie + część — etap kodu, D32); v1 identyfikator `bzp_notice_part` `{numer}#{część}`, bez `bzp_notice_number`; primary per inwestycja | TC-PD-PRJ-012, TC-PD-PRJ-011 | MVP; v1 identyfikator; aktywna bez warunku; wnioski 33, 34 rozstrzygnięte |
 | **D133** | Deal niewygrany → 422 `DEAL_NOT_WON`; oferta bez `primary` albo bez snapshotu (wersja robocza) → 422 `OFFER_NOT_PRIMARY`, bez fallbacku | TC-PD-PRJ-003 | MVP; wniosek 25 rozstrzygnięty |
 | **D134** | Zero relacji ORM i FK DB z `pd_*` do `pc_*`/`ps_*`/`customers_*`; FK-id + snapshot | TC-PD-PRJ-005 | MVP; wniosek 26 rozstrzygnięty |
-| **D135** | `projects.link_winning_offer` wymaga `project_delivery.projects.manage`, inaczej 403 | TC-PD-PRJ-010 | MVP; wniosek 27 rozstrzygnięty |
-| **D136** | Soft delete dokumentu wymaga `project_delivery.documents.delete` (domyślnie admin, employee → 403); obiekty S3 dalej w quota | TC-PD-RET-004, TC-PD-ACL-005 | MVP; wniosek 29 rozstrzygnięty (folder/projekt — wniosek 38) |
+| **D135** | `projects.link_winning_offer` wymaga `project_delivery.projects.manage`, inaczej `403 FORBIDDEN` | TC-PD-PRJ-010 | MVP; wniosek 27 rozstrzygnięty |
+| **D136** | Soft delete dokumentu wymaga `project_delivery.documents.delete` (domyślnie admin, employee → `403 FORBIDDEN`); obiekty S3 dalej w quota | TC-PD-RET-004, TC-PD-ACL-005 | MVP; wniosek 29 rozstrzygnięty (folder/projekt — wniosek 38) |
 | **D137** | Macierz 14 feature'ów modułu z `projects.delete` (tylko admin) i granty (jawna lista — D165; zasady `projects.delete` — D162) | TC-PD-ACL-005, TC-PD-ACL-006, TC-PD-SHARE-001 | MVP; v1; wniosek 20 rozstrzygnięty |
 | **D138** | Dokument-link: tylko `https:`, inne schematy → 422 | TC-PD-DOC-002 | MVP |
 | **D139** | Parametry limitów ZIP (`import.zip_max_bytes` domyślnie 250 MB, `zip_max_entries`, `zip_max_uncompressed_bytes`, `zip_max_ratio`); ZIP w ZIP jako plik; zaszyfrowany → `encrypted` | TC-PD-WRK-003, TC-PD-SEC-002, TC-PD-PERF-003 | MVP; wartość domyślna i jej zmiana — D158 |
@@ -1918,7 +1918,7 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka; jedyna d
 | **D144** | Klucz generuje serwer: `{prefix}/org_{orgId}/tenant_{tenantId}/proj_{projectId}/{random}` (segmenty według `key-scope.ts`; `{prefix}` znormalizowany; pusty prefiks → `org_…`; nazwa pliku w DB i `Content-Disposition`); pole klucza w body `POST /uploads` → 422 `FIELD_NOT_ALLOWED` | TC-PD-REV-002, TC-PD-DOC-001, TC-PD-TEN-003 | MVP; rev 6: segment tenanta |
 | **D145** | Presigned POST → 404 (brak trasy) | TC-PD-ACL-006 | MVP |
 | **D146** | Pole `sha256` w body `POST /uploads` → 422 `FIELD_NOT_ALLOWED` | TC-PD-REV-002 | MVP |
-| **D147** | Brak dostępu w ACL → 404 (jak nieistniejący/inna organizacja); brak feature'a → 403; folder widoczny bez `write` → 403, niewidoczny → 404; po odebraniu dostępu brak nowego URL | TC-PD-ACL-002, TC-PD-ACL-003, TC-PD-ACL-006 | MVP |
+| **D147** | Brak dostępu w ACL → 404 (jak nieistniejący/inna organizacja); brak feature'a → `403 FORBIDDEN`; folder widoczny bez `write` → `403 FORBIDDEN`, niewidoczny → 404; po odebraniu dostępu brak nowego URL | TC-PD-ACL-002, TC-PD-ACL-003, TC-PD-ACL-006 | MVP |
 | **D148** | Wpisy `..`, absolutne, symlink → pominięte z powodem `unsafe_path`, import trwa | TC-PD-SEC-002, TC-PD-WRK-008 | MVP |
 | **D149** | `complete` dla sesji `expired` → 409 `UPLOAD_SESSION_EXPIRED`; bez rewizji; rezerwacja już zwolniona; obiekt dla sweepera | TC-PD-STOR-008 | MVP; wniosek 28 rozstrzygnięty |
 | **D150** | Przekroczenie limitu ZIP → `failed`, `zip_limit_exceeded` z nazwą limitu, bez dalszych wpisów, rewizje zostają; wpis > `import.max_file_bytes` → `too_large`; duplikaty nie liczą się do `partial` (`completed` + `skipped_duplicates`) | TC-PD-WRK-003, TC-PD-WRK-008, TC-PD-IMP-005, TC-PD-SEC-002 | MVP; wnioski 30, 31 rozstrzygnięte; komunikat dla użytkownika — D158 (TC-PD-WRK-009) |
@@ -1931,15 +1931,15 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka; jedyna d
 | **D157** | Wysłanie transmittala z dokumentami bez wymaganej akceptacji → 409 `APPROVAL_PENDING` z listą; zamknięcia protokołu i jego akceptacji nie blokuje | TC-PD-APR-004 | v1 |
 | **D158** | Limit paczki ZIP: domyślne `import.zip_max_bytes` = 250 MB, administrator instancji może zmienić; podniesienie domyślnej dopiero po pomiarze RAM dla większej paczki (KA-6, progi D120); `zip_limit_exceeded` z komunikatem: nazwa i wartość limitu oraz wartość zmierzona (A: rozmiar paczki z `Content-Length`, bez nagłówka — „co najmniej X”; B–D: „co najmniej X”) i dwie drogi: ręczny upload (pojedynczo albo mniejsze ZIP-y) albo dokument-link (`kind = link`, `link_provider = generic`, `POST /documents/:id/links`, `https:` — D138) | TC-PD-WRK-009, TC-PD-WRK-003, TC-PD-PERF-003, TC-PD-SEC-002 | MVP; wnioski 40, 41 rozstrzygnięte |
 | **D159** | Role projektu `manager`/`member`/`viewer` (`pd_project_members.role`, unique `(project_id, user_id)`); RBAC decyduje co, członkostwo (albo `projects.view_all`) — gdzie, ACL — w którym folderze; `inherit`: `viewer` → `read`, `member` → `write`, `manager` → `manage`; `restricted`: tylko `pd_folder_acl` (`user`/`project_role`) | TC-PD-ACL-001, TC-PD-ACL-002, TC-PD-ACL-006, TC-PD-ACL-007 | MVP; wniosek 36 rozstrzygnięty; rev 7: z zastrzeżeniem D169 (folder najwyższego poziomu — mapowanie ról; pod `restricted` — wpisy przodka) |
-| **D160** | `read` = lista i pobranie; `write` = + upload, dokument-link, nowa rewizja; `manage` = + podfoldery i `folders.set_acl`; rola `manager` = `projects.manage` w swoim projekcie (edycja, członkowie, `projects.close` także `cancelled`, retencja tylko w górę — `RETENTION_BELOW_COMPANY_MINIMUM`, zdjęcie flagi); poza rolą: akceptacje, usuwanie, purge, ustawienia, szablony, linki; 403/404 wg D147 | TC-PD-ACL-007, TC-PD-RET-009, TC-PD-RET-010, TC-PD-PRJ-008 | MVP; wnioski 36, 42, 43; dostęp RBAC `projects.manage` tylko z członkostwem albo `projects.view_all` (D159, D147) — TC-PD-PRJ-008; dolna granica retencji doprecyzowana przez D166 (TC-PD-RET-009) |
-| **D161** | `deal_reopened_at` znika sama przy powrocie deala do `won` (`customers.deal.won`, `customers.deal.updated`; persistent, idempotentnie); ręcznie `projects.reopen_flag_clear` — rola `manager` albo `projects.manage`, inni 403; brak powodu → 422 `REASON_REQUIRED`; każde zdjęcie w `audit_logs` (`system`/`deal_won` albo użytkownik/powód) | TC-PD-PRJ-008 | MVP; wniosek 37 rozstrzygnięty |
+| **D160** | `read` = lista i pobranie; `write` = + upload, dokument-link, nowa rewizja; `manage` = + podfoldery i `folders.set_acl`; rola `manager` = `projects.manage` w swoim projekcie (edycja, członkowie, `projects.close` także `cancelled`, retencja tylko w górę — `RETENTION_BELOW_COMPANY_MINIMUM`, zdjęcie flagi); poza rolą: akceptacje, usuwanie, purge, ustawienia, szablony, linki; `403 FORBIDDEN`/404 wg D147 | TC-PD-ACL-007, TC-PD-RET-009, TC-PD-RET-010, TC-PD-PRJ-008 | MVP; wnioski 36, 42, 43; dostęp RBAC `projects.manage` tylko z członkostwem albo `projects.view_all` (D159, D147) — TC-PD-PRJ-008; dolna granica retencji doprecyzowana przez D166 (TC-PD-RET-009) |
+| **D161** | `deal_reopened_at` znika sama przy powrocie deala do `won` (`customers.deal.won`, `customers.deal.updated`; persistent, idempotentnie); ręcznie `projects.reopen_flag_clear` — rola `manager` albo `projects.manage`, inni `403 FORBIDDEN`; brak powodu → 422 `REASON_REQUIRED`; każde zdjęcie w `audit_logs` (`system`/`deal_won` albo użytkownik/powód) | TC-PD-PRJ-008 | MVP; wniosek 37 rozstrzygnięty |
 | **D162** | `folders.delete`: `documents.delete` + `manage`, niepusty → 409 `FOLDER_NOT_EMPTY`; `projects.delete`: feature `projects.delete` (tylko admin, nie z roli `manager`), kaskadowo w jednej transakcji, undo; pliki w S3 i quota, fizycznie tylko purge; zwykły użytkownik zamyka projekt jako `cancelled` | TC-PD-RET-010, TC-PD-ACL-005, TC-PD-ACL-007 | MVP; wniosek 38 rozstrzygnięty |
 | **D163** | Rewizja niemutowalna w kolumnach treści; zmienne tylko `review_status`, `approved_*`, `deleted_at`; zmiana na poziomie serwisu/komendy → 409 `REVISION_IMMUTABLE`; pola w body → 422 `FIELD_NOT_ALLOWED`; jednorazowy zapis `sha256` i `content_type` przez worker | TC-PD-REV-001, TC-PD-REV-006 | MVP; wniosek 39 rozstrzygnięty |
 | **D164** | `sizeBytes` > `docs.max_file_bytes` → 413 `FILE_TOO_LARGE` bez sesji i rezerwacji; limit pliku przed quota; po `complete` → `UPLOAD_SIZE_MISMATCH`; import → `too_large` w raporcie | TC-PD-STOR-009 | MVP; wniosek 39 rozstrzygnięty |
 | **D165** | Granty `employee`: `view`, `projects.create`, `documents.upload`, `imports.run`, v1 `approvals.review`; bez: `projects.view_all`, `projects.manage`, `projects.delete`, `documents.approve`, `documents.delete`, `templates.manage`, `settings.manage`, `storage.purge`, v1 `share_links.manage`; admin wszystkie | TC-PD-ACL-005, TC-PD-RET-004, TC-PD-RET-010 | MVP; v1; wniosek 20 rozstrzygnięty |
 | **D166** | Dolna granica retencji dla `manager`: `later_of_both` → późniejsza data, tylko gdy obie ustawione; `warranty_end` / `rekojmia_end` → wskazana data; brak wskazanej daty albo `manual` → granicy nie ma, wtedy D160 (bez skracania ustawionej); poniżej granicy → 422 `RETENTION_BELOW_COMPANY_MINIMUM` | TC-PD-RET-009 | MVP; wniosek 43 rozstrzygnięty |
-| **D167** | Rola `manager` nie zastępuje `view` (bez niego brak dostępu → 403); daje tylko zakres `projects.manage` w swoim projekcie i `manage` w folderach `inherit` (z zastrzeżeniem D169); żadnych innych feature'ów ani grantów `pd_folder_acl` | TC-PD-ACL-007, TC-PD-ACL-002 | MVP; wniosek 42 rozstrzygnięty |
-| **D168** | `projects.view_all` bez roli: `read` w folderach `inherit` bez przodka `restricted`; z przodkiem `restricted` — D169; `write`/`manage` tylko z roli albo grantu ACL; brak feature'a → 403 | TC-PD-ACL-001, TC-PD-ACL-002 | MVP; wniosek 44 rozstrzygnięty |
+| **D167** | Rola `manager` nie zastępuje `view` (bez niego brak dostępu → `403 FORBIDDEN`); daje tylko zakres `projects.manage` w swoim projekcie i `manage` w folderach `inherit` (z zastrzeżeniem D169); żadnych innych feature'ów ani grantów `pd_folder_acl` | TC-PD-ACL-007, TC-PD-ACL-002 | MVP; wniosek 42 rozstrzygnięty |
+| **D168** | `projects.view_all` bez roli: `read` w folderach `inherit` bez przodka `restricted`; z przodkiem `restricted` — D169; `write`/`manage` tylko z roli albo grantu ACL; brak feature'a → `403 FORBIDDEN` | TC-PD-ACL-001, TC-PD-ACL-002 | MVP; wniosek 44 rozstrzygnięty |
 | **D169** | Folder `inherit` dziedziczy po rodzicu: najwyższy poziom — projekt (mapowanie ról D159); z przodkiem `restricted` — wpisy `pd_folder_acl` najbliższego przodka `restricted`, w tym wpisy `principal_type = project_role` (np. `viewer` = `read` → viewer ma `read`); role bez wpisu i `view_all` nie poszerzają | TC-PD-ACL-002, TC-PD-ACL-007, TC-PD-ACL-001 | MVP; wnioski 45, 46 rozstrzygnięte |
 | **D186** | Statusy projektu `active` (domyślny), `on_hold`, `completed`, `cancelled` (CHECK); `active` ⇄ `on_hold` i powrót do `active` — `projects.set_status` z `projects.manage`, bez powodu, wpis w `audit_logs`; do `completed`/`cancelled` — `projects.close` (D160) z powodem (brak/pusty → 422 `REASON_REQUIRED`), wpis w `audit_logs` z autorem i powodem; rola `manager` obiema komendami; niedozwolone → 422 `INVALID_STATUS_TRANSITION`; archiwizacja v2 tylko z `completed`/`cancelled`, inaczej 422 `INVALID_STATUS_TRANSITION`; soft delete bez zmian (D162) | TC-PD-PRJ-014 | MVP, v2 (archiwizacja); rejestr @fa3c15d (zmiana 2026-10-31) |
 | **D188** | Usunięcie deala z projektem: bez kaskady (D134), `deal_reopened_at` i event `project_delivery.project.deal_reopened` (wzorzec D141); flagi zostają; przywrócenie deala → event `project_delivery.project.deal_restored`, flaga bez automatycznego czyszczenia, zdjęcie `projects.reopen_flag_clear` (D161) z audytem; czyszczenie przy `won` bez zmian; n8n deala nie odtwarza (D35); część harmonogramu — plan costing (TC-EXEC-006) | TC-PD-PRJ-015 | MVP (projekt); rejestr @49384e6 |
@@ -1963,6 +1963,13 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka; jedyna d
 ---
 
 ## Changelog
+
+### Rev 9d — 2026-10-31 (zapis `403 FORBIDDEN`; rejestr @cdf27dc, PR #38)
+
+- Niezależna sesja planu (P4): jedyne źródło — `.ai/decisions.md` @cdf27dc; bez speki i bez briefów
+- D122, D135, D136, D147, D160, D161, D168 (zmiana 2026-10-31, zapis `403 FORBIDDEN` bez zmiany sensu): asercje braku uprawnień w TC, kryteriach, wnioskach i załączniku zapisane jako `403 FORBIDDEN` — 40 linii
+- Bez zmian: odpowiedzi 403 samego S3 (anonimowy GET, presigned po wygaśnięciu, zły `Content-Type`, nieważny podpis) — to nie brak uprawnienia OM; stare wpisy changelogu
+- Nowych TC brak — doprecyzowania nie zmieniają reguł; liczba scenariuszy bez zmian: 125
 
 ### Rev 9c — 2026-10-31 (doprecyzowanie D186; rejestr @fa3c15d, PR #36)
 
