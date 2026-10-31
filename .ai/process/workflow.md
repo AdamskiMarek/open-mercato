@@ -1,6 +1,6 @@
 # Przepływ pracy Klin #1 (od speki do merge)
 
-**Status:** 2026-10-31 (P18; praca w ClickUp — P22; zmiana 2026-10-31: „zrobione” dopiero po merge PR i PASS Weryfikatora; subtaski — budujący story, statusy „otwarte”/„zamknięte”; kolejność merge → werdykt Weryfikatora → zamknięcie; role Cezar / Kod / Weryfikator — P23). Opis kolejności kroków i ról. Szczegóły kroków: bramka — `readiness-gate.md` (P13), review — `review-format.md` (P15), zasady agentów — `../agent-rules.md` (P17). Źródło decyzji: `.ai/decisions.md` (P12).
+**Status:** 2026-10-31 (P18; praca w ClickUp — P22; zmiana 2026-10-31: „zrobione” dopiero po merge PR i PASS Weryfikatora; subtaski — budujący story, statusy „otwarte”/„zamknięte”; kolejność merge → werdykt Weryfikatora → zamknięcie; role Cezar / Kod / Weryfikator — P23; zmiana 2026-10-31: etykiety QA w forku, workflow Cezara `om-story` — Koordynator (proces, Z7) 2026-10-31). Opis kolejności kroków i ról. Szczegóły kroków: bramka — `readiness-gate.md` (P13), review — `review-format.md` (P15), zasady agentów — `../agent-rules.md` (P17). Źródło decyzji: `.ai/decisions.md` (P12).
 
 ## Role (P23)
 
@@ -33,7 +33,7 @@ flowchart TD
 | 2 | spec-check | Kod (osobna sesja) | pliki z repo przy SHA heada (`git show`) | PASS, 0 FAIL bez flag |
 | 3 | Bramka gotowości | osobna sesja tylko do odczytu, uruchomiona przez Kod | speka, plan, rejestr, brief, `architecture.md` | PASS / CONCERNS / FAIL (P13) |
 | 4 | „implementujemy” | Marek, przez Koordynatora | werdykt bramki PASS | zgoda na kod (P3) |
-| 5 | Implementacja (kod) i review | kod: Cezar albo jego agent kodujący (P2); review: osobna sesja uruchomiona przez Kod, w 3 grupach (P15) | speka, TC | PR z kodem i testami |
+| 5 | Implementacja (kod) i review | kod: Cezar albo jego agent kodujący (P2), w Cezarze workflow `om-story` (`../cezar/README.md`, zmiana 2026-10-31); review: osobna sesja uruchomiona przez Kod, w 3 grupach (P15) | speka, TC | PR z kodem i testami |
 | 6 | Merge | wykonawca, dopiero po „merguj” Marka albo w ramach stałej zgody na PR doc-only (P5) | PR po review (krok 5) | merge do `develop_OM_CRM` w forku (P6) |
 | 7 | Weryfikacja na TC | Weryfikator (QA) | TC zadania + środowisko testowe (instancja testowa open-mercato.pl, P7) ze zmergowanym kodem | werdykt per TC: spełnione / niespełnione, z dowodem |
 | 8 | Zamknięcie zadania (zrobione) | Koordynator | merge (krok 6) i werdykt Weryfikatora „spełnione” (krok 7) | zadanie zamknięte, story „zrobione” (P22) |
@@ -52,6 +52,22 @@ Warunki kolejności (P18, zmiana 2026-10-31; źródło: Marek 2026-10-31 (via Ko
 - Nie wdraża, nie merguje i nie ma dostępu do produkcji (P18). Niespełnione TC wracają do kroku 5 z listą TC i dowodem (poprawka kolejnym PR, bo kod jest już zmergowany — kroki 6–8).
 - Brak TC dla zachowania albo TC sprzeczne z D → ustalenie „Do poprawy” dla niezależnej sesji planu (treść TC zmienia tylko ona, `agent-rules.md` Z11); pytanie biznesowe → „Do decyzji człowieka”, przez Koordynatora (P1, P15).
 - PR doc-only (bez kodu) nie wymaga Weryfikatora: kontrolą jest spec-check bez flag @head.
+
+## Etykiety QA w forku
+
+Zmiana 2026-10-31 — źródło: Koordynator (proces, Z7) 2026-10-31.
+
+Root `AGENTS.md` (sekcja o etykietach PR) i skille `om-pr-autopilot` / `om-auto-*` zakładają ręczne QA przed merge: PR z `needs-qa` nie może być zmergowany bez `qa-approved`. W forku (PR-y do `develop_OM_CRM`) kolejność jest inna (P18): Kod PASS (review, P15) → „merguj” od Marka (P5) → merge → Weryfikator na TC → zamknięcie (P22). Tę bramkę przed merge pełni „merguj”, a nie etykieta; werdykt QA przychodzi po merge. PR-y do upstream (`open-mercato/open-mercato`) podlegają `AGENTS.md` bez zmian.
+
+| Etykieta / zachowanie upstream | W forku |
+|---|---|
+| `needs-qa` (ustawiają `om-auto-*`, `om-pr-autopilot` przy zmianach UI) | Informacja: „story wymaga werdyktu Weryfikatora po merge” (P18). Może zostać na PR. Sama etykieta ani jej brak nie daje zgody na merge — zgodą jest tylko „merguj” (P5) albo stała zgoda na PR doc-only (krok 6). |
+| `qa-approved`, `qa-self-verified` | Żaden agent (Cezar, jego agent kodujący, Kod, `om-auto-*`, `om-pr-autopilot`) ich nie ustawia. Po merge to zapis werdyktu „spełnione” Weryfikatora z dowodem (P7) na zmergowanym PR; ustawia Weryfikator albo Koordynator. Zamknięcie story dopiero po tym werdykcie (P22). |
+| `qa` (ręczne QA w toku) | Nie używamy: w forku nie ma kolejki ręcznego QA przed merge. |
+| `qa-failed` | Po merge: zapis werdyktu „niespełnione”. Poprawka albo revert kolejnym PR; nic z tej zmiany nie trafia na produkcję (P18, warunek 2). |
+| `skip-qa` | PR doc-only (bez kodu): Weryfikator nie jest potrzebny, kontrolą jest spec-check bez flag @head (sekcja „Weryfikator (QA)”). |
+| Merge przez skille (`merge-queue`, `om-approve-merge-pr`, `om-merge-buddy`, krok merge w `om-pr-autopilot`) | Skille zatrzymują się przed merge i raportują „gotowe do »merguj«”. Etykieta ani zielone checki nie zastępują „merguj” (P5). |
+| Cezar, workflow `om-story` (`../cezar/README.md`) | Kończy się draft PR bez etykiet QA. Nie merguje. |
 
 ## Praca w ClickUp (P22)
 
