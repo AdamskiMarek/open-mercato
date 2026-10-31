@@ -1,6 +1,6 @@
 # Przepływ pracy Klin #1 (od speki do merge)
 
-**Status:** 2026-10-31 (P18; praca w ClickUp — P22; zmiana 2026-10-31: „zrobione” dopiero po merge PR i PASS Weryfikatora). Opis kolejności kroków i ról. Szczegóły kroków: bramka — `readiness-gate.md` (P13), review — `review-format.md` (P15), zasady agentów — `../agent-rules.md` (P17). Źródło decyzji: `.ai/decisions.md` (P12).
+**Status:** 2026-10-31 (P18; praca w ClickUp — P22; zmiana 2026-10-31: „zrobione” dopiero po merge PR i PASS Weryfikatora; subtaski — Kod, statusy „otwarte”/„zamknięte”). Opis kolejności kroków i ról. Szczegóły kroków: bramka — `readiness-gate.md` (P13), review — `review-format.md` (P15), zasady agentów — `../agent-rules.md` (P17). Źródło decyzji: `.ai/decisions.md` (P12).
 
 ## Przepływ
 
@@ -45,6 +45,7 @@ flowchart TD
 - GitHub zostaje na kod i PR-y; każde story linkuje swój PR.
 - Story przechodzi do „zrobione” dopiero po merge PR (P5) i werdykcie PASS Weryfikatora („spełnione”, P18). Merge nie dostaje osobnego statusu: story z werdyktem PASS i niezmergowanym PR zostaje w „weryfikacja” do merge (zmiana 2026-10-31).
 - Speki, plany testów i PR doc-only nie wymagają story (`agent-rules.md` Z13).
+- Subtaski zakłada sam Kod jako kroki w ramach story. Jedyne statusy subtasków: „otwarte” i „zamknięte” (zmiana 2026-10-31; źródło: Koordynator 2026-10-31 (proces, Z7)).
 
 ```mermaid
 flowchart LR
