@@ -6,7 +6,7 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-31 |
-| **Rewizja** | 2026-10-31 (rev 2 — poprawki po review PR #33: B2–B5, N1–N16; decyzje D170–D184 zaktualizowane) |
+| **Rewizja** | 2026-10-31 (rev 3 — ostatnie łatki po review rev 2 PR #33; wcześniej rev 2: B2–B5, N1–N16) |
 | **Faza** | v2 |
 | **Moduł** | `crm_followups` (`apps/mercato/src/modules/crm_followups`; prefiks tabel `fu_`), opcjonalny per organizacja (D47) |
 | **Zależności upstream** | `customers` (deale, interakcje, komentarze, ustawienia), `configs` (ModuleConfigService), `audit_logs`, `notifications`, `@open-mercato/queue`, `auth`/`directory` (scope), opcjonalnie `@open-mercato/scheduler` (wyzwalacz cron, D180) |
@@ -72,14 +72,14 @@ Undo: `approve` dla zadania/przypomnienia cofa się przez undo komendy `customer
 ### 0.3 Zdarzenia i subskrypcje
 
 - Emitowane (tylko ID, bez treści szkicu): `crm_followups.run.finished`, `crm_followups.draft.created`, `crm_followups.draft.approved`, `crm_followups.draft.rejected`.
-- Subskrypcje (`persistent: true`): `customers.interaction.created`, `customers.interaction.completed`, `customers.email.linked` (maile przychodzące i wychodzące — handler zapisuje interakcję `email` per osoba i nie emituje `interaction.created`), `customers.comment.created`, `customers.todo.created`, `customers.activity.created`, `customers.deal.updated` (tylko zmiana etapu), `customers.deal.won`, `customers.deal.lost`, `customers.deal.deleted`, `customers.person.deleted`, `customers.company.deleted` → komenda `crm_followups.drafts.supersede` dla otwartego szkicu obiektu (D174). Zdarzenie na osobie lub firmie zamyka też otwarte szkice deali, z którymi jest powiązana (`customer_deal_people`, `customer_deal_companies`; D172).
+- Subskrypcje (`persistent: true`): `customers.interaction.created`, `customers.interaction.completed`, `customers.email.linked` (maile przychodzące i wychodzące — handler zapisuje interakcję `email` per osoba i nie emituje `interaction.created`), `customers.comment.created`, `customers.todo.created`, `customers.activity.created`, `customers.deal.updated` (tylko zmiana etapu), `customers.deal.won`, `customers.deal.lost`, `customers.deal.deleted`, `customers.person.deleted`, `customers.company.deleted` → komenda `crm_followups.drafts.supersede` dla otwartego szkicu obiektu (D174). Zdarzenie na osobie lub firmie wyzwala też sprawdzenie otwartych szkiców deali, z którymi jest powiązana (`customer_deal_people`, `customer_deal_companies`), ale tylko gdy wiersz ma `deal_id IS NULL OR deal_id = <ten deal>` (D172). Subscriber niczego nie zamyka „na ślepo”: stosuje predykat z §4.3.
 - Eventy są przyspieszeniem, nie jedynym mechanizmem: rekoncyliacja na początku przebiegu (§4.3) zamyka szkice, których event zginął.
 
 ### 0.4 Włączanie per organizacja (D47, D178)
 
 Moduł włącza build (`apps/mercato/src/modules.ts`). W organizacji działa po ustawieniu `followups.enabled = true` (ModuleConfigService, `org:{id}:settings`, D69). `feature_toggles` tylko jako globalny wyłącznik per tenant.
 
-`setup.ts` **nie** zakłada joba schedulera. Job `scheduled_jobs` organizacji zakłada komenda `crm_followups.settings.update` przy przełączeniu `followups.enabled` na `true`, a usuwa (soft delete) przy przełączeniu na `false` — wyłączona organizacja nie dostaje nocnych przebiegów.
+`setup.ts` **nie** zakłada joba schedulera. Job `scheduled_jobs` organizacji (jeden per organizacja, `scope_type = organization`) zakłada komenda `crm_followups.settings.update` przy przełączeniu `followups.enabled` na `true`, a usuwa (soft delete) przy przełączeniu na `false` — wyłączona organizacja nie dostaje nocnych przebiegów. Ponowne włączenie przywraca usunięty job organizacji z jego `schedule_value`, więc godzina ustawiona przez administratora nie ginie; nowy job z `0 3 * * *` powstaje tylko przy pierwszym włączeniu. Gdy moduł `scheduler` jest wyłączony w buildzie, komenda ustawień pomija job bez błędu (zapis ustawień się udaje; drogą zastępczą jest n8n → endpoint).
 
 **Przebieg przy `followups.enabled = false` (wybrany wariant, N16):** wyzwalacz spoza schedulera (webhook, agent, CLI) albo spóźniony job dostaje wpis `fu_runs` ze statusem `skipped` i `skip_reason = 'disabled'`, bez szkiców i bez powiadomień; endpoint zwraca ten `runId`. Powód: wywołujący (n8n, agent) widzi ślad i przyczynę, a ten sam `run_key` jest idempotentny. Menu i trasy szkiców przy wyłączonym module są zablokowane.
 
@@ -161,6 +161,7 @@ Szkic zawiera dane osobowe (RODO): `payload` (w tym adres odbiorcy) i `target_la
 | `trigger_source` | text CHECK `scheduler \| webhook \| agent \| cli` | |
 | `status` | text CHECK `running \| finished \| failed \| skipped` | |
 | `skip_reason` | text NULL CHECK `disabled \| concurrent` | przy `skipped` (D180, §0.4) |
+| `heartbeat_at` | timestamptz NULL | aktualizowany po każdej partii; od niego liczony stale (D180) |
 | `started_at`, `finished_at` | timestamptz | |
 | `counters` | jsonb | `scanned`, `created` per `kind` i `target_type`, `superseded_reconciled`, `skipped_open_draft`, `skipped_muted`, `skipped_planned`, `skipped_contact_has_deal_draft`, `skipped_limit`, `errors` |
 | `note` | text | krótka notka (D182) |
@@ -182,7 +183,7 @@ Dlaczego nie `progress_jobs.result_summary`: ProgressJob opisuje zadanie uruchom
 **Przetarg z częściami i nakładanie się deal/kontakt — wariant tymczasowy do odpowiedzi na Q-FU-5 (D173):**
 
 - Każda część to osobny deal (D31, D132), więc dostaje osobny szkic. Bez grupowania po `tender_notice_number` — wymagałoby zależności od `project_costing` (`pc_investments`), sprzecznej z kierunkiem zależności.
-- Przebieg najpierw tworzy szkice deali, potem kontaktów. Szkic kontaktu (osoby) jest pomijany (`skipped_contact_has_deal_draft`), jeśli ta osoba ma już w tym przebiegu szkic deala: jest w `customer_deal_people` deala, który dostał szkic, albo jest adresatem jego maila. Firma analogicznie przez `customer_deal_companies`.
+- Przebieg najpierw tworzy szkice deali, potem kontaktów. Szkic kontaktu (osoby) jest pomijany (`skipped_contact_has_deal_draft`), jeśli ta osoba ma otwarty szkic deala — utworzony w tym przebiegu **albo w którymś z wcześniejszych**: jest w `customer_deal_people` deala z otwartym szkicem albo jest adresatem jego maila. Firma analogicznie przez `customer_deal_companies`.
 - Jedna osoba może w tym wariancie dostać kilka szkiców deali jednej nocy (po jednym na część). Limit na osobę to pytanie Q-FU-5.
 
 ### 3.2 Definicja aktywności (D172)
@@ -190,7 +191,7 @@ Dlaczego nie `progress_jobs.result_summary`: ProgressJob opisuje zadanie uruchom
 `last_activity_at` obiektu = maksimum z:
 
 1. `customer_interactions` powiązanych z obiektem (deal: `deal_id`; kontakt: `entity_id`), bez usuniętych: `occurred_at` dla zakończonych, `created_at` dla pozostałych (obejmuje maile przychodzące i wychodzące zapisane jako interakcje `email` oraz todo — interakcje `task`);
-1a. **dla deala także** interakcje (w tym maile, które handler zapisuje per osoba bez `deal_id`) i komentarze osób z `customer_deal_people` oraz firm z `customer_deal_companies` tego deala, liczone od `created_at` powiązania (wcześniejsza korespondencja z tą osobą nie dotyczy deala);
+1a. **dla deala także** interakcje (w tym maile, które handler zapisuje per osoba bez `deal_id`) i komentarze osób z `customer_deal_people` oraz firm z `customer_deal_companies` tego deala, liczone od `created_at` powiązania (wcześniejsza korespondencja z tą osobą nie dotyczy deala), **tylko wiersze z `deal_id IS NULL OR deal_id = <ten deal>`** ([`customer_interactions.deal_id` l.661](https://github.com/AdamskiMarek/open-mercato/blob/41549820a198aea08a0ab9f36271a704439889cd/packages/core/src/modules/customers/data/entities.ts#L661), [`customer_comments.deal_id` l.761](https://github.com/AdamskiMarek/open-mercato/blob/41549820a198aea08a0ab9f36271a704439889cd/packages/core/src/modules/customers/data/entities.ts#L761)). Telefon u zamawiającego przypięty do przetargu A nie resetuje jego przetargu B. Aktywność bez `deal_id` liczy się dla wszystkich otwartych deali tej osoby lub firmy — ostrożniej: mniej szkiców, bez spamu (Cezar 2026-10-31 (techniczne); zamyka Q-FU-7, R-FU-11);
 2. `customer_activities` (legacy): `occurred_at`, a gdy brak — `created_at`;
 3. `customer_comments` obiektu: `created_at`;
 4. dla deala: ostatnie `customer_deal_stage_transitions.transitioned_at` (jak `stuckDeals.ts`); uwaga: `@Unique(deal, stageId)` — powrót na wcześniej odwiedzony etap nie tworzy wiersza i nie odświeża daty (R-FU-10);
@@ -199,11 +200,11 @@ Dlaczego nie `progress_jobs.result_summary`: ProgressJob opisuje zadanie uruchom
 
 **Nie** liczymy `updated_at` deala ani kontaktu: push z n8n i automatyczne zmiany pól (D34) aktualizują rekord bez kontaktu z klientem.
 
-Obiekt kwalifikuje się, gdy `now − last_activity_at ≥ N` (N = `followups.inactivity_days`, dni kalendarzowe w strefie `followups.timezone`, liczone jak w `lib/localDay.ts`) **i** nie ma zaplanowanej przyszłej interakcji w statusie nieterminalnym (todo, spotkanie, telefon z `scheduled_at ≥ now`; dla deala także na osobach i firmach deala). Zaplanowana przyszła interakcja liczy się jako aktywność — następny krok już jest, więc obiekt jest pomijany (`skipped_planned`).
+Obiekt kwalifikuje się, gdy `now − last_activity_at ≥ N` (N = `followups.inactivity_days`, dni kalendarzowe w strefie `followups.timezone`, liczone jak w `lib/localDay.ts`) **i** nie ma zaplanowanej przyszłej interakcji w statusie nieterminalnym (todo, spotkanie, telefon z `scheduled_at ≥ now`; dla deala także na osobach i firmach deala, z tym samym filtrem `deal_id IS NULL OR deal_id = <ten deal>`). Zaplanowana przyszła interakcja liczy się jako aktywność — następny krok już jest, więc obiekt jest pomijany (`skipped_planned`).
 
 ### 3.3 Kolejność i limity
 
-Kolejność kroków przebiegu: (1) rekoncyliacja otwartych szkiców (§4.3); (2) deale; (3) kontakty z pominięciem osób/firm ze szkicem deala w tym przebiegu (§3.1). W obrębie typu obiekty sortowane rosnąco po `last_activity_at` (najdłużej zaniedbane najpierw). Limit `followups.max_drafts_per_run` (domyślnie 200 na przebieg na firmę) i twardy limit instancji (§8.1); obiekty ponad limit liczone w `skipped_limit` i podane w notce (§9), dostaną szkic w kolejnym przebiegu. Przetwarzanie partiami (`OM_CRM_FOLLOWUPS_SCAN_BATCH_SIZE`), zapytania z indeksami po `organization_id`.
+Kolejność kroków przebiegu: (1) rekoncyliacja otwartych szkiców (§4.3); (2) deale; (3) kontakty z pominięciem osób/firm z otwartym szkicem deala — z tego albo wcześniejszego przebiegu (§3.1). W obrębie typu obiekty sortowane rosnąco po `last_activity_at` (najdłużej zaniedbane najpierw). Limit `followups.max_drafts_per_run` (domyślnie 200 na przebieg na firmę) i twardy limit instancji (§8.1); obiekty ponad limit liczone w `skipped_limit` i podane w notce (§9), dostaną szkic w kolejnym przebiegu. Przetwarzanie partiami (`OM_CRM_FOLLOWUPS_SCAN_BATCH_SIZE`), zapytania z indeksami po `organization_id`.
 
 ## 4. Szkice (D174, D177, D184)
 
@@ -211,11 +212,11 @@ Kolejność kroków przebiegu: (1) rekoncyliacja otwartych szkiców (§4.3); (2)
 
 Reguła domyślna, w kolejności:
 
-1. **przypomnienie o terminie** — gdy deal ma termin w horyzoncie `followups.reminder_horizon` (domyślnie 7, w dniach kalendarzowych): `expected_close_at` albo termin składania ofert z pola własnego deala o kluczu `followups.reminder_term_field_key` (domyślnie `cf_offer_deadline`; definicja pola rozwiązywana po kluczu, bez UUID; brak pola → tylko `expected_close_at`); szkic interakcji z `scheduled_at` przed terminem i `reminder_minutes`;
+1. **przypomnienie o terminie** — gdy deal ma termin w horyzoncie `followups.reminder_horizon` (domyślnie 7, w dniach kalendarzowych): `expected_close_at` albo termin składania ofert z pola własnego deala o kluczu `followups.reminder_term_field_key` (domyślnie `cf_deadline` — termin składania ofert, który push n8n zapisuje z `notices.submitting_offers_date`; N8N-workflows `docs/e_zamowienia_om_push.md` l.22, `sql/2026-10-e_zamowienia_stage2_om_batch_queries.sql` l.131, l.140; definicja pola rozwiązywana po kluczu, bez UUID; brak pola → tylko `expected_close_at`). Dla deali z n8n `expected_close_at` to ten sam termin (UTC), więc oba źródła dają tę samą datę; dzień liczony w `followups.timezone`; szkic interakcji z `scheduled_at` przed terminem i `reminder_minutes`;
 2. **mail** — gdy obiekt ma osobę kontaktową z adresem e-mail (osoba bezpośrednio, dla deala z `customer_deal_people`, dla firmy osoba powiązana) **i** właściciel ma podłączoną skrzynkę (`communication_channels`);
 3. **zadanie** — w każdym innym przypadku („zadzwoń / sprawdź status”).
 
-Kolejność rodzajów zostaje (Cezar 2026-10-31). Lista dozwolonych rodzajów per firma: `followups.kinds`. Przypomnienie powstaje dziś tylko dla obiektu bezczynnego; czy ma działać niezależnie od bezczynności (aktywny deal z terminem jutro) — Q-FU-6.
+Kolejność rodzajów zostaje (Cezar 2026-10-31). Reguła przypomnień jest zależna od Q-FU-6. Lista dozwolonych rodzajów per firma: `followups.kinds`. Przypomnienie powstaje dziś tylko dla obiektu bezczynnego; czy ma działać niezależnie od bezczynności (aktywny deal z terminem jutro) — Q-FU-6.
 
 ### 4.2 Treść (D184)
 
@@ -224,8 +225,9 @@ Szablony per `kind` × `target_type`, i18n pl/en w kodzie modułu, nadpisywalne 
 ### 4.3 Idempotencja szkiców (D174)
 
 - Najwyżej jeden otwarty szkic na obiekt: częściowy unikalny indeks (§2.2). Kolejny przebieg pomija obiekt z otwartym szkicem (`skipped_open_draft`).
-- Pojawienie się aktywności (§0.3, w tym `customers.email.linked`, `customers.comment.created`, `customers.todo.created`) zamyka otwarty szkic jako `superseded` (`superseded_reason = 'activity'`) — szkic przestał być potrzebny.
-- **Rekoncyliacja na początku każdego przebiegu:** zanim worker policzy kandydatów, zamyka jako `superseded` każdy otwarty szkic organizacji, którego obiekt ma aktywność (§3.2) nowszą niż `created_at` szkicu (`reconciled`) albo przestał się kwalifikować — deal zamknięty lub usunięty, obiekt poza zakresem ustawień (`not_eligible`). Zgubiony event nie zostawia wiszącego szkicu, a częściowy unikalny indeks nie blokuje nowego. Licznik `superseded_reconciled`.
+- **Jeden predykat zamknięcia (D174):** otwarty szkic zamykamy jako `superseded`, gdy obiekt **teraz** nie kwalifikuje się wg §3.2 — bezczynność < N (aktywność liczona z `occurred_at`/`created_at` jak w §3.2), zaplanowana przyszła interakcja, deal zamknięty, obiekt usunięty albo poza zakresem ustawień. Ten sam predykat stosuje subscriber i rekoncyliacja.
+- **Event tylko wyzwala sprawdzenie** (§0.3, w tym `customers.email.linked`, `customers.comment.created`, `customers.todo.created`); `superseded_reason = 'activity'`. Przykłady: stary wątek mailowy dołączony wstecz (data sprzed N) — obiekt dalej bezczynny, szkic zostaje; telefon z wczoraj wpisany dziś po nocnym przebiegu — bezczynność < N, szkic zamknięty.
+- **Rekoncyliacja na początku każdego przebiegu:** zanim worker policzy kandydatów, stosuje ten sam predykat do każdego otwartego szkicu organizacji (`superseded_reason = 'reconciled'` dla aktywności, `not_eligible` dla zamknięcia, usunięcia lub zakresu). Zgubiony event nie zostawia wiszącego szkicu, a częściowy unikalny indeks nie blokuje nowego. Licznik `superseded_reconciled`.
 - Powtórzenie tego samego przebiegu (`run_key`) nie tworzy nic nowego (D180).
 
 ## 5. Decyzja użytkownika (D175, D176)
@@ -238,7 +240,9 @@ Strona `/backend/crm-followups` (DataTable z `packages/ui`): filtry status, rodz
 
 - **Zadanie / przypomnienie:** komenda `crm_followups.drafts.approve` wywołuje przez CommandBus `customers.interactions.create` (`interaction_type = 'task'` dla zadania, status `planned`, `scheduled_at`, `reminder_minutes`, powiązanie z dealem/kontaktem). `owner_user_id` = właściciel obiektu; autor (aktor komendy, audyt) = zatwierdzający. Obiekt bez właściciela albo z właścicielem nieaktywnym/usuniętym → `owner_user_id` = zatwierdzający. Szkic → `approved`, `result_interaction_id`.
 - **Mail:** szkic → `handed_off`; UI otwiera istniejące okno wysyłki CRM dla osoby (trasa `POST /api/customers/people/[id]/emails`) z wypełnionym tematem i treścią. Wysyła użytkownik, ze swojej skrzynki i ze swoim uprawnieniem `customers.email.compose`. Moduł `crm_followups` nie ma dostępu do `sendAsUserService` ani innej ścieżki wysyłki. Zapis wysłanego maila jako interakcji resetuje licznik (D172). `handed_off` ≠ wysłane: jeśli użytkownik porzuci okno wysyłki, mail nie wychodzi, a obiekt i tak milczy przez N od decyzji (`decided_at`, §3.2 pkt 6) — świadomie: decyzja „zajmę się tym” należała do człowieka. Notka i liczniki mówią „przekazano do wysyłki”, nigdy „wysłano” (D182).
-- **Tylko sesja użytkownika:** approve, reject, `PATCH` i reassign wymagają sesji zalogowanego użytkownika; wywołanie kluczem API (n8n, agent) → 403 niezależnie od przypisanych uprawnień. Klucz API dostaje wyłącznie `crm_followups.run` — w szczególności **nie** `customers.email.compose`, więc nie wyśle maila także istniejącą trasą osoby (D179).
+- **Tylko sesja użytkownika:** approve, reject, `PATCH` i reassign wymagają sesji zalogowanego użytkownika. Mechanizm: `auth.isApiKey === true` → 403 niezależnie od ról i uprawnień ([`packages/shared/src/lib/auth/server.ts` l.28, l.316](https://github.com/AdamskiMarek/open-mercato/blob/41549820a198aea08a0ab9f36271a704439889cd/packages/shared/src/lib/auth/server.ts#L316) — flaga ustawiana dla każdego klucza API, `sub = api_key:<id>`). Dotyczy to też efemerycznych kluczy sesji czatu `ai_assistant` ([`api_keys/services/apiKeyService.ts` l.232–261](https://github.com/AdamskiMarek/open-mercato/blob/41549820a198aea08a0ab9f36271a704439889cd/packages/core/src/modules/api_keys/services/apiKeyService.ts#L232), `createSessionApiKey`), które dziedziczą role użytkownika — w tym `customers.email.compose` — więc chroni je `isApiKey`, nie brak uprawnień.
+- **Obrona w głąb:** to samo sprawdzenie powtarzają komendy `crm_followups.drafts.approve`/`reject`/`update`/`reassign` i `crm_followups.settings.update` (aktor `api_key:*` → odmowa), na wypadek wywołania przez CommandBus z pominięciem trasy.
+- Klucz API **n8n** dostaje wyłącznie `crm_followups.run` — w szczególności **nie** `customers.email.compose`, więc nie wyśle maila także istniejącą trasą osoby (D179).
 - Brak autowysyłki obejmuje też powiadomienia: typ powiadomienia modułu ma tylko kanał in-app (bez strategii e-mail).
 
 ### 5.3 Odrzucenie i wyciszenie (D175)
@@ -258,7 +262,8 @@ Odrzucenie: status `rejected`, powód opcjonalny (metadane komendy), `muted_unti
 Zatwierdzenie wymaga dodatkowo uprawnień celu: zadanie/przypomnienie — `customers.interactions.manage`; mail — `customers.email.compose`; widok obiektu — `customers.deals.view` albo `customers.people.view` / `customers.companies.view`. Granty domyślne w `setup.ts`. Role tylko OM (superadmin/admin/employee). Czy handlowiec widzi szkice cudzych obiektów — Q-FU-4.
 
 - **Obiekt bez właściciela** (lub właściciel nieaktywny/usunięty): szkic dla administratorów (`assignee_user_id = NULL`, widok przez `manage_all`); D179 bez zmian, widoczność dla innych zależy od Q-FU-4.
-- **Klucze API (n8n, agent):** wyłącznie `crm_followups.run`. Bez `crm_followups.drafts.*`, bez `crm_followups.settings.manage` i bez `customers.email.compose`. Trasy decyzji odrzucają klucz API (403) niezależnie od uprawnień (§5.2).
+- **Klucz API n8n:** wyłącznie `crm_followups.run`. Bez `crm_followups.drafts.*`, bez `crm_followups.settings.manage` i bez `customers.email.compose`.
+- **Każdy klucz API** (n8n, inny agent, efemeryczny klucz sesji `ai_assistant` z rolami użytkownika): trasy i komendy decyzji odrzucają go przez `auth.isApiKey` → 403 niezależnie od uprawnień (§5.2).
 - **404 vs 403 (jak D147):** szkic cudzy bez `crm_followups.drafts.manage_all` → 404, tak jak szkic nieistniejący i szkic innej organizacji (odpowiedź nie ujawnia istnienia). Brak feature'a modułu → 403.
 
 ## 7. API i wyzwalacze (D180)
@@ -288,7 +293,7 @@ Worker nie planuje sam kolejnych uruchomień.
 
 - Jeden przebieg na organizację naraz przez częściowy unikalny indeks `fu_runs (organization_id) WHERE status = 'running'` (§2.3), a nie blokadę doradczą — działa przy puli połączeń i przeżywa restart procesu.
 - Równoległy wyzwalacz z innym `run_key` zapisuje wiersz `skipped` z `skip_reason = 'concurrent'` i kończy.
-- Ten sam `run_key`: `finished` albo `skipped` → zwrot istniejącego przebiegu bez pracy; `failed` → wznowienie tego samego wiersza (status `running`); `running` starszy niż `OM_CRM_FOLLOWUPS_RUN_STALE_MINUTES` → oznaczenie `failed` i wznowienie; świeży `running` → zwrot istniejącego. Wznowienie jest bezpieczne: rekoncyliacja + częściowy unikalny indeks szkiców nie dopuszczą duplikatów.
+- Ten sam `run_key`: `finished` albo `skipped` → zwrot istniejącego przebiegu bez pracy; `failed` → wznowienie tego samego wiersza (status `running`); `running`, którego `heartbeat_at` (aktualizowany po każdej partii; przed pierwszą partią = `started_at`) jest starszy niż `OM_CRM_FOLLOWUPS_RUN_STALE_MINUTES` → oznaczenie `failed` i wznowienie; świeży `running` → zwrot istniejącego. Długi, ale żywy przebieg dużej firmy nie jest więc wznawiany równolegle. Jeśli przy wznowieniu w organizacji trwa inny `running` (częściowy unikalny indeks), wznawiany przebieg dostaje `skipped` z `skip_reason = 'concurrent'`. Wznowienie jest bezpieczne: rekoncyliacja + częściowy unikalny indeks szkiców nie dopuszczą duplikatów.
 
 ## 8. Ustawienia firmy (ModuleConfigService, `org:{id}:settings`, D69, D181)
 
@@ -305,7 +310,7 @@ Worker nie planuje sam kolejnych uruchomień.
 | `followups.contact_lifecycle_stages` | text[] | Q-FU-2 | |
 | `followups.kinds` | `email \| task \| reminder`[] | wszystkie | D177 |
 | `followups.reminder_horizon` | int ≥ 1 | 7 | horyzont terminu dla przypomnień, w dniach kalendarzowych (D177) |
-| `followups.reminder_term_field_key` | text NULL | `cf_offer_deadline` | klucz pola własnego deala z terminem składania ofert; rozwiązywany po kluczu, brak pola → tylko `expected_close_at` |
+| `followups.reminder_term_field_key` | text NULL | `cf_deadline` | klucz pola własnego deala z terminem składania ofert (push n8n); rozwiązywany po kluczu, brak pola → tylko `expected_close_at`; dla deali z n8n `expected_close_at` = ten sam termin (UTC) |
 | `followups.max_drafts_per_run` | int ≥ 1 | 200 | na przebieg na firmę; nadmiar w `skipped_limit` i w notce (§9) |
 | `followups.content_mode` | `template \| llm` | `template` | `llm` zablokowane do decyzji Q-FU-1 |
 | `followups.templates` | json | szablony w kodzie | nadpisania treści |
@@ -322,7 +327,7 @@ Ustawia administrator instancji (env serwera, Dokploy), nie organizacja; nie tra
 | `OM_CRM_FOLLOWUPS_SCAN_BATCH_SIZE` | int | 500 | rozmiar partii odczytu obiektów |
 | `OM_CRM_FOLLOWUPS_MAX_DRAFTS_PER_RUN` | int | 1000 | twardy limit instancji; wygrywa z ustawieniem firmy |
 | `OM_CRM_FOLLOWUPS_WORKER_CONCURRENCY` | int | 1 | współbieżność workera w procesie `queue worker --all` (D115) |
-| `OM_CRM_FOLLOWUPS_RUN_STALE_MINUTES` | int | 60 | po tylu minutach przebieg `running` uznany za porzucony i wznawiany (D180) |
+| `OM_CRM_FOLLOWUPS_RUN_STALE_MINUTES` | int | 60 | po tylu minutach od `heartbeat_at` przebieg `running` uznany za porzucony i wznawiany (D180) |
 | `OM_AI_PROVIDER` (+ klucz dostawcy) | istniejące | — | używane tylko, jeśli Q-FU-1 = LLM; klucz wyłącznie w env, nigdy w repo, logach ani ustawieniach |
 
 ## 9. Notka z przebiegu (D182)
@@ -345,14 +350,14 @@ Wszystkie zapisy przez komendy → `action_logs` (`audit_logs`); bez własnej ta
 | R-FU-1 | Zalew szkiców przy pierwszym przebiegu (wiele starych przetargów z n8n) | użytkownik ignoruje listę | limity §8 i §8.1, sortowanie po zaniedbaniu, domyślne etapy wg Q-FU-3 | niskie |
 | R-FU-2 | `scheduler` wyłączony w forku; strategia `local` to polling jednej instancji | brak crona albo zawodny cron | warunek wstępny etapu kodu za zgodą Marka (D94, D89); wybór `QUEUE_STRATEGY` (`async` = Redis); droga zastępcza: n8n → endpoint | niskie |
 | R-FU-3 | Fałszywa aktywność (automatyczne zmiany deala) blokuje szkice | brak follow-upu | `updated_at` nie liczy się (D172) | niskie |
-| R-FU-4 | Mail wysłany albo szkic zatwierdzony bez decyzji człowieka (w tym automat z kluczem API: n8n, agent) | naruszenie D170 | moduł nie ma ścieżki wysyłki; powiadomienia tylko in-app; approve/reject/`PATCH`/reassign tylko z sesji użytkownika; klucz API ma wyłącznie `crm_followups.run`, bez `customers.email.compose`; testy negatywne w planie: (1) brak ścieżki wysyłki w module, (2) approve, reject i `PATCH` kluczem API → 403 i szkic bez zmian, (3) klucz API na `POST /api/customers/people/[id]/emails` → 403 | bardzo niskie |
+| R-FU-4 | Mail wysłany albo szkic zatwierdzony bez decyzji człowieka (w tym automat z kluczem API: n8n, agent) | naruszenie D170 | moduł nie ma ścieżki wysyłki; powiadomienia tylko in-app; approve/reject/`PATCH`/reassign tylko z sesji użytkownika (`auth.isApiKey` → 403 w trasie i w komendzie); klucz n8n ma wyłącznie `crm_followups.run`, bez `customers.email.compose`; testy negatywne w planie: (1) brak ścieżki wysyłki w module, (2) approve, reject i `PATCH` kluczem n8n → 403 i szkic bez zmian, (3) klucz n8n na `POST /api/customers/people/[id]/emails` → 403, (4) approve, reject i `PATCH` efemerycznym kluczem sesji `ai_assistant` użytkownika z `crm_followups.drafts.decide` i `customers.email.compose` → 403 i szkic bez zmian, (5) komenda decyzji wywołana przez CommandBus z aktorem `api_key:*` → odmowa | bardzo niskie |
 | R-FU-5 | Wyciek danych między organizacjami | naruszenie izolacji | filtr org/tenant w każdym zapytaniu, przebieg per organizacja, scope z zaufanego payloadu schedulera | niskie |
 | R-FU-6 | Wariant LLM wysyła dane osobowe do zewnętrznego dostawcy | RODO, koszt | domyślnie szablony; LLM tylko po decyzji Marka | zależne od Q-FU-1 |
 | R-FU-7 | Dane legacy `customer_activities` i nowe interakcje liczone podwójnie | brak (maksimum, nie suma) | `max` z obu źródeł | brak |
 | R-FU-8 | Obciążenie kontenera `app` (worker dzieli RAM, D115) | spowolnienie nocą | partie, współbieżność 1, pora nocna | niskie |
 | R-FU-9 | Zgubiony event (restart, błąd subscribera) zostawia otwarty szkic mimo aktywności | szkic nieaktualny, indeks blokuje nowy | rekoncyliacja na początku każdego przebiegu (§4.3) | niskie |
 | R-FU-10 | Powrót deala na wcześniej odwiedzony etap nie tworzy przejścia (`@Unique(deal, stageId)`) | sama zmiana etapu wstecz nie resetuje licznika | zwykle towarzyszy jej interakcja lub komentarz; akceptujemy (bez zmian w `customers`) | niskie |
-| R-FU-11 | Osoba w kilku dealach: jej mail resetuje licznik wszystkich tych deali (§3.2 pkt 1a) | pominięty szkic deala, którego mail nie dotyczył | liczenie od daty powiązania; akceptujemy zamiast fałszywych szkiców przy bieżącej korespondencji | niskie |
+| R-FU-11 | Osoba lub firma w kilku dealach (np. zamawiający w wielu przetargach — push n8n wiąże z dealem zamawiającego i wykonawców): jej aktywność resetuje licznik tych deali (§3.2 pkt 1a) | pominięty szkic deala, którego aktywność nie dotyczyła | liczenie od daty powiązania; tylko wiersze z `deal_id IS NULL OR deal_id = <ten deal>` — aktywność przypięta do innego deala go nie dotyczy | aktywność bez `deal_id` na zamawiającym nadal resetuje wszystkie jego otwarte przetargi — akceptujemy świadomie (mniej szkiców, bez spamu; Q-FU-7 zamknięte) |
 | R-FU-12 | Kilka szkiców dla jednej osoby jednej nocy (przetarg z częściami) | szum dla handlowca | wariant tymczasowy §3.1; decyzja Q-FU-5 | zależne od Q-FU-5 |
 
 ## 13. Otwarte — pytania biznesowe do Marka
@@ -363,6 +368,8 @@ Wszystkie zapisy przez komendy → `action_logs` (`audit_logs`); bez własnej ta
 - **Q-FU-4 (kto widzi szkice):** (a) tylko właściciel obiektu + administrator; (b) wszyscy handlowcy w firmie.
 - **Q-FU-5 (przetarg z częściami, nowe po review #33):** (a) szkic na każdą część (deal) — wariant tymczasowy w D173; (b) jeden szkic na postępowanie (wymaga sposobu grupowania części bez zależności od `project_costing`). Oraz: ile szkiców może dostać jedna osoba jednej nocy — (a) bez limitu (po jednym na deal); (b) najwyżej jeden, pozostałe pominięte do kolejnego przebiegu; (c) jeden szkic zbiorczy dla osoby.
 - **Q-FU-6 (przypomnienie o terminie, nowe po review #33):** (a) tylko dla obiektów bezczynnych (stan D177); (b) niezależnie od bezczynności — aktywny deal z terminem w horyzoncie też dostaje szkic przypomnienia.
+
+- **Q-FU-7 (zamknięte, Cezar 2026-10-31 (techniczne)):** czy aktywność osoby lub firmy bez wskazania deala wstrzymuje follow-upy wszystkich jej otwartych deali — tak: liczy się dla wszystkich (ostrożniej, mniej szkiców, bez spamu); aktywność przypięta do innego deala się nie liczy (§3.2 pkt 1a, R-FU-11).
 
 Pytania idą do Marka przez Koordynatora. Do odpowiedzi obowiązują warianty oznaczone w D173 (tymczasowy, Q-FU-5), D177 (Q-FU-6) i D184 (szablony, Q-FU-1).
 
@@ -387,7 +394,9 @@ apps/mercato/src/modules/crm_followups/
   lib/templates.ts         # D184
   commands/runs.ts  commands/drafts.ts
   workers/scan.worker.ts   # schedulerSafe
-  lib/reconcile.ts         # D174 (rekoncyliacja na starcie przebiegu)
+  lib/reconcile.ts         # D174 (rekoncyliacja na starcie przebiegu; ten sam predykat co subscriber)
+  encryption.ts            # D183: `payload`, `target_label_snapshot` (wzór: [`customers/encryption.ts`](https://github.com/AdamskiMarek/open-mercato/blob/41549820a198aea08a0ab9f36271a704439889cd/packages/core/src/modules/customers/encryption.ts#L20), jsonb jak [`inbox_ops/encryption.ts`](https://github.com/AdamskiMarek/open-mercato/blob/41549820a198aea08a0ab9f36271a704439889cd/packages/core/src/modules/inbox_ops/encryption.ts))
+  notifications.ts         # D182: typ powiadomienia tylko `in_app` (wzór: [`customers/notifications.ts`](https://github.com/AdamskiMarek/open-mercato/blob/41549820a198aea08a0ab9f36271a704439889cd/packages/core/src/modules/customers/notifications.ts))
   subscribers/supersede-on-activity.ts
   api/runs/route.ts  api/drafts/route.ts  api/drafts/[id]/approve/route.ts  api/drafts/[id]/reject/route.ts  api/drafts/[id]/reassign/route.ts  api/settings/route.ts
   backend/crm-followups/page.tsx  backend/crm-followups/runs/page.tsx
@@ -451,13 +460,13 @@ apps/mercato/src/modules/crm_followups/
 | D171 | nowy moduł `crm_followups`, tabele `fu_*`, bez `inbox_ops` i bez interakcji `draft` | §0.1, §1, §2 |
 | D172 | definicja aktywności (z osobami i firmami deala) | §3.2 |
 | D173 | zakres obiektów; tymczasowa reguła części (Q-FU-5) | §3.1, §3.3 |
-| D174 | idempotencja szkiców, `superseded`, rekoncyliacja | §0.3, §2.2, §4.3 |
+| D174 | idempotencja szkiców, jeden predykat `superseded` (event i rekoncyliacja) | §0.3, §2.2, §4.3 |
 | D175 | odrzucenie wycisza | §5.3 |
-| D176 | zatwierdzenie bez autowysyłki, tylko sesja | §5.2, §7 |
-| D177 | rodzaj szkicu | §4.1 |
+| D176 | zatwierdzenie bez autowysyłki, tylko sesja (`isApiKey` w trasie i komendzie) | §5.2, §6, §7 |
+| D177 | rodzaj szkicu; pole terminu `cf_deadline`; zależne od Q-FU-6 | §4.1, §8 |
 | D178 | zakres org/tenant | §0.4, §2.1 |
 | D179 | ACL, klucz API tylko `run`, 404/403 | §6 |
-| D180 | wyzwalacze, `run_key`, współbieżność, job przy włączeniu | §0.4, §7 |
+| D180 | wyzwalacze, `run_key`, współbieżność, heartbeat, job przy włączeniu | §0.4, §2.3, §7 |
 | D181 | parametry firmy i instancji | §8, §8.1 |
 | D182 | notka z przebiegu | §9 |
 | D183 | audyt | §10 |
@@ -469,3 +478,4 @@ Powiązane wcześniejsze: D33, D34 (lejek „Przetargi”), D47 (włączanie per
 
 - 2026-10-31 rev 1 — pierwsza wersja (v2): rozpoznanie forka @41549820, D170–D184, pytania Q-FU-1…Q-FU-4.
 - 2026-10-31 rev 2 — review PR #33 (Cezar): B2 rekoncyliacja + eventy `email.linked`/`comment.created`/`todo.created`; B3 maile i interakcje osób deala; B4 decyzje tylko z sesji, klucz API tylko `run`, R-FU-4; B5 tymczasowa reguła części (Q-FU-5); N1–N16; rozstrzygnięcia techniczne; Q-FU-5, Q-FU-6. Zaktualizowane D171–D177, D179–D184.
+- 2026-10-31 rev 3 — łatki po review rev 2 (Cezar): filtr `deal_id IS NULL OR deal_id = <ten deal>` dla aktywności osób i firm deala, R-FU-11 z firmami, Q-FU-7 zamknięte (D172); jeden predykat zamknięcia dla eventu i rekoncyliacji (D174); pole terminu `cf_deadline` = `expected_close_at` z n8n (D177, D181); `auth.isApiKey` → 403 w trasach i komendach, klucze sesji `ai_assistant`, R-FU-4 (D176, D179); heartbeat i `skipped`/`concurrent` przy wznowieniu, zachowanie godziny joba, scheduler wyłączony bez błędu (D180); D177 zależne od Q-FU-6; pomijanie kontaktu przy otwartym szkicu deala z wcześniejszego przebiegu (D173); §16 `encryption.ts`, `notifications.ts`. Zaktualizowane D172–D174, D176, D177, D179–D181.
