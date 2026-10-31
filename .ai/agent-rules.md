@@ -7,7 +7,7 @@
 | # | Nie rób | Zamiast tego | Źródło |
 |---|---|---|---|
 | Z1 | Nie wdrażaj i nie pisz kodu modułów Klin #1. | Przygotuj spekę albo plan i poproś o zgodę; kod dopiero po „implementujemy” od Marka. | P3; nagłówek sekcji D98–D130 |
-| Z2 | Nie merguj PR bez „merguj” od Marka — wyjątek: PR doc-only (P23 (6)). | Zostaw PR jako draft i zgłoś gotowość. PR z kodem merguje Cezar po „merguj” od Marka; PR doc-only merguje Cezar po review Kod bez FAIL, w ramach stałej zgody Marka (P23 (6)); Kod nie merguje. Nie wdrażaj na produkcję: wdrożenie tylko za zgodą Marka po PASS Weryfikatora dla całej paczki, wykonuje Dawid (Dokploy) albo Mirek (zmiana 2026-10-31). | P5, P18, P23 (6) |
+| Z2 | Nie merguj PR bez „merguj” od Marka — wyjątek: PR doc-only (P23 (6)). | Zostaw PR jako draft i zgłoś gotowość. PR z kodem merguje Cezar po „merguj” od Marka; PR doc-only merguje Cezar po review Kod bez FAIL, w ramach stałej zgody Marka (P23 (6)); Kod nie merguje. Wdrożenie na produkcję — zgodnie z P18 (zmiana 2026-10-31). | P5, P18, P23 (6) |
 | Z3 | Nie pushuj do upstream (`open-mercato/open-mercato`). | Każde polecenie `gh` z `--repo AdamskiMarek/open-mercato`; zgłoszenie do upstream tylko jako issue, gdy decyzja tak mówi. | P6, D96 |
 | Z4 | Nie rób force-push ani nie przepisuj historii. | Nowy commit na gałęzi; przez Git Data API ref aktualizowany z `force=false` po sprawdzeniu heada. | P19 |
 | Z5 | Nie zapisuj sekretów w repo, ustawieniach, logach ani w raportach. | Sekrety tylko w zmiennych środowiskowych wdrożenia; token używany wyłącznie w `bash -lc` i nigdy nie drukowany. | D130, D143 |

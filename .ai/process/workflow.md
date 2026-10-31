@@ -48,8 +48,10 @@ Kolejność kroków 6–8 (zmiana 2026-10-31, spójnie z P22): merge → werdykt
 
 Warunki kolejności (P18, zmiana 2026-10-31; źródło: Marek 2026-10-31 (via Koordynator)):
 
-1. Merge kodu do `develop_OM_CRM` nadal tylko po „merguj” od Marka (P5). Wdrożenie na produkcję dopiero po PASS Weryfikatora dla wszystkich story z danej paczki. PR doc-only merguje Cezar po review Kod bez FAIL, w ramach stałej zgody Marka; PR z kodem merguje Cezar po „merguj”; wdrożenie na produkcję tylko za zgodą Marka — wykonuje je Dawid (Dokploy) albo Mirek, nie Cezar (P23 (6), zmiana 2026-10-31).
+1. Merge kodu do `develop_OM_CRM` nadal tylko po „merguj” od Marka (P5). Wdrożenie na produkcję dopiero po PASS Weryfikatora dla wszystkich story z danej paczki i za zgodą Marka (zmiana 2026-10-31; źródło zgody: Marek, stała zasada (merge i redeploy za jego zgodą)).
 2. Przy FAIL poprawka albo revert idzie kolejnym PR i nic z tej zmiany nie trafia na produkcję.
+
+Kto merguje (P23 (6), zmiana 2026-10-31; źródło: Koordynator 2026-10-31 (proces, Z7; review #39)): PR doc-only merguje Cezar po review Kod bez FAIL, w ramach stałej zgody Marka; PR z kodem merguje Cezar po „merguj”.
 
 ## Weryfikator (QA)
 
