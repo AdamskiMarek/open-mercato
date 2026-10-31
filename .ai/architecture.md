@@ -1,6 +1,6 @@
 # Klin #1 — kręgosłup architektury
 
-**Status:** 2026-10-31 (P16; luki L1–L6 przeniesione do D185–D190; otwarte tylko Q-ARCH-1, Q-ARCH-2 i skutki merge z L3). Krótki przegląd: kto jest właścicielem jakiego bytu, jakie są przejścia stanów, granice modułów i klucze. Każde zdanie wskazuje decyzję D z `.ai/decisions.md`; czego nie da się wyprowadzić z D, jest oznaczone jako **Luka** (sekcja 5). Ten plik niczego nie rozstrzyga — przy rozbieżności obowiązuje rejestr (P12).
+**Status:** 2026-10-31 (P16; luki L1–L6 przeniesione do D185–D190, `lost → open` — D191, nity po merge #35; otwarte tylko Q-ARCH-1, Q-ARCH-2 i skutki merge z L3). Krótki przegląd: kto jest właścicielem jakiego bytu, jakie są przejścia stanów, granice modułów i klucze. Każde zdanie wskazuje decyzję D z `.ai/decisions.md`; czego nie da się wyprowadzić z D, jest oznaczone jako **Luka** (sekcja 5). Ten plik niczego nie rozstrzyga — przy rozbieżności obowiązuje rejestr (P12).
 
 ## 1. Właściciele bytów
 
@@ -33,16 +33,16 @@ stateDiagram-v2
     open --> lost: closure_outcome = lost, powód ze słownika (D41, D42)
     won --> open: closure_outcome → NULL (D72, D141)
     won --> lost: customers.deal.lost (D141)
-    lost --> open: closure_outcome → NULL (OM core, bez D)
+    lost --> open: closure_outcome → NULL, OM core bez zmian (D191)
     open --> deleted: ręcznie w UI (D35, D188)
 ```
 
 - Etapy lejka: `new`, `result_lead`, `qualify`, `contact`, `offer`, `won`, `lost`, `rejected`, `cancelled` (D33). Automat zmienia etap tylko, gdy deal stoi na `new` albo `result_lead` (D34).
 - Deal usunięty w UI nie jest odtwarzany przez n8n (`last_error = 'deleted_in_om'`, D35). Wynik przetargu ustawia `winner_*`/`competitor*`; n8n nie zmienia `closure_outcome` ani powodu przegranej (D42).
 - Źródła przejść: n8n tworzy deal i przestawia etap tylko na `result_lead` i `cancelled`, bez `closure_outcome` (D4, D31, D34, D42, D185); `won`/`lost` ustawia użytkownik w UI OM (D41 — słownik powodów odblokowuje „Oznacz jako przegrany”); D133 wymaga `won` do utworzenia projektu, D49 (marża) i D141 (flaga projektu) to skutki przejść, nie ich źródło.
-- `lost → open` to zachowanie OM core, poza zakresem rejestru (D72 dotyczy ponownego otwarcia po `won`); nie jest luką.
+- `lost → open` to zachowanie OM core bez zmian w forku; deal wraca do prognozy, moduły własne nie dodają reakcji — flagi D72 i D141 dotyczą deala po `won` (D191).
 - Ręczne zmiany etapu nie wpływają na kosztorys — costing patrzy tylko na `closure_outcome` i `deleted_at` (D185). Znaczenie etapu `rejected` — **Q-ARCH-1** (sekcja 5).
-- Usunięcie deala z projektem albo harmonogramem: bez kaskady, flagi `deal_reopened_at` / `reopened_at` zostają jako historia, dane zostają; przywrócenie deala emituje `deal_restored`, flagę zdejmuje użytkownik z audytem (D188).
+- Usunięcie deala z projektem albo harmonogramem: bez kaskady, flagi `deal_reopened_at` / `reopened_at` zostają jako historia, dane zostają; przywrócenie deala emituje `deal_restored`, flagę zdejmuje użytkownik z audytem — w projekcie z powodem (D161), w harmonogramie bez powodu, bez `project_schedule.edit` → 403 (D188).
 
 ### 2.2 Rekord harmonogramu inwestycji (`project_schedule`, v1)
 
@@ -73,22 +73,25 @@ stateDiagram-v2
     active --> active: flaga deal_reopened_at przy won → NULL, lost (D141) i usunięciu deala (D188), zdjęcie D161
     active --> on_hold: projects.set_status (D186)
     on_hold --> active: projects.set_status (D186)
-    active --> completed: projects.close (D186)
-    active --> cancelled: projects.close (D162, D186)
-    on_hold --> completed: projects.close (D186)
-    on_hold --> cancelled: projects.close (D186)
+    active --> completed: projects.close, powód, audyt (D186)
+    active --> cancelled: projects.close, powód, audyt (D162, D186)
+    on_hold --> completed: projects.close, powód, audyt (D186)
+    on_hold --> cancelled: projects.close, powód, audyt (D186)
     completed --> active: projects.set_status, audyt (D186)
     cancelled --> active: projects.set_status, audyt (D186)
     active --> deleted: projects.delete, tylko administrator, kaskadowo, z undo (D162)
+    on_hold --> deleted: projects.delete (D162)
+    completed --> deleted: projects.delete (D162)
+    cancelled --> deleted: projects.delete (D162)
 ```
 
 - Projekt bez oferty w OM: trzy kolumny oferty i `investment_id` są NULL; ofertę podpina się później `link_winning_offer` (D116, D135).
 - Pliki po soft delete zostają w S3 i liczą się do quota; fizycznie usuwa je tylko purge (D122, D126, D162).
-- Statusy i przejścia: D186 (dawna Luka L2). Soft delete z każdego statusu tylko administrator (D162); na diagramie jedna strzałka dla czytelności.
+- Statusy i przejścia: D186 (dawna Luka L2). `set_status` bez powodu; `close` z powodem i wpisem w `audit_logs`; przejście spoza listy i archiwizacja (v2) z innego statusu niż `completed`/`cancelled` → 422 `INVALID_STATUS_TRANSITION` (D186). Soft delete z każdego statusu tylko administrator (D162).
 
 ### 2.4 Inwestycja
 
-Status domyślny `active`; `archived` w MVP (tylko odczyt, ukryta w listach, bez nowych deali, przywrócenie z audytem), `merged` z `merged_into_id` od v1 (D187). Split od v1 (D83). Skutki merge dla ofert, projektu i harmonogramu — **Luka L3** (do decyzji przed v1); po tej decyzji TC-DEAL-009 (scalanie) wymaga przeglądu. Właściciel inwestycji = `created_by` (D190).
+Status domyślny `active`; `archived` w MVP (tylko odczyt, ukryta w listach, bez nowych deali — 422 `INVESTMENT_ARCHIVED`, archiwizacja i przywrócenie z `project_costing.manage_investments` i audytem, bez feature'a → 403 `FORBIDDEN`; CHECK na `status`), `merged` z `merged_into_id` od v1 (D187). Split od v1 (D83). Skutki merge dla ofert, projektu i harmonogramu — **Luka L3** (do decyzji przed v1); po tej decyzji TC-DEAL-009 (scalanie) wymaga przeglądu. Właściciel inwestycji = `created_by` (D190).
 
 ## 3. Granice modułów
 
@@ -133,12 +136,12 @@ Luki L1, L2, L4, L5, L6 i statusy z L3 są rozstrzygnięte w rejestrze — wiers
 
 | # | Luka | Stan / odesłanie | Kto rozstrzyga |
 |---|---|---|---|
-| L1 | Przejścia między etapami lejka poza automatem i wejście do `rejected`/`cancelled`. | → **D185** (n8n tylko `result_lead` i `cancelled`; ręczne zmiany etapu bez wpływu na kosztorys); `lost → open` — OM core, nie luka. Otwarte tylko znaczenie `rejected` (Q-ARCH-1). | Q-ARCH-1: Marek przez Koordynatora |
+| L1 | Przejścia między etapami lejka poza automatem i wejście do `rejected`/`cancelled`. | → **D185** (n8n tylko `result_lead` i `cancelled`; ręczne zmiany etapu bez wpływu na kosztorys); `lost → open` → **D191** (OM core bez zmian). Otwarte tylko znaczenie `rejected` (Q-ARCH-1). | Q-ARCH-1: Marek przez Koordynatora |
 | L2 | Statusy projektu i ich przejścia. | → **D186** | — |
 | L3 | Stany inwestycji i skutki merge. | statusy → **D187**. **Otwarte:** co dzieje się z ofertami (primary, D51, D65), projektem (D116) i harmonogramem (D23) po merge; po decyzji przegląd TC-DEAL-009 (D187). | Cezar / Koordynator przed v1 |
 | L4 | Skutek usunięcia deala, który ma projekt albo harmonogram wykonawczy. | → **D188** | — |
-| L5 | Format klucza push „postępowanie + część”. | → **D189** (klucz bez części `ezamowienia:<tender_id>` przyjęty — brak formatu w repo; wdrożenie: Enka, etap kodu, D32) | — |
-| L6 | Właściciel deala i inwestycji. | inwestycja → **D190** (`created_by`, przy kluczu API — użytkownik klucza albo NULL i administratorzy). Otwarte tylko właściciel deala z n8n (Q-ARCH-2). | Q-ARCH-2: Marek przez Koordynatora |
+| L5 | Format klucza push „postępowanie + część”. | → **D189** (klucz bez części `ezamowienia:<tender_id>` przyjęty — brak formatu w repo; wdrożenie: Enka, etap kodu, D32) | Enka: potwierdzenie formatu bez części przy kodzie kontraktu push |
+| L6 | Właściciel deala i inwestycji. | inwestycja → **D190** (`created_by`, przy kluczu API — użytkownik klucza albo NULL i administratorzy). Otwarte tylko właściciel deala z n8n (Q-ARCH-2). Zakres „szkiców” z D190 zależy od modułu `crm_followups` (PR #33, poza rejestrem). | Q-ARCH-2: Marek przez Koordynatora |
 
 | # | Pytanie do Marka (wyłącznie przez Koordynatora) | Warianty |
 |---|---|---|
