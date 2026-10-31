@@ -1,13 +1,13 @@
 # Zasady dla agentów (Klin #1)
 
-**Status:** 2026-10-31 (P17; Z4, Z9, Z11 ze źródłem P19–P21, Z8 zgodny z „Zasadą” rejestru; Z13 — praca w ClickUp, P22; brzmienie Z13 zmienione 2026-10-31 — Cezar; role w Z13 (kto buduje, kto kontroluje) — Marek 2026-10-31 (via Koordynator), P23; zmiana 2026-10-31: Kod tylko obserwator (Z11, Z13) — Marek 2026-10-31 (via Koordynator); Z2 i definicja FAIL w Z13 — Koordynator 2026-10-31 (proces, Z7; review #39)). Minimum kontekstu: tylko zakazy z alternatywą i pułapki, które już się zdarzyły. Bez map repo i opisów systemu — te są w spekach, w `.ai/architecture.md` i w rejestrze `.ai/decisions.md` (jedyne źródło decyzji, P12).
+**Status:** 2026-10-31 (P17; Z4, Z9, Z11 ze źródłem P19–P21, Z8 zgodny z „Zasadą” rejestru; Z13 — praca w ClickUp, P22; brzmienie Z13 zmienione 2026-10-31 — Cezar; role w Z13 (kto buduje, kto kontroluje) — Marek 2026-10-31 (via Koordynator), P23; zmiana 2026-10-31: Kod tylko obserwator (Z11, Z13) — Marek 2026-10-31 (via Koordynator); Z2: reguły merge (doc-only, PR z kodem przez Cezara po „merguj”) — Marek, stała zasada, wdrożenie — Marek, stała zasada (merge i redeploy za jego zgodą), reszta Z2 i definicja FAIL w Z13 — Koordynator 2026-10-31 (proces, Z7; review #39)). Minimum kontekstu: tylko zakazy z alternatywą i pułapki, które już się zdarzyły. Bez map repo i opisów systemu — te są w spekach, w `.ai/architecture.md` i w rejestrze `.ai/decisions.md` (jedyne źródło decyzji, P12).
 
 ## Zakazy i co robić zamiast
 
 | # | Nie rób | Zamiast tego | Źródło |
 |---|---|---|---|
 | Z1 | Nie wdrażaj i nie pisz kodu modułów Klin #1. | Przygotuj spekę albo plan i poproś o zgodę; kod dopiero po „implementujemy” od Marka. | P3; nagłówek sekcji D98–D130 |
-| Z2 | Nie merguj PR bez „merguj” od Marka — wyjątek: PR doc-only (P23 (6)). | Zostaw PR jako draft i zgłoś gotowość. PR z kodem merguje Cezar po „merguj” od Marka; PR doc-only merguje Cezar po review Kod bez FAIL, w ramach stałej zgody Marka (P23 (6)); Kod nie merguje. Wdrożenie na produkcję — zgodnie z P18 (zmiana 2026-10-31). | P5, P18, P23 (6) |
+| Z2 | Nie merguj PR bez „merguj” od Marka — wyjątek: PR doc-only (P23 (6)). | Zostaw PR jako draft i zgłoś gotowość. PR z kodem merguje Cezar po „merguj” od Marka; PR doc-only merguje Cezar po review Kod bez FAIL, w ramach stałej zgody Marka (P23 (6); źródło: Marek, stała zasada). Kod nie merguje. Wdrożenie na produkcję — zgodnie z P18: po PASS Weryfikatora dla całej paczki i za zgodą Marka, wdraża wyłącznie Dawid (Dokploy) (zmiana 2026-10-31; źródło: Marek, stała zasada (merge i redeploy za jego zgodą)). | P5, P18, P23 (6) |
 | Z3 | Nie pushuj do upstream (`open-mercato/open-mercato`). | Każde polecenie `gh` z `--repo AdamskiMarek/open-mercato`; zgłoszenie do upstream tylko jako issue, gdy decyzja tak mówi. | P6, D96 |
 | Z4 | Nie rób force-push ani nie przepisuj historii. | Nowy commit na gałęzi; przez Git Data API ref aktualizowany z `force=false` po sprawdzeniu heada. | P19 |
 | Z5 | Nie zapisuj sekretów w repo, ustawieniach, logach ani w raportach. | Sekrety tylko w zmiennych środowiskowych wdrożenia; token używany wyłącznie w `bash -lc` i nigdy nie drukowany. | D130, D143 |

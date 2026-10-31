@@ -77,7 +77,7 @@
 - Cały kod OM idzie przez Cezara. Wszystko zostaje w forku `AdamskiMarek/open-mercato`; nigdy nie pushujemy do `open-mercato/open-mercato`.
 - Moduły costing, schedule i delivery: żadnej implementacji, dopóki Marek wprost nie powie „implementujemy”.
 - Przed kodem powstaje osobny plan testów, pisany innym modelem niż spec i bez czytania speki.
-- Merge kodu tylko po „merguj” (merguje Cezar); PR doc-only merguje Cezar po review Kod bez FAIL, w ramach stałej zgody Marka. Wdrożenie na produkcję — zgodnie z P18 (P5, P18, P23 (6); zmiana 2026-10-31).
+- Merge kodu tylko po „merguj” (merguje Cezar); PR doc-only merguje Cezar po review Kod bez FAIL, w ramach stałej zgody Marka. Wdrożenie na produkcję — zgodnie z P18: po PASS Weryfikatora dla całej paczki i za zgodą Marka; wdraża wyłącznie Dawid (Dokploy) (P5, P18, P23 (6); zmiana 2026-10-31; źródło: Marek, stała zasada (merge i redeploy za jego zgodą)).
 - „Gotowe” = dowód: testy + zrzuty ekranu albo przebieg na instancji testowej open-mercato.pl.
 - Cezar buduje: na własnym VPS dobiera model, skille i agentów kodujących (m.in. Copilot, limit odnawia się 1. dnia miesiąca). Kod jest niezależnym kontrolerem: plan TC, spec-check, review i bramka gotowości; nie buduje tego, co weryfikuje, i nie jest runnerem (P23; zmiana 2026-10-31, źródło: Marek 2026-10-31 (via Koordynator)). Kod tylko obserwuje i raportuje Cezarowi — nie commituje i nie otwiera PR; jedynym autorem zmian w repo jest Cezar (P23; zmiana 2026-10-31, źródło: Marek 2026-10-31 (via Koordynator)).
 - Kod robi niezależny przegląd architektury przed kodem (lista: `om-architecture-checklist.md`); wynik w raporcie do Cezara (P23; zmiana 2026-10-31).
