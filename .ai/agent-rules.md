@@ -17,6 +17,7 @@
 | Z9 | Nie rozstrzygaj sam sprzeczności speki z rejestrem. | Nie commituj spornego punktu; zgłoś cytat z obu miejsc (plik:linia). | reguła pracy (Koordynator) |
 | Z10 | Nie traktuj briefu jak speki. | Brief to cel i zakres; zachowanie, model i kody błędów bierz ze speki i z D. | P14 |
 | Z11 | Wykonawca nie zmienia treści TC w planach testów (kroki, asercje). | Drobne zmiany meta w planach (nagłówki, changelog, daty, odesłania) może zrobić wykonawca, z wpisem w changelogu; zmianę treści TC zgłoś jako zadanie dla niezależnej sesji planu. | P4; Cezar 2026-10-31 |
+| Z12 | Nie zamykaj zadania bez werdyktu Weryfikatora. | Przekaż Weryfikatorowi TC zadania i środowisko testowe; zamknij dopiero po werdykcie „spełnione” (przepływ: `.ai/process/workflow.md`). | P18 |
 
 ## Pułapki, które już się zdarzyły
 
