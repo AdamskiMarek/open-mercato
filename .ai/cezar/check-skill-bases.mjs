@@ -9,7 +9,7 @@
 // w twardy błąd, zanim agent dostanie sam override bez bazy.
 // zmiana 2026-10-31 — źródło: Koordynator (proces, Z7) 2026-10-31.
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 
 const root = process.cwd()
 const tiers = JSON.parse(readFileSync(join(root, '.ai/skills/tiers.json'), 'utf8'))
@@ -17,13 +17,20 @@ const external = tiers?.external?.skills ?? []
 const overrides = external.filter((name) => existsSync(join(root, '.ai/skills', name)))
 const localDir = realpathSync(resolve(root, '.ai/skills'))
 
+// Pusta lista override'ów = zły katalog roboczy albo zepsuty tiers.json, nie „wszystko OK”
+// (zmiana 2026-10-31 — Koordynator 2026-10-31 (proces, Z7; review #40)).
+if (overrides.length === 0) {
+  console.error(`check-skill-bases: FAIL — brak override'ów z .ai/skills/tiers.json → external.skills w ${root}/.ai/skills (zły katalog roboczy albo tiers.json?)`)
+  process.exit(1)
+}
+
 const BASE_DIRS = ['.agents/skills', '.claude/skills']
 const found = []
 const missing = []
 for (const name of overrides) {
   // Baza to prawdziwy SKILL.md, nie link z powrotem do override'u w .ai/skills/.
   const base = BASE_DIRS.map((dir) => join(root, dir, name, 'SKILL.md')).find(
-    (path) => existsSync(path) && !realpathSync(path).startsWith(localDir),
+    (path) => existsSync(path) && !realpathSync(path).startsWith(localDir + sep),
   )
   if (base) found.push(`${name} → ${base.slice(root.length + 1)}`)
   else missing.push(name)

@@ -4,6 +4,8 @@
 # Instrukcja uruchomienia, szablon zadania i stała odpowiedź na pytanie
 # om-implement-spec (extension vs core, D45): .ai/cezar/README.md.
 # Bez bramki człowieka w grafie: merge tylko po „merguj” Marka (P5), poza Cezarem.
+# Cel forka (zmiana 2026-10-31 — Koordynator 2026-10-31 (proces, Z7; review #40)): git.push nie ma pól, github.draft-pr ma
+# tylko title? (reference.md) — repo/base trzyma check-fork-target.mjs (fork-target, push-guard).
 version: 2
 name: om-story
 description: >-
@@ -12,6 +14,10 @@ description: >-
   max 2 rundy poprawek, self-review om-code-review, commit, push, draft PR.
 nodes:
   - { id: start, type: start }
+  - id: fork-target
+    type: check
+    name: Preflight — origin = fork, base = develop_OM_CRM
+    command: "node .ai/cezar/check-fork-target.mjs"
   - id: setup
     type: check
     name: Setup (install, skills, build, generate)
@@ -82,12 +88,18 @@ nodes:
     type: git.commit
     name: Commit
     message: "feat(crm): implementacja story (workflow om-story)"
+  - id: push-guard
+    type: check
+    name: Push guard — origin = fork, base = develop_OM_CRM
+    command: "node .ai/cezar/check-fork-target.mjs"
   - { id: push, type: git.push, name: Push }
   - { id: pr, type: github.draft-pr, name: Draft PR }
   - { id: done, type: end, name: Draft PR opened, status: success }
   - { id: stopped, type: end, name: Stopped, status: failed }
 edges:
-  - { from: start, to: setup }
+  - { from: start, to: fork-target }
+  - { from: fork-target.pass, to: setup }
+  - { from: fork-target.fail, to: stopped }
   - { from: setup.pass, to: skill-bases }
   - { from: setup.fail, to: stopped }
   - { from: skill-bases.pass, to: implement }
@@ -107,8 +119,10 @@ edges:
   - { from: review-loop.exhausted, to: stopped }
   - { from: address.done, to: verify }
   - { from: address.failed, to: stopped }
-  - { from: commit.done, to: push }
-  - { from: commit.nothing, to: push }   # agent mógł już sam zacommitować
+  - { from: commit.done, to: push-guard }
+  - { from: commit.nothing, to: push-guard }   # agent mógł już sam zacommitować
+  - { from: push-guard.pass, to: push }
+  - { from: push-guard.fail, to: stopped }
   - { from: commit.failed, to: stopped }
   - { from: push.done, to: pr }
   - { from: push.failed, to: stopped }

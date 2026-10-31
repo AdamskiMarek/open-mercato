@@ -28,6 +28,7 @@ The label vocabulary, the mutual-exclusion groups, and the priority/risk inferen
 - **The QA-approval merge gate is hard.** A PR carrying `needs-qa` without `qa-approved` MUST NOT merge, even when everything else is green. `skip-qa` is the explicit opt-out; never combine it with `needs-qa`/`qa-approved`.
 - **Never set the `qa` pipeline label.** It means "manual QA in progress" and is applied by QA reviewers only. This skill and everything it dispatches request QA with `needs-qa` alone.
 - **`qa-failed`, `blocked`, and `do-not-merge` are hard blocks** — matrix row 0c stops on them.
+- **Merge step — fork guard (zmiana 2026-10-31 — reguła merge: Marek, stała zasada (P5, Z2, P23 (6)); strażnik: Koordynator 2026-10-31 (proces, Z7; review #40)).** In this fork (PRs to `develop_OM_CRM`) and in every Cezar run, the chain never dispatches `om-approve-merge-pr` and never merges, enables auto-merge or queues a PR without Marek's explicit „merguj” for that exact PR — `--allow-merge`, green CI, `qa-approved` or `skip-qa` do not replace it. Without „merguj” the chain stops at merge-ready and the report says „gotowe do »merguj«”.
 
 ## When the active account lacks triage rights
 

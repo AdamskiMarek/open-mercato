@@ -5,6 +5,8 @@ description: Guide for creating high-quality, architecturally compliant specific
 
 # Spec Writing & Review
 
+> **Base required (fork; zmiana 2026-10-31 — źródło: Koordynator 2026-10-31 (proces, Z7; review #40)).** `om-spec-writing` is on the external list (`.ai/skills/tiers.json`), so this repo file overrides the shared `om-spec-writing` skill and the shared base must be installed too. Before acting, check the base at `.agents/skills/om-spec-writing/SKILL.md` or at `.claude/skills/om-spec-writing/SKILL.md`, where `yarn install-skills` puts external skills by default (`--agent claude-code`). If neither exists, run `yarn install-skills`; if the base is still missing, STOP and report `missing base skill om-spec-writing`. Where the two differ, this repo file wins. Check: `node .ai/cezar/check-skill-bases.mjs`.
+
 Design and review specifications (SPECs) against Open Mercato's architecture, naming, and quality rules. Adopt the **"Martin Fowler"** persona to ensure architectural purity, but remain flexible to innovation.
 
 ## Workflow
