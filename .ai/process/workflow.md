@@ -40,7 +40,7 @@ flowchart TD
 | 3 | Bramka gotowości | osobna sesja tylko do odczytu, uruchomiona przez Kod; raport do Cezara | speka, plan, rejestr, brief, `architecture.md` | PASS / CONCERNS / FAIL (P13) |
 | 4 | „implementujemy” | Marek, przez Koordynatora | werdykt bramki PASS | zgoda na kod (P3) |
 | 5 | Implementacja (kod) i review | kod: Cezar albo jego agent kodujący (P2), w Cezarze workflow `om-story` (`../cezar/README.md`, zmiana 2026-10-31); review: osobna sesja uruchomiona przez Kod, w 3 grupach (P15), raport do Cezara; poprawki commituje Cezar | speka, TC | PR z kodem i testami (autor: Cezar) |
-| 6 | Merge | Cezar (zmiana 2026-10-31, P23 (6)): PR doc-only — po review Kod bez FAIL, w ramach stałej zgody Marka; PR z kodem — Cezar, wyłącznie po „merguj” Marka (P5) | PR po review (krok 5), bez FAIL w raporcie Kod (`review-format.md`, „Werdykt review”) | merge do `develop_OM_CRM` w forku (P6) |
+| 6 | Merge | Cezar (zmiana 2026-10-31, P23 (6)): PR doc-only (definicja: „PR doc-only — definicja” niżej) — po review Kod bez FAIL, w ramach stałej zgody Marka; PR z kodem — Cezar, wyłącznie po „merguj” Marka (P5) | PR po review (krok 5), bez FAIL w raporcie Kod (`review-format.md`, „Werdykt review”) | merge do `develop_OM_CRM` w forku (P6) |
 | 7 | Weryfikacja na TC | Weryfikator (QA) | TC zadania + środowisko testowe (instancja testowa open-mercato.pl, P7) ze zmergowanym kodem | werdykt per TC: spełnione / niespełnione, z dowodem |
 | 8 | Zamknięcie zadania (zrobione) | Koordynator | merge (krok 6) i werdykt Weryfikatora „spełnione” (krok 7) | zadanie zamknięte, story „zrobione” (P22) |
 
@@ -53,13 +53,27 @@ Warunki kolejności (P18, zmiana 2026-10-31; źródło: Marek 2026-10-31 (via Ko
 
 Kto merguje (P23 (6), zmiana 2026-10-31; źródło: Marek, stała zasada): PR doc-only merguje Cezar po review Kod bez FAIL, w ramach stałej zgody Marka; PR z kodem merguje Cezar po „merguj”.
 
+### PR doc-only — definicja
+
+Jedyna definicja PR doc-only w tym repo; wszystkie inne miejsca do niej odsyłają (zmiana 2026-10-31 — źródło: Koordynator 2026-10-31 (proces, Z7; review #40 R2-3)). PR jest doc-only, gdy **każdy** plik z jego listy plików leży w `.ai/**` lub `docs/**` albo jest plikiem `*.md` — **z wyjątkiem**:
+
+- `.ai/skills/**` (instrukcje wykonywane przez agentów),
+- `.ai/cezar/**` (graf i skrypty Cezara),
+- `.ai/agentic.config.json`,
+- `AGENTS.md` i `CLAUDE.md` na każdym poziomie drzewa,
+- `packages/**` i `apps/**`,
+- `.github/**` (workflowy CI są wykonywalne),
+- każdego pliku wykonywalnego (skrypt, kod, konfiguracja uruchamiana przez narzędzia).
+
+Jeden plik z wyjątków albo spoza `.ai/**`, `docs/**`, `*.md` czyni PR PR-em z kodem: merge wyłącznie po „merguj” (P5), Weryfikator po merge (P18). W razie wątpliwości PR nie jest doc-only. Klasyfikacja „docs-only” w skillach upstream (np. `om-pr-autopilot`) wybiera tylko ścieżkę review i tej definicji nie zastępuje.
+
 ## Weryfikator (QA)
 
 - Działa od „implementujemy”: dla każdego zadania sprawdza na środowisku testowym, czy spełnia swoje TC; zadanie zamykamy dopiero po jego werdykcie (P18).
 - Dowód werdyktu wg P7: wynik testów i zrzuty ekranu albo przebieg na instancji testowej.
 - Nie wdraża, nie merguje i nie ma dostępu do produkcji (P18). Niespełnione TC wracają do kroku 5 z listą TC i dowodem (poprawka kolejnym PR, bo kod jest już zmergowany — kroki 6–8).
 - Brak TC dla zachowania albo TC sprzeczne z D → ustalenie „Do poprawy” dla niezależnej sesji planu (treść TC zmienia tylko ona, `agent-rules.md` Z11); pytanie biznesowe → „Do decyzji człowieka”, przez Koordynatora (P1, P15).
-- PR doc-only (bez kodu) nie wymaga Weryfikatora: kontrolą jest spec-check bez flag @head.
+- PR doc-only (definicja: sekcja „PR doc-only — definicja”) nie wymaga Weryfikatora: kontrolą jest spec-check bez flag @head.
 
 ## Etykiety QA w forku
 
@@ -73,7 +87,7 @@ Root `AGENTS.md` (sekcja o etykietach PR) i skille `om-pr-autopilot` / `om-auto-
 | `qa-approved`, `qa-self-verified` | Żaden agent (Cezar, jego agent kodujący, Kod, `om-auto-*`, `om-pr-autopilot`) ich nie ustawia. Po merge to zapis werdyktu „spełnione” Weryfikatora z dowodem (P7) na zmergowanym PR; ustawia Weryfikator albo Koordynator. Zamknięcie story dopiero po tym werdykcie (P22). |
 | `qa` (ręczne QA w toku) | Nie używamy: w forku nie ma kolejki ręcznego QA przed merge. |
 | `qa-failed` | Po merge: zapis werdyktu „niespełnione”. Poprawka albo revert kolejnym PR; nic z tej zmiany nie trafia na produkcję (P18, warunek 2). |
-| `skip-qa` | Nie zwalnia z Weryfikatora (zmiana 2026-10-31 — Koordynator 2026-10-31 (proces, Z7; review #40)). Różnica wobec upstream: root `AGENTS.md`:157 („Automated-verification exemption”) daje `skip-qa` także PR z kodem bez zmian UI — w forku to nie wystarcza. Bez Weryfikatora (P18) idzie wyłącznie PR doc-only według listy plików: tylko `.ai/**`, `docs/**`, `*.md` i żadnego pliku wykonywalnego (skrypt, kod, konfiguracja uruchamiana przez narzędzia); jego kontrolą jest spec-check bez flag @head (sekcja „Weryfikator (QA)”). PR z kodem bez zmian UI, także z `skip-qa`, przechodzi Weryfikatora po merge (P18). |
+| `skip-qa` | Nie zwalnia z Weryfikatora (zmiana 2026-10-31 — Koordynator 2026-10-31 (proces, Z7; review #40)). Różnica wobec upstream: root `AGENTS.md`:157 („Automated-verification exemption”) daje `skip-qa` także PR z kodem bez zmian UI — w forku to nie wystarcza. Bez Weryfikatora (P18) idzie wyłącznie PR doc-only w rozumieniu sekcji „PR doc-only — definicja” (lista plików PR); jego kontrolą jest spec-check bez flag @head (sekcja „Weryfikator (QA)”). PR z kodem bez zmian UI, także z `skip-qa`, przechodzi Weryfikatora po merge (P18). |
 | Merge przez skille (`merge-queue`, `om-approve-merge-pr`, `om-merge-buddy`, krok merge w `om-pr-autopilot`) | Skille upstream nie znają „merguj” (`om-approve-merge-pr` merguje po spełnieniu swoich bramek, `om-pr-autopilot` — z `--allow-merge`), więc ich zachowanie nie jest bramką (zmiana 2026-10-31 — Koordynator 2026-10-31 (proces, Z7; review #40)). Zatrzymanie przed merge trzymają: (1) graf `om-story` nie ma węzła merge (`../cezar/README.md`); (2) Z2 (`../agent-rules.md`) i P23 (6) — PR z kodem tylko po „merguj” Marka, PR doc-only po review Kod bez FAIL w ramach stałej zgody Marka (źródło: Marek, stała zasada); (3) w runach Cezara `om-approve-merge-pr`, `om-merge-buddy` i krok merge w `om-pr-autopilot` są zakazane bez „merguj” Marka — strażnik na początku override'ów w `../skills/` (`om-approve-merge-pr`, `om-merge-buddy`: kopie skilli z open-mercato/skills ze strażnikiem; `om-pr-autopilot`: krok merge). Etykieta (także `merge-queue`) ani zielone checki nie zastępują „merguj” (P5). `develop_OM_CRM` nie ma ochrony gałęzi (`protected: false`); włączenie jej to propozycja dla Marka, na GitHubie nic nie zmieniono. |
 | Cezar, workflow `om-story` (`../cezar/README.md`) | Kończy się draft PR bez etykiet QA. Nie merguje. |
 

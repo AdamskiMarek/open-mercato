@@ -11,7 +11,7 @@ Ten katalog to konfiguracja Cezara dla repo (`.ai/cezar/workflows/` — workflow
 ## Od story do runu
 
 1. Story w ClickUp (P22) ma kryteria akceptacji, numery D i TC oraz wersję (MVP / v1 / v2). Speka i plan testów są zmergowane, spec-check bez flag daje PASS, bramka gotowości daje PASS (P13).
-2. Marek mówi „implementujemy” (P3). Dopiero wtedy Cezar tworzy run: projekt `open-mercato`, workflow `om-story`, treść zadania (`task`) z szablonu niżej. Base branch runu to `baseBranch` projektu w Cezarze — musi być `develop_OM_CRM`, a `origin` checkoutu projektu musi wskazywać `AdamskiMarek/open-mercato`. Tego nie ustawia graf (patrz „Cel: fork, nie upstream”); sprawdza to węzeł `fork-target` przed `setup` i `push-guard` przed `push` — inaczej run kończy się `stopped`.
+2. Marek mówi „implementujemy” (P3). Dopiero wtedy Cezar tworzy run: projekt `open-mercato`, workflow `om-story`, treść zadania (`task`) z szablonu niżej. Base branch runu to `baseBranch` projektu w Cezarze — musi być `develop_OM_CRM`, a remote push i remote base PR checkoutu projektu muszą wskazywać `AdamskiMarek/open-mercato`. Tego nie ustawia graf (patrz „Cel: fork, nie upstream”); sprawdza to węzeł `fork-target` przed `setup` i `push-guard` przed `push` — inaczej run kończy się `stopped`.
 3. Run kończy się draft PR do `develop_OM_CRM` albo stanem `Stopped` (failed) z powodem w logu runu.
 4. Dalej bez Cezara: review w sesji uruchomionej przez Kod (P15) → „merguj” od Marka (P5) → merge → Weryfikator na TC (P18) → zamknięcie (P22). W grafie nie ma `gate.human` ani merge.
 
@@ -19,7 +19,7 @@ Ten katalog to konfiguracja Cezara dla repo (`.ai/cezar/workflows/` — workflow
 
 | Węzeł | Typ | Co robi | Wyjścia |
 |---|---|---|---|
-| `fork-target` | check | `node .ai/cezar/check-fork-target.mjs` — run celuje w fork (patrz „Cel: fork, nie upstream”) | pass → `setup`; fail → `stopped` |
+| `fork-target` | check | `node .ai/cezar/check-fork-target.mjs` — `CEZ_BASE` = `develop_OM_CRM`, remote push i remote base PR = fork (patrz „Cel: fork, nie upstream”) | pass → `setup`; fail → `stopped` |
 | `setup` | check | `yarn install --immutable && yarn install-skills && yarn build:packages && yarn generate && yarn build:packages` | pass → `skill-bases`; fail → `stopped` |
 | `skill-bases` | check | `node .ai/cezar/check-skill-bases.mjs` — każdy override z `.ai/skills/` ma bazę (patrz niżej) | pass → `implement`; fail → `stopped` |
 | `implement` | agent | skill `om-implement-spec`, runner `copilot`, model `claude-sonnet-4.6`, prompt `{{task}}` | done → `verify`; failed → `stopped` |
@@ -31,8 +31,8 @@ Ten katalog to konfiguracja Cezara dla repo (`.ai/cezar/workflows/` — workflow
 | `address` | agent | `session.continue: implement`; dostaje podsumowanie review | done → `verify` |
 | `commit` | git.commit | `feat(crm): implementacja story (workflow om-story)` | done / nothing → `push-guard`; failed → `stopped` |
 | `push-guard` | check | ten sam skrypt co `fork-target`, tuż przed push (agent mógł zmienić remote) | pass → `push`; fail → `stopped` |
-| `push` | git.push | push gałęzi runu na `origin` | done → `pr`; failed → `stopped` |
-| `pr` | github.draft-pr | draft PR do base branch runu | created → `done` (success); failed → `stopped` |
+| `push` | git.push | `git push -u` gałęzi runu na remote push Cezara (`remote.pushDefault`, inaczej `origin`) | done → `pr`; failed → `stopped` |
+| `pr` | github.draft-pr | ponowny push, potem `gh pr create --draft --repo <remote base> --base <CEZ_BASE bez prefiksu>` | created → `done` (success); failed → `stopped` |
 
 Każdy cykl przechodzi przez węzeł `loop`; port bez krawędzi nie występuje (wszystkie porty błędu prowadzą do `stopped`).
 
@@ -40,14 +40,21 @@ Każdy cykl przechodzi przez węzeł `loop`; port bez krawędzi nie występuje (
 
 Zmiana 2026-10-31 — źródło: Koordynator 2026-10-31 (proces, Z7; review #40).
 
-Według `docs/reference.md` Cezara v0.15.1 („Workflow graphs (`version: 2`)”, tabela węzłów) `git.push` nie ma żadnych pól, a `github.draft-pr` ma tylko `title?`. Repo ani base PR nie da się więc ustawić w grafie: push idzie na `origin` checkoutu, a PR celuje w `baseBranch` projektu (`.ai/cezar/config.json` w checkoucie projektu, rozdział „Configuration”). Dlatego graf ma dwa węzły `check` z tym samym skryptem `check-fork-target.mjs` — `fork-target` przed `setup` i `push-guard` przed `push`. Skrypt kończy run błędem, gdy:
+Według `docs/reference.md` Cezara v0.15.1 („Workflow graphs (`version: 2`)”, tabela węzłów) `git.push` nie ma żadnych pól, a `github.draft-pr` ma tylko `title?` — repo, remote ani base PR nie ustawia się w grafie. Wybiera je kod Cezara (open-mercato/cezar@v0.15.1, `packages/cezar/src`; zmiana 2026-10-31 — Koordynator 2026-10-31 (proces, Z7; review #40 R2-4)):
 
-1. `git remote get-url origin` (fetch albo push) nie wskazuje `github.com/AdamskiMarek/open-mercato`;
-2. w `.ai/cezar/config.json` checkoutu projektu (katalog nad wspólnym `.git` worktree) nie ma `"baseBranch": "develop_OM_CRM"` — brak pliku, klucza albo niepoprawny JSON też jest błędem;
-3. punkt rozwidlenia runu (`CEZ_BASE`, gdy Cezar go poda) nie leży na `origin/develop_OM_CRM`;
-4. inny remote wskazuje `open-mercato/open-mercato`, a `gh repo set-default --view` nie zwraca forka (wtedy `gh` mógłby wybrać upstream jako repo PR).
+- **Remote push** — `resolveTaskRemotes` (`git-remotes.ts`:97–124): `remote.pushDefault`, gdy wskazuje istniejący remote, inaczej `origin`. Na ten remote pushują węzeł `push` (`pushBranch`, `git-worktree.ts`:761, `git push -u <remote> <gałąź>`) i ponownie węzeł `pr` (`createDraftPr`, `server/forge/github.ts`:2620). Cezar podaje remote jawnie, więc `branch.<gałąź>.pushRemote` go nie zmienia — skrypt i tak go sprawdza, bo zwykły `git push` agenta w worktree by go użył.
+- **Repo PR** — Cezar sam podaje `gh pr create --draft --repo <host/owner/repo>` (`createDraftPr`) z URL remote'u base. Remote base według `resolveTaskRemotes`: remote z `gh-resolved=base` (zapis `gh repo set-default`), inaczej remote będący rodzicem forka `origin` według GitHuba (`forkParentRemote`, `git-remotes.ts`:131–143), inaczej `origin`. **Ryzyko:** przy dodanym remote upstream (`open-mercato/open-mercato`) bez `gh repo set-default` Cezar uzna upstream za repo PR. Pokrywają to `fork-target` i `push-guard` (warunek 3 niżej).
+- **Base PR** — `--base` to `run.baseBranch` bez prefiksu `<remote>/`. `run.baseBranch` = `baseBranch` projektu, ale tylko gdy da się go rozwiązać w checkoucie; inaczej Cezar bierze bieżącą gałąź checkoutu i zostawia jedynie notę (`chooseForkBase`, `git-worktree.ts`:197–218). Przy odłączonym HEAD albo `forkRef` jest to sha — wtedy `--base` nie pada i PR idzie do gałęzi domyślnej repo (`main`). Węzeł `check` dostaje tę wartość jako `CEZ_BASE` (`checkContextEnv`, `workflows/run.ts`:7107; tylko gdy run ma baseBranch).
 
-Przed pierwszym runem w projekcie Cezara: `origin` = fork, `baseBranch` = `develop_OM_CRM` (zakładka Git albo `config.json`), bez remote upstream albo z `gh repo set-default AdamskiMarek/open-mercato`. Skrypt sprawdzono lokalnie (2026-10-31): fork + `develop_OM_CRM` → OK; brak `config.json`, `baseBranch: develop`, `CEZ_BASE` spoza `develop_OM_CRM`, remote upstream bez domyślnego repo `gh` → FAIL. W Cezarze nie był uruchomiony.
+Dlatego graf ma dwa węzły `check` z tym samym skryptem `check-fork-target.mjs` — `fork-target` przed `setup` i `push-guard` przed `push` (agent mógł zmienić remote albo konfigurację git). Skrypt kończy run błędem (exit 1), gdy:
+
+1. brak `CEZ_BASE` albo po zdjęciu prefiksu `<remote>/` (nazwa skonfigurowanego remote'u) nie jest on dokładnie `develop_OM_CRM` — sha, `main` czy inna gałąź to FAIL (równość, nie „leży na”);
+2. remote, na który może pójść push — `remote.pushDefault`, `branch.<gałąź runu>.pushRemote` (gałąź z `CEZ_BRANCH` albo HEAD), `origin` — nie istnieje albo któryś jego URL (fetch lub push, po `insteadOf`/`pushInsteadOf`) nie jest dokładnie `github.com/AdamskiMarek/open-mercato` (host porównywany w całości: `evilgithub.com/...` to FAIL);
+3. remote base PR nie jest forkiem: `gh-resolved=base` stoi na remote'cie spoza forka albo — bez `gh-resolved` — istnieje remote spoza forka, który Cezar mógłby wziąć za rodzica forka;
+4. remote z prefiksu `CEZ_BASE` nie jest forkiem;
+5. w `.ai/cezar/config.json` checkoutu projektu (katalog nad wspólnym `.git` worktree) nie ma `"baseBranch": "develop_OM_CRM"` — brak pliku, klucza albo niepoprawny JSON też jest błędem.
+
+Przed pierwszym runem w projekcie Cezara: `origin` = fork, `baseBranch` = `develop_OM_CRM` (zakładka Git albo `config.json`), bez `remote.pushDefault`/`pushRemote` na inny remote, bez remote upstream albo z `gh repo set-default AdamskiMarek/open-mercato`. Skrypt sprawdzono lokalnie (2026-10-31, repo tymczasowe): fork + `CEZ_BASE` = `develop_OM_CRM` lub `origin/develop_OM_CRM` → exit 0; brak `CEZ_BASE`, `CEZ_BASE` = `main` / `origin/main` / `e85aec2`, `pushDefault` = upstream, `branch.<b>.pushRemote` = upstream, remote upstream bez `gh-resolved`, `evilgithub.com`, `pushurl`/`pushInsteadOf` na upstream, `baseBranch: develop`, brak `config.json` → exit 1. W Cezarze nie był uruchomiony.
 
 ## Szablon zadania (`task`)
 

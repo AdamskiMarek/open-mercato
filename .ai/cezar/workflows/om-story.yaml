@@ -4,8 +4,10 @@
 # Instrukcja uruchomienia, szablon zadania i stała odpowiedź na pytanie
 # om-implement-spec (extension vs core, D45): .ai/cezar/README.md.
 # Bez bramki człowieka w grafie: merge tylko po „merguj” Marka (P5), poza Cezarem.
-# Cel forka (zmiana 2026-10-31 — Koordynator 2026-10-31 (proces, Z7; review #40)): git.push nie ma pól, github.draft-pr ma
-# tylko title? (reference.md) — repo/base trzyma check-fork-target.mjs (fork-target, push-guard).
+# Cel forka (zmiana 2026-10-31 — Koordynator 2026-10-31 (proces, Z7; review #40 R2-4)): git.push nie ma pól, github.draft-pr
+# ma tylko title? (reference.md). Remote push, --repo i --base wybiera kod Cezara (createDraftPr, resolveTaskRemotes,
+# chooseForkBase); check-fork-target.mjs (fork-target, push-guard) przerywa run, gdy któryś nie wskazuje forka i
+# develop_OM_CRM. Opis mechanizmu i ryzyka (rodzic forka jako repo PR): .ai/cezar/README.md „Cel: fork, nie upstream”.
 version: 2
 name: om-story
 description: >-
@@ -16,7 +18,7 @@ nodes:
   - { id: start, type: start }
   - id: fork-target
     type: check
-    name: Preflight — origin = fork, base = develop_OM_CRM
+    name: Preflight — push/PR = fork, base = develop_OM_CRM
     command: "node .ai/cezar/check-fork-target.mjs"
   - id: setup
     type: check
@@ -90,7 +92,7 @@ nodes:
     message: "feat(crm): implementacja story (workflow om-story)"
   - id: push-guard
     type: check
-    name: Push guard — origin = fork, base = develop_OM_CRM
+    name: Push guard — push/PR = fork, base = develop_OM_CRM
     command: "node .ai/cezar/check-fork-target.mjs"
   - { id: push, type: git.push, name: Push }
   - { id: pr, type: github.draft-pr, name: Draft PR }

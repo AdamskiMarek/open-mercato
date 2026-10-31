@@ -16,7 +16,7 @@ The shared skill's own references (`references/diagnose.md`, `references/state-m
 The shared `references/diagnose.md` signal 4 asks for the diff's scope. In this repository, classify against:
 
 - **spec-only** — only `.ai/specs/` or `.ai/specs/enterprise/` (the config's `paths.specs`). A spec-only PR gets the specification review and must never grow into implementation here.
-- **docs-only** — `apps/docs/`, root markdown, `AGENTS.md` files, `.ai/skills/`, `.ai/runs/`.
+- **docs-only** — `apps/docs/`, root markdown, `AGENTS.md` files, `.ai/skills/`, `.ai/runs/`. This lane only picks the review path; it never makes a PR doc-only for merge in this fork (see the merge-step fork guard below).
 - **UI-touching** — `packages/ui/`, any module's `backend/` or `frontend/` pages and components, and the customer-portal surfaces. This is what drives `needs-qa`.
 - **migration/schema** — `migrations/`, `.snapshot-open-mercato.json`, ORM entities under `data/entities.ts`.
 - **contract surface** — anything enumerated in `BACKWARD_COMPATIBILITY.md`: auto-discovery files, exported types and signatures, import paths, event IDs, widget spot IDs, API routes, DB schema, DI keys, ACL feature IDs, notification IDs, CLI commands, generated registries. A touch here forces `risk-high` and deeper review.
@@ -28,7 +28,7 @@ The label vocabulary, the mutual-exclusion groups, and the priority/risk inferen
 - **The QA-approval merge gate is hard.** A PR carrying `needs-qa` without `qa-approved` MUST NOT merge, even when everything else is green. `skip-qa` is the explicit opt-out; never combine it with `needs-qa`/`qa-approved`.
 - **Never set the `qa` pipeline label.** It means "manual QA in progress" and is applied by QA reviewers only. This skill and everything it dispatches request QA with `needs-qa` alone.
 - **`qa-failed`, `blocked`, and `do-not-merge` are hard blocks** — matrix row 0c stops on them.
-- **Merge step — fork guard (zmiana 2026-10-31 — reguła merge: Marek, stała zasada (P5, Z2, P23 (6)); strażnik: Koordynator 2026-10-31 (proces, Z7; review #40)).** In this fork (PRs to `develop_OM_CRM`) and in every Cezar run, the chain never dispatches `om-approve-merge-pr` and never merges, enables auto-merge or queues a PR without Marek's explicit „merguj” for that exact PR — `--allow-merge`, green CI, `qa-approved` or `skip-qa` do not replace it. Without „merguj” the chain stops at merge-ready and the report says „gotowe do »merguj«”.
+- **Merge step — fork guard (zmiana 2026-10-31 — reguła merge: Marek, stała zasada (P5, Z2, P23 (6)); strażnik: Koordynator 2026-10-31 (proces, Z7; review #40)).** In this fork (PRs to `develop_OM_CRM`) and in every Cezar run, the chain never dispatches `om-approve-merge-pr` and never merges, enables auto-merge or queues a PR without Marek's explicit „merguj” for that exact PR — `--allow-merge`, green CI, `qa-approved` or `skip-qa` do not replace it. Without „merguj” the chain stops at merge-ready and the report says „gotowe do »merguj«”. Whether a PR is doc-only (merged by Cezar outside this chain, P23 (6)) is decided only by `.ai/process/workflow.md` → „PR doc-only — definicja” (source: Koordynator 2026-10-31 (proces, Z7; review #40 R2-3)), never by the docs-only lane above.
 
 ## When the active account lacks triage rights
 
