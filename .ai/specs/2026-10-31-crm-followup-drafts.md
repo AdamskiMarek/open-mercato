@@ -6,7 +6,7 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-31 |
-| **Rewizja** | 2026-10-31 (rev 4 — odpowiedzi Marka na Q-FU-1…Q-FU-6, nity review rev 3, merge `develop_OM_CRM` @2faa964; wcześniej rev 3: łatki po review rev 2, rev 2: B2–B5, N1–N16) |
+| **Rewizja** | 2026-10-31 (rev 4b — rozstrzygnięcia Cezara: grupowanie części po kluczu D189, jedno przypomnienie na postępowanie i termin, D192 na słowniku `sales.deal_loss_reason`; rev 4 — odpowiedzi Marka na Q-FU-1…Q-FU-6, nity review rev 3, merge `develop_OM_CRM` @2faa964; wcześniej rev 3: łatki po review rev 2, rev 2: B2–B5, N1–N16) |
 | **Faza** | v2 |
 | **Moduł** | `crm_followups` (`apps/mercato/src/modules/crm_followups`; prefiks tabel `fu_`), opcjonalny per organizacja (D47) |
 | **Zależności upstream** | `customers` (deale, interakcje, komentarze, ustawienia), `configs` (ModuleConfigService), `audit_logs`, `notifications`, `@open-mercato/queue`, `auth`/`directory` (scope), opcjonalnie `@open-mercato/scheduler` (wyzwalacz cron, D180) |
@@ -139,7 +139,7 @@ Każda tabela: `id uuid`, `organization_id`, `tenant_id`, `created_at`, `updated
 | `kind` | text CHECK `email \| task \| reminder` | D177 |
 | `status` | text CHECK `open \| approved \| handed_off \| rejected \| superseded` | D174–D176 |
 | `assignee_user_id` | uuid NULL | opiekun obiektu (`owner_user_id`); brak albo opiekun nieaktywny/usunięty → NULL = kolejka administratorów (D179); deal z n8n — opiekun wg D193 |
-| `group_key` | text | klucz postępowania dla szkicu follow-upu deala: wartość pola `followups.tender_group_field_key` (domyślnie `cf_notice_number`) albo `deal:<id>`, gdy jej brak; dla kontaktu `person:<id>` / `company:<id>` (D173) |
+| `group_key` | text | klucz postępowania deala: klucz D189 bez części `ezamowienia:<tender_id>` (z pól deala `cf_source` + `cf_external_id`) albo `deal:<id>`, gdy ich brak; dla kontaktu `person:<id>` / `company:<id>` (D173); używany przez szkic follow-upu i przez przypomnienie (D177) |
 | `term_value` | timestamptz NULL | tylko przypomnienie: wartość terminu, dla której powstało (deduplikacja D177) |
 | `last_activity_at` | timestamptz | snapshot wyliczenia D172 |
 | `inactivity_threshold` | int | N użyte w przebiegu |
@@ -151,7 +151,7 @@ Każda tabela: `id uuid`, `organization_id`, `tenant_id`, `created_at`, `updated
 | `muted_until` | timestamptz NULL | ustawiane przy odrzuceniu (D175) |
 | `result_interaction_id` | uuid NULL | interakcja z zatwierdzenia (D176) |
 
-Indeksy: częściowe unikalne `(organization_id, target_type, target_id)` i `(organization_id, group_key)` `WHERE status = 'open' AND kind <> 'reminder' AND deleted_at IS NULL` (D174); unikalny `(organization_id, target_id, term_value) WHERE kind = 'reminder' AND deleted_at IS NULL` — na wszystkich statusach, więc odrzucone przypomnienie nie wraca dla tego samego terminu (D177); `(organization_id, assignee_user_id, status)`; `(organization_id, run_id)`.
+Indeksy: częściowe unikalne `(organization_id, target_type, target_id)` i `(organization_id, group_key)` `WHERE status = 'open' AND kind <> 'reminder' AND deleted_at IS NULL` (D174); unikalny `(organization_id, group_key, term_value) WHERE kind = 'reminder' AND deleted_at IS NULL` — jedno przypomnienie na postępowanie i termin, na wszystkich statusach, więc odrzucone przypomnienie nie wraca dla tego samego terminu (D177); `(organization_id, assignee_user_id, status)`; `(organization_id, run_id)`.
 
 Szkic zawiera dane osobowe (RODO): `payload` (w tym adres odbiorcy) i `target_label_snapshot` są w mapie szyfrowania modułu, tak jak `customer_entity.display_name` i `customer_deal.title` w `customers`; poza `query_index` i wyszukiwaniem; w eventach i snapshotach komend tylko ID. Logger workera i komend zapisuje tylko ID, statusy i liczniki — nigdy treści, adresów ani nazw obiektów (D183).
 
@@ -184,12 +184,12 @@ Dlaczego nie `progress_jobs.result_summary`: ProgressJob opisuje zadanie uruchom
 
 **Przetarg z częściami, limit na osobę i nakładanie się deal/kontakt (D173, Q-FU-5):**
 
-- **Jeden szkic follow-upu na postępowanie.** Części (osobne deale, D31, D132) grupuje `group_key` = wartość pola własnego deala o kluczu `followups.tender_group_field_key` (domyślnie `cf_notice_number` — numer ogłoszenia z pushu n8n, N8N-workflows `sql/2026-10-e_zamowienia_stage2_om_batch_queries.sql` l.134; rozwiązywane po kluczu, bez UUID). Deal bez wartości = postępowanie jednoczęściowe (`group_key = deal:<id>`). Bez odczytu `pc_investments.tender_notice_number`, więc bez zależności od `project_costing`. Grupa kwalifikuje się, gdy kwalifikuje się co najmniej jedna jej część (§3.2); szkic dostaje część wybrana regułą kolizji (niżej), a pozostałe kwalifikujące się części są wymienione w treści. Pozostałe części: `skipped_group`. Postępowanie z otwartym szkicem follow-upu na dowolnej części jest pomijane (częściowy unikalny indeks na `group_key`, §2.2).
+- **Jeden szkic follow-upu na postępowanie.** Części (osobne deale, D31, D132) grupuje `group_key` = klucz postępowania z D189 bez części: `ezamowienia:<tender_id>`, nie numer ogłoszenia. Na dealu moduł składa go z pól własnych z pushu n8n: `cf_source` (`ezamowienia`) + `:` + `cf_external_id` (`tid`) (N8N-workflows @0d247ed `sql/2026-10-e_zamowienia_stage2_om_batch_queries.sql` l.134; ten sam klucz n8n trzyma w `om_sync.external_key`, l.147, l.151; definicje pól rozwiązywane po kluczu, bez UUID). Rejestr nie wskazuje pola deala z kluczem D189 — źródło do potwierdzenia przez Enkę (sekcja „Otwarte” rejestru). Deal bez tych pól = postępowanie jednoczęściowe (`group_key = deal:<id>`). Bez odczytu `pc_investments.tender_notice_number`, więc bez zależności od `project_costing`. Grupa kwalifikuje się, gdy kwalifikuje się co najmniej jedna jej część (§3.2); szkic dostaje część wybrana regułą kolizji (niżej), a pozostałe kwalifikujące się części są wymienione w treści. Pozostałe części: `skipped_group`. Postępowanie z otwartym szkicem follow-upu na dowolnej części jest pomijane (częściowy unikalny indeks na `group_key`, §2.2).
 - **Najwyżej jeden szkic follow-upu na osobę kontaktową na dobę.** Doba w `followups.timezone`; liczą się szkice utworzone w tej dobie we wszystkich przebiegach organizacji. Osoby szkicu: adresat maila; dla zadania — sama osoba (szkic osoby) albo osoby z `customer_deal_people` deala (szkic deala); szkic firmy bez osób nie podlega limitowi. Szkic, którego któraś osoba ma już szkic tej doby, jest pomijany (`skipped_person_limit`) i wróci w kolejnym przebiegu.
 - **Reguła kolizji** (wybór części w grupie i kolejność przy limicie na osobę): wygrywa najbliższy przyszły termin `cf_deadline` (pole z `followups.reminder_term_field_key`; deal bez terminu po dealach z terminem), potem najdłuższa nieaktywność (najstarsze `last_activity_at`).
 - Pominięte szkice (`skipped_group`, `skipped_person_limit`) są liczone w notce przebiegu (D182, §9).
 - **Kontakt a deal:** przebieg najpierw tworzy szkice deali, potem kontaktów. Szkic kontaktu (osoby) jest pomijany (`skipped_contact_has_deal_draft`), jeśli ta osoba ma otwarty szkic deala — utworzony w tym przebiegu **albo w którymś z wcześniejszych**: jest w `customer_deal_people` deala z otwartym szkicem albo jest adresatem jego maila. Firma analogicznie przez `customer_deal_companies`.
-- Przypomnienie o terminie (§4.1) nie podlega grupowaniu ani limitowi na osobę; podlega limitowi na przebieg (§3.3).
+- Przypomnienie o terminie (§4.1) nie podlega regule jednego szkicu follow-upu na postępowanie ani limitowi na osobę; ma własną deduplikację per postępowanie i termin (`group_key`, `term_value`) i podlega limitowi na przebieg (§3.3).
 
 ### 3.2 Definicja aktywności (D172)
 
@@ -226,8 +226,8 @@ Szkic follow-upu dla obiektu bezczynnego (§3.2):
 
 - Powstaje zawsze, niezależnie od aktywności, zaplanowanych interakcji i `muted_until`, gdy do terminu deala zostało najwyżej `followups.reminder_days_before` (domyślnie 3, w dniach kalendarzowych liczonych w strefie `followups.timezone`, domyślnie Europe/Warsaw), a termin nie minął. Deal musi być w zakresie §3.1 (otwarty, lejek i etap z ustawień).
 - Termin = pole własne deala o kluczu `followups.reminder_term_field_key` (domyślnie `cf_deadline` — termin składania ofert, który push n8n zapisuje z `notices.submitting_offers_date`; N8N-workflows `docs/e_zamowienia_om_push.md` l.22, `sql/2026-10-e_zamowienia_stage2_om_batch_queries.sql` l.131, l.140; definicja pola rozwiązywana po kluczu, bez UUID). Dla deali z n8n `expected_close_at` to ten sam termin (UTC); brak pola → `expected_close_at`.
-- Jedno przypomnienie na deal na daną wartość terminu (`term_value`, unikalny indeks §2.2 na wszystkich statusach). Odrzucone przypomnienie nie wraca dla tego samego terminu; zmiana terminu daje nowe przypomnienie, a otwarte przypomnienie starego terminu zamyka się jako `superseded` z `term_changed` (§4.3). Duplikat: `skipped_reminder_duplicate`.
-- Przypomnienie jest per deal (także dla każdej części postępowania), nie wchodzi do limitu jednego szkicu na osobę na dobę, wchodzi do limitu `max_drafts_per_run`. Może istnieć obok otwartego szkicu follow-upu tego deala.
+- Jedno przypomnienie na postępowanie na daną wartość terminu: deduplikacja po `(group_key, term_value)` (unikalny indeks §2.2 na wszystkich statusach). Części o tym samym terminie dają jedno przypomnienie — dostaje je część wybrana regułą kolizji (§3.1), pozostałe części z tym terminem są wymienione w treści; części o różnych terminach dostają po jednym przypomnieniu na każdy odrębny termin. Odrzucone przypomnienie nie wraca dla tego samego terminu; zmiana terminu daje nowe przypomnienie, a otwarte przypomnienie starego terminu zamyka się jako `superseded` z `term_changed` (§4.3), gdy żadna część w zakresie nie ma już tego terminu. Duplikat: `skipped_reminder_duplicate`.
+- Przypomnienie jest per postępowanie i termin (postępowanie jednoczęściowe = deal), nie wchodzi do limitu jednego szkicu na osobę na dobę, wchodzi do limitu `max_drafts_per_run`. Może istnieć obok otwartego szkicu follow-upu tego deala.
 - Zatwierdzenie: interakcja z `scheduled_at` przed terminem i `reminder_minutes` (§5.2).
 
 Lista dozwolonych rodzajów per firma: `followups.kinds`.
@@ -238,8 +238,8 @@ Szablony per `kind` × `target_type`, i18n pl/en w kodzie modułu, nadpisywalne 
 
 ### 4.3 Idempotencja szkiców (D174)
 
-- Najwyżej jeden otwarty szkic follow-upu na obiekt i na postępowanie: częściowe unikalne indeksy (§2.2). Kolejny przebieg pomija obiekt z otwartym szkicem (`skipped_open_draft`). Przypomnienie ma osobną deduplikację po `term_value` (§4.1).
-- **Jeden predykat zamknięcia (D174):** otwarty szkic follow-upu zamykamy jako `superseded`, gdy obiekt **teraz** nie kwalifikuje się wg §3.2 — bezczynność < N (aktywność liczona z `occurred_at`/`created_at` jak w §3.2), zaplanowana przyszła interakcja, deal zamknięty, obiekt usunięty albo poza zakresem ustawień. Przypomnienie (`kind = reminder`) zamykamy tylko, gdy deal jest zamknięty, usunięty albo poza zakresem, termin się zmienił lub minął; aktywność go nie zamyka. Ten sam predykat stosuje subscriber i rekoncyliacja.
+- Najwyżej jeden otwarty szkic follow-upu na obiekt i na postępowanie: częściowe unikalne indeksy (§2.2). Kolejny przebieg pomija obiekt z otwartym szkicem (`skipped_open_draft`). Przypomnienie ma osobną deduplikację po `(group_key, term_value)` (§4.1).
+- **Jeden predykat zamknięcia (D174):** otwarty szkic follow-upu zamykamy jako `superseded`, gdy obiekt **teraz** nie kwalifikuje się wg §3.2 — bezczynność < N (aktywność liczona z `occurred_at`/`created_at` jak w §3.2), zaplanowana przyszła interakcja, deal zamknięty, obiekt usunięty albo poza zakresem ustawień. Przypomnienie (`kind = reminder`) zamykamy tylko, gdy w grupie nie zostaje żadna część w zakresie (otwarta, nieusunięta, w lejku i etapie z ustawień) z terminem równym `term_value` albo termin minął; przyczyna wg stanu części docelowej; aktywność go nie zamyka. Ten sam predykat stosuje subscriber i rekoncyliacja.
 - **`superseded_reason` wg przyczyny:** `activity` — bezczynność < N albo zaplanowana przyszła interakcja; `closed` — `closure_outcome` ustawione (won/lost) albo etap `won`, `lost`, `rejected`, `cancelled`; `deleted` — obiekt usunięty; `out_of_scope` — lejek, etap, typ obiektu albo kontakt bez otwartego deala poza ustawieniami; `term_changed` — tylko przypomnienie, termin zmieniony albo minął. Droga zamknięcia osobno w `superseded_via`: `event` (subscriber) albo `reconciliation`.
 - **Event tylko wyzwala sprawdzenie** (§0.3, w tym `customers.email.linked`, `customers.comment.created`, `customers.todo.created`); `superseded_via = 'event'`, przyczyna wg listy wyżej. Przykłady: stary wątek mailowy dołączony wstecz (data sprzed N) — obiekt dalej bezczynny, szkic zostaje; telefon z wczoraj wpisany dziś po nocnym przebiegu — bezczynność < N, szkic zamknięty.
 - **Rekoncyliacja na początku każdego przebiegu:** zanim worker policzy kandydatów, stosuje ten sam predykat do każdego otwartego szkicu organizacji (`superseded_via = 'reconciliation'`, przyczyna wg listy wyżej). Zgubiony event nie zostawia wiszącego szkicu, a częściowy unikalny indeks nie blokuje nowego. Licznik `superseded_reconciled`.
@@ -321,7 +321,6 @@ Worker nie planuje sam kolejnych uruchomień.
 | `followups.target_types` | `deal \| person \| company`[] | wszystkie | D173 |
 | `followups.deal_pipeline_ids` | uuid[] | lejek „Przetargi” rozwiązany po kluczu przy `setup` | bez twardych UUID |
 | `followups.deal_stage_keys` | text[] | `result_lead`, `qualify`, `contact`, `offer` | Q-FU-3; tylko etapy od `result_lead` w górę — `new` i etapy zamknięte (`won`, `lost`, `rejected`, `cancelled`) odrzucane przy zapisie (422) |
-| `followups.tender_group_field_key` | text | `cf_notice_number` | klucz pola własnego deala z numerem ogłoszenia postępowania do grupowania części (D173, Q-FU-5); rozwiązywany po kluczu |
 | `followups.kinds` | `email \| task \| reminder`[] | wszystkie | D177 |
 | `followups.reminder_days_before` | int ≥ 1 | 3 | ile dni kalendarzowych przed terminem powstaje przypomnienie; liczone w `followups.timezone` (D177, Q-FU-6) |
 | `followups.reminder_term_field_key` | text NULL | `cf_deadline` | klucz pola własnego deala z terminem składania ofert (push n8n); rozwiązywany po kluczu, brak pola → tylko `expected_close_at`; dla deali z n8n `expected_close_at` = ten sam termin (UTC) |
@@ -370,8 +369,8 @@ Wszystkie zapisy przez komendy → `action_logs` (`audit_logs`); bez własnej ta
 | R-FU-10 | Powrót deala na wcześniej odwiedzony etap nie tworzy przejścia (`@Unique(deal, stageId)`) | sama zmiana etapu wstecz nie resetuje licznika | zwykle towarzyszy jej interakcja lub komentarz; akceptujemy (bez zmian w `customers`) | niskie |
 | R-FU-11 | Osoba lub firma w kilku dealach (np. zamawiający w wielu przetargach — push n8n wiąże z dealem zamawiającego i wykonawców): jej aktywność resetuje licznik tych deali (§3.2 pkt 1a) | pominięty szkic deala, którego aktywność nie dotyczyła | liczenie od daty powiązania; tylko wiersze z `deal_id IS NULL OR deal_id = <ten deal>` — aktywność przypięta do innego deala go nie dotyczy; aktywność bez `deal_id` na zamawiającym nadal resetuje wszystkie jego otwarte przetargi — akceptujemy świadomie (mniej szkiców, bez spamu; Q-FU-7 zamknięte); przypomnienie o terminie działa niezależnie od aktywności (Q-FU-6) | średnie |
 | R-FU-12 | Kilka szkiców dla jednej osoby jednej nocy (przetarg z częściami) | szum dla handlowca | jeden szkic na postępowanie i najwyżej jeden na osobę na dobę (§3.1, Q-FU-5); przypomnienia poza limitem na osobę | niskie |
-| R-FU-13 | `cf_notice_number` to numer najnowszego ogłoszenia (N8N-workflows `docs/e_zamowienia_om_push.md` l.48); części jednego postępowania mogą dostać różne numery | grupowanie się rozpada: więcej szkiców, bez utraty danych | klucz pola konfigurowalny (`followups.tender_group_field_key`); potwierdzenie przez Enkę razem z kluczem push części (D189) | niskie |
-| R-FU-14 | Postępowanie z kilkoma częściami o tym samym terminie dostaje przypomnienie na każdą część (Q-FU-6: jedno na deal) | kilka przypomnień tej samej doby | zgodnie z odpowiedzią na Q-FU-6; zgłoszone Koordynatorowi do potwierdzenia | niskie |
+| R-FU-13 | `cf_notice_number` to numer najnowszego ogłoszenia (N8N-workflows `docs/e_zamowienia_om_push.md` l.48); części jednego postępowania mogą dostać różne numery | grupowanie się rozpada: więcej szkiców, bez utraty danych | **zamknięte (rev 4b, Cezar):** grupowanie po kluczu D189 bez części (`ezamowienia:<tender_id>`), nie po `cf_notice_number`; parametr `followups.tender_group_field_key` usunięty; źródło klucza na dealu (`cf_source` + `cf_external_id`) — do potwierdzenia przez Enkę (D189) | zamknięte |
+| R-FU-14 | Postępowanie z kilkoma częściami o tym samym terminie dostaje przypomnienie na każdą część (Q-FU-6: jedno na deal) | kilka przypomnień tej samej doby | **zamknięte (rev 4b, Cezar):** jedno przypomnienie na postępowanie i termin, deduplikacja `(group_key, term_value)` (D177, §4.1) | zamknięte |
 
 ## 13. Pytania biznesowe — rozstrzygnięte
 
@@ -381,13 +380,13 @@ Odpowiedzi: Marek 2026-10-31 (via Koordynator); części techniczne: Cezar 2026-
 - **Q-FU-2 (które kontakty):** tylko osoby i firmy powiązane z otwartym dealem → D173, §3.1.
 - **Q-FU-3 (które etapy lejka „Przetargi”):** od `result_lead` w górę, bez zamkniętych (`won`, `lost`, `rejected`, `cancelled`) → D173, §3.1, §8.
 - **Q-FU-4 (kto widzi szkice):** opiekun obiektu i administrator; bez opiekuna — administratorzy → D179, §5.1, §6.
-- **Q-FU-5 (przetarg z częściami, limit na osobę):** jeden szkic na postępowanie (części grupowane po `tender_notice_number`); najwyżej jeden szkic na osobę kontaktową na dobę; przy kolizji wygrywa najbliższy `cf_deadline`, potem najdłuższa nieaktywność; pominięte w notce → D173, D182, §3.1, §9.
-- **Q-FU-6 (przypomnienie o terminie):** zawsze, przed `cf_deadline` o `followups.reminder_days_before` (domyślnie 3); wyjątek `kind = reminder` ignoruje aktywność i `mute_days`; jedno przypomnienie na deal na wartość terminu → D174, D175, D177, D181, §3.2, §4.1, §4.3.
+- **Q-FU-5 (przetarg z częściami, limit na osobę):** jeden szkic na postępowanie (części grupowane po kluczu D189 bez części — rev 4b, Cezar; wcześniej po numerze ogłoszenia); najwyżej jeden szkic na osobę kontaktową na dobę; przy kolizji wygrywa najbliższy `cf_deadline`, potem najdłuższa nieaktywność; pominięte w notce → D173, D182, §3.1, §9.
+- **Q-FU-6 (przypomnienie o terminie):** zawsze, przed `cf_deadline` o `followups.reminder_days_before` (domyślnie 3); wyjątek `kind = reminder` ignoruje aktywność i `mute_days`; jedno przypomnienie na postępowanie na wartość terminu (rev 4b, Cezar; wcześniej na deal) → D174, D175, D177, D181, §3.2, §4.1, §4.3.
 - **Q-FU-7 (zamknięte wcześniej, Cezar 2026-10-31 (techniczne)):** aktywność osoby lub firmy bez wskazania deala liczy się dla wszystkich jej otwartych deali; aktywność przypięta do innego deala się nie liczy (§3.2 pkt 1a, R-FU-11).
 
-Rozstrzygnięcia techniczne po review #33 (Cezar 2026-10-31 (techniczne)): `mute_days` = N, min 1; limit 200 szkiców na przebieg na firmę z liczbą pominiętych w notce; obiekt bez opiekuna → administratorzy; właściciel zatwierdzonego zadania = opiekun obiektu, autor = zatwierdzający; zaplanowana przyszła interakcja = aktywność; przebieg przy wyłączonym module = wpis `skipped`; rev 4: klucz grupowania z pola deala (`followups.tender_group_field_key`), deduplikacja przypomnień po `term_value`, `superseded_reason` wg przyczyny i `superseded_via`.
+Rozstrzygnięcia techniczne po review #33 (Cezar 2026-10-31 (techniczne)): `mute_days` = N, min 1; limit 200 szkiców na przebieg na firmę z liczbą pominiętych w notce; obiekt bez opiekuna → administratorzy; właściciel zatwierdzonego zadania = opiekun obiektu, autor = zatwierdzający; zaplanowana przyszła interakcja = aktywność; przebieg przy wyłączonym module = wpis `skipped`; rev 4: klucz grupowania z pola deala (`followups.tender_group_field_key`), deduplikacja przypomnień po `term_value`, `superseded_reason` wg przyczyny i `superseded_via`; rev 4b: grupowanie po kluczu D189 bez części (parametr usunięty), deduplikacja przypomnień po `(group_key, term_value)`, D192 na słowniku `sales.deal_loss_reason`, D193 potwierdzone.
 
-Do Koordynatora (P20, bez rozstrzygnięcia w tej speki): stabilność `cf_notice_number` jako klucza grupowania (R-FU-13, razem z D189); przypomnienie per część postępowania (R-FU-14). Pytania techniczne: brak otwartych.
+Do Koordynatora (P20, bez rozstrzygnięcia w tej speki): pole deala z kluczem D189 (`cf_source` + `cf_external_id` z pushu n8n; rejestr go nie wskazuje — Enka przy kodzie). R-FU-13 i R-FU-14 zamknięte w rev 4b. Pytania techniczne: brak otwartych.
 
 ## 14. Uwagi dla planu testów (niezależny plan, osobna sesja)
 
@@ -405,7 +404,7 @@ apps/mercato/src/modules/crm_followups/
   data/entities.ts  data/validators.ts
   lib/inactivity.ts        # D172 (czysta funkcja + zapytania, wzór stuckDeals.ts)
   lib/draftKind.ts         # D177 (mail/zadanie)
-  lib/reminders.ts         # D177 (wyjątek `kind = reminder`, deduplikacja `term_value`)
+  lib/reminders.ts         # D177 (wyjątek `kind = reminder`, deduplikacja `(group_key, term_value)`)
   lib/grouping.ts          # D173 (`group_key`, limit na osobę, reguła kolizji)
   lib/templates.ts         # D184
   commands/runs.ts  commands/drafts.ts
@@ -445,7 +444,7 @@ apps/mercato/src/modules/crm_followups/
 | Zależność jednokierunkowa | ✅ `crm_followups` → `customers` |
 | Brak zapisów do cudzych tabel | ✅ zapis do `customers` tylko komendą `customers.interactions.create` |
 | Zero twardych UUID | ✅ lejek rozwiązywany po kluczu |
-| Jednoznaczne reguły w bazie (partial unique) | ✅ jeden otwarty szkic follow-upu na obiekt i na postępowanie; jedno przypomnienie na deal i termin; `run_key` unikalny; jeden `running` na organizację |
+| Jednoznaczne reguły w bazie (partial unique) | ✅ jeden otwarty szkic follow-upu na obiekt i na postępowanie; jedno przypomnienie na postępowanie i termin; `run_key` unikalny; jeden `running` na organizację |
 | Jedno pojęcie na byt | ✅ szkic ≠ interakcja |
 | RBAC tylko w `acl.ts`, role OM | ✅ §6 |
 | Ustawienia nie dublują RBAC | ✅ §8 |
@@ -487,8 +486,8 @@ apps/mercato/src/modules/crm_followups/
 | D182 | notka z przebiegu (z pominięciami Q-FU-5) | §2.3, §9 |
 | D183 | audyt | §10 |
 | D184 | treść: tylko szablony pl/en, bez LLM (Q-FU-1) | §4.2 |
-| D192 | etap `rejected` = każde odrzucenie, powód z `rejection_reason` (spoza modułu; tu: etap zamknięty, poza zakresem) | §3.1, §4.3 |
-| D193 | opiekun deala z n8n z ustawienia firmy, domyślnie brak → szkice do administratorów | §2.2, §6 |
+| D192 | etap `rejected` = każde odrzucenie, powód z `sales.deal_loss_reason` (spoza modułu; tu: etap zamknięty, poza zakresem) | §3.1, §4.3 |
+| D193 | opiekun deala z n8n z ustawienia firmy, domyślnie brak → szkice do administratorów; tylko przy tworzeniu deala, bez wstecz (potwierdzone) | §2.2, §6 |
 
 Powiązane wcześniejsze: D33, D34 (lejek „Przetargi”), D47 (włączanie per organizacja), D69 (klucz ustawień), D31, D132 (przetarg z częściami), D89 (job dzienny), D94 (`scheduler` opcjonalny, wyłączony w forku), D115 (workery w kontenerze `app`), D147 (404 / `403 FORBIDDEN`), D185, D190 (zasada „bez opiekuna → administratorzy”).
 
@@ -498,3 +497,4 @@ Powiązane wcześniejsze: D33, D34 (lejek „Przetargi”), D47 (włączanie per
 - 2026-10-31 rev 2 — review PR #33 (Cezar): B2 rekoncyliacja + eventy `email.linked`/`comment.created`/`todo.created`; B3 maile i interakcje osób deala; B4 decyzje tylko z sesji, klucz API tylko `run`, R-FU-4; B5 tymczasowa reguła części (Q-FU-5); N1–N16; rozstrzygnięcia techniczne; Q-FU-5, Q-FU-6. Zaktualizowane D171–D177, D179–D184.
 - 2026-10-31 rev 3 — łatki po review rev 2 (Cezar): filtr `deal_id IS NULL OR deal_id = <ten deal>` dla aktywności osób i firm deala, R-FU-11 z firmami, Q-FU-7 zamknięte (D172); jeden predykat zamknięcia dla eventu i rekoncyliacji (D174); pole terminu `cf_deadline` = `expected_close_at` z n8n (D177, D181); `auth.isApiKey` → 403 w trasach i komendach, klucze sesji `ai_assistant`, R-FU-4 (D176, D179); heartbeat i `skipped`/`concurrent` przy wznowieniu, zachowanie godziny joba, scheduler wyłączony bez błędu (D180); D177 zależne od Q-FU-6; pomijanie kontaktu przy otwartym szkicu deala z wcześniejszego przebiegu (D173); §16 `encryption.ts`, `notifications.ts`. Zaktualizowane D172–D174, D176, D177, D179–D181.
 - 2026-10-31 rev 4 — merge `develop_OM_CRM` @2faa964 do gałęzi (commit merge z dwoma rodzicami); odpowiedzi Marka na Q-FU-1…Q-FU-6 (via Koordynator; części techniczne — Cezar): tylko szablony bez LLM (D184), kontakty tylko z otwartym dealem i etapy od `result_lead` (D173), widoczność opiekun + administrator (D179), jeden szkic na postępowanie, jeden na osobę na dobę, reguła kolizji i pominięcia w notce (D173, D182), przypomnienie jako wyjątek `kind = reminder` z deduplikacją po terminie (D174, D175, D177, D181); nity review rev 3: §0.2 odsyła do §4.3, `superseded_reason` wg przyczyny + `superseded_via`, R-FU-11 z poziomem ryzyka; zapis `403 FORBIDDEN`; R-FU-13, R-FU-14; odesłania do D192 i D193. Zaktualizowane D173–D177, D179, D181, D182, D184.
+- 2026-10-31 rev 4b — rozstrzygnięcia Cezara 2026-10-31 (techniczne): części grupowane po kluczu D189 bez części (`ezamowienia:<tender_id>` z `cf_source` + `cf_external_id`), parametr `followups.tender_group_field_key` usunięty, R-FU-13 zamknięte (D173, D181, §2.2, §3.1, §8); jedno przypomnienie na postępowanie i termin, indeks `(organization_id, group_key, term_value)`, zamknięcie przypomnienia per grupa, R-FU-14 zamknięte (D174, D177, §2.2, §4.1, §4.3); D192 — powód z `sales.deal_loss_reason` zamiast `rejection_reason` (§19); D193 potwierdzone (§19). Zaktualizowane D173, D174, D177, D181; poza modułem D185, D188, D191, D192, D193.

@@ -1,6 +1,6 @@
 # Klin #1 — kręgosłup architektury
 
-**Status:** 2026-10-31 (P16; luki L1–L6 przeniesione do D185–D190, `lost → open` — D191, nity po merge #35; Q-ARCH-1 → D192, Q-ARCH-2 → D193; otwarte tylko skutki merge z L3). Krótki przegląd: kto jest właścicielem jakiego bytu, jakie są przejścia stanów, granice modułów i klucze. Każde zdanie wskazuje decyzję D z `.ai/decisions.md`; czego nie da się wyprowadzić z D, jest oznaczone jako **Luka** (sekcja 5). Ten plik niczego nie rozstrzyga — przy rozbieżności obowiązuje rejestr (P12).
+**Status:** 2026-10-31 (P16; luki L1–L6 przeniesione do D185–D190, `lost → open` — D191, nity po merge #35; Q-ARCH-1 → D192, Q-ARCH-2 → D193; punkty zapisu D192 rozstrzygnięte 2026-10-31 przez Cezara; otwarte tylko skutki merge z L3). Krótki przegląd: kto jest właścicielem jakiego bytu, jakie są przejścia stanów, granice modułów i klucze. Każde zdanie wskazuje decyzję D z `.ai/decisions.md`; czego nie da się wyprowadzić z D, jest oznaczone jako **Luka** (sekcja 5). Ten plik niczego nie rozstrzyga — przy rozbieżności obowiązuje rejestr (P12).
 
 ## 1. Właściciele bytów
 
@@ -42,8 +42,8 @@ stateDiagram-v2
 - Deal usunięty w UI nie jest odtwarzany przez n8n (`last_error = 'deleted_in_om'`, D35). Wynik przetargu ustawia `winner_*`/`competitor*`; n8n nie zmienia `closure_outcome` ani powodu przegranej (D42).
 - Źródła przejść: n8n tworzy deal i przestawia etap tylko na `result_lead` i `cancelled`, bez `closure_outcome` (D4, D31, D34, D42, D185); `won`/`lost` ustawia użytkownik w UI OM (D41 — słownik powodów odblokowuje „Oznacz jako przegrany”); D133 wymaga `won` do utworzenia projektu, D49 (marża) i D141 (flaga projektu) to skutki przejść, nie ich źródło.
 - `lost → open` to zachowanie OM core bez zmian w forku; deal wraca do prognozy, moduły własne nie dodają reakcji — flagi D72 i D141 dotyczą deala po `won` (D191).
-- Ręczne zmiany etapu nie wpływają na kosztorys — costing patrzy tylko na `closure_outcome` i `deleted_at` (D185). Etap `rejected` = każde odrzucenie, z powodem ze słownika `rejection_reason` (brak → 422 `REASON_REQUIRED`); `closure_outcome` wynika z atrybutu `outcome` powodu: `lost` → `closure_outcome = lost`, `no_result` — zapis otwarty (D192, sekcja 5).
-- Usunięcie deala z projektem albo harmonogramem: bez kaskady, flagi `deal_reopened_at` / `reopened_at` zostają jako historia, dane zostają; przywrócenie deala emituje `deal_restored`, flagę zdejmuje użytkownik z audytem — w projekcie z powodem (D161), w harmonogramie bez powodu, bez `project_schedule.edit` → 403 (D188).
+- Ręczne zmiany etapu nie wpływają na kosztorys — costing patrzy tylko na `closure_outcome` i `deleted_at` (D185). Etap `rejected` = każde odrzucenie, z powodem ze słownika `sales.deal_loss_reason` (D41; `loss_reason_id`, brak → 422 `REASON_REQUIRED`); `outcome` powodu z tabeli mapującej w module forka (wpis bez mapowania = `no_result`): `lost` → `closure_outcome = lost`, `no_result` → `closure_outcome` zostaje NULL; prognoza kosztorysu wyklucza `rejected` niezależnie od `closure_outcome` (D185, D191, D192).
+- Usunięcie deala z projektem albo harmonogramem: bez kaskady, flagi `deal_reopened_at` / `reopened_at` zostają jako historia, dane zostają; przywrócenie deala emituje `deal_restored`, flagę zdejmuje użytkownik z audytem — w projekcie z powodem (D161), w harmonogramie bez powodu, bez `project_schedule.edit` → `403 FORBIDDEN` (D188).
 
 ### 2.2 Rekord harmonogramu inwestycji (`project_schedule`, v1)
 
@@ -133,11 +133,11 @@ flowchart LR
 
 ## 5. Luki i pytania otwarte
 
-Luki L1, L2, L4, L5, L6 i statusy z L3 są rozstrzygnięte w rejestrze — wiersz zostaje jako odesłanie. Q-ARCH-1 i Q-ARCH-2 zamknięte (D192, D193). Otwarte są tylko skutki merge (L3) i punkty zapisu D192 (sekcja „Otwarte” w `.ai/decisions.md`).
+Luki L1, L2, L4, L5, L6 i statusy z L3 są rozstrzygnięte w rejestrze — wiersz zostaje jako odesłanie. Q-ARCH-1 i Q-ARCH-2 zamknięte (D192, D193). Otwarte są tylko skutki merge (L3); punkty zapisu D192 rozstrzygnięte (Cezar 2026-10-31); spójność D192 z D41 i speką kosztorysu — sekcja „Otwarte” w `.ai/decisions.md`.
 
 | # | Luka | Stan / odesłanie | Kto rozstrzyga |
 |---|---|---|---|
-| L1 | Przejścia między etapami lejka poza automatem i wejście do `rejected`/`cancelled`. | → **D185** (n8n tylko `result_lead` i `cancelled`; ręczne zmiany etapu bez wpływu na kosztorys); `lost → open` → **D191** (OM core bez zmian). znaczenie `rejected` → **D192** (każde odrzucenie, powód obowiązkowy, `closure_outcome` z atrybutu powodu). Otwarte (P20): zapis `no_result` przy `closure_outcome` tylko `won`/`lost`, miejsce atrybutu `outcome`, relacja do `sales.deal_loss_reason` (D41). | Koordynator / Cezar: punkty zapisu D192 |
+| L1 | Przejścia między etapami lejka poza automatem i wejście do `rejected`/`cancelled`. | → **D185** (n8n tylko `result_lead` i `cancelled`; ręczne zmiany etapu bez wpływu na kosztorys); `lost → open` → **D191** (OM core bez zmian). znaczenie `rejected` → **D192** (każde odrzucenie, powód obowiązkowy ze słownika `sales.deal_loss_reason`, `outcome` z tabeli mapującej forka, `no_result` → `closure_outcome` NULL, prognoza bez `rejected`; punkty zapisu rozstrzygnięte przez Cezara 2026-10-31). | — |
 | L2 | Statusy projektu i ich przejścia. | → **D186** | — |
 | L3 | Stany inwestycji i skutki merge. | statusy → **D187**. **Otwarte:** co dzieje się z ofertami (primary, D51, D65), projektem (D116) i harmonogramem (D23) po merge; po decyzji przegląd TC-DEAL-009 (D187). | Cezar / Koordynator przed v1 |
 | L4 | Skutek usunięcia deala, który ma projekt albo harmonogram wykonawczy. | → **D188** | — |
