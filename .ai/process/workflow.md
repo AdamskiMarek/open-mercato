@@ -21,7 +21,7 @@ flowchart TD
 
 | # | Krok | Kto | Wejście | Wyjście |
 |---|---|---|---|---|
-| 1 | Speka i plan testów | Cezar (speka); niezależna sesja innym modelem (plan, z rejestru D, bez czytania speki) | `.ai/decisions.md`, brief (P14) | speka + plan testów w PR doc-only |
+| 1 | Speka i plan testów | Cezar (speka); niezależna sesja innym modelem (plan, z rejestru D, bez czytania speki) | speka: `.ai/decisions.md` + brief (P14); plan: wyłącznie `.ai/decisions.md`, bez speki i briefów (P4) | speka + plan testów w PR doc-only |
 | 2 | spec-check | wykonawca | pliki z repo przy SHA heada (`git show`) | PASS, 0 FAIL bez flag |
 | 3 | Bramka gotowości | osobna sesja tylko do odczytu | speka, plan, rejestr, brief, `architecture.md` | PASS / CONCERNS / FAIL (P13) |
 | 4 | „implementujemy” | Marek, przez Koordynatora | werdykt bramki PASS | zgoda na kod (P3) |
