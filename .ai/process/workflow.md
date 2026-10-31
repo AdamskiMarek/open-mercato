@@ -1,6 +1,6 @@
 # Przepływ pracy Klin #1 (od speki do merge)
 
-**Status:** 2026-10-31 (P18; praca w ClickUp — P22). Opis kolejności kroków i ról. Szczegóły kroków: bramka — `readiness-gate.md` (P13), review — `review-format.md` (P15), zasady agentów — `../agent-rules.md` (P17). Źródło decyzji: `.ai/decisions.md` (P12).
+**Status:** 2026-10-31 (P18; praca w ClickUp — P22; zmiana 2026-10-31: „zrobione” dopiero po merge PR i PASS Weryfikatora). Opis kolejności kroków i ról. Szczegóły kroków: bramka — `readiness-gate.md` (P13), review — `review-format.md` (P15), zasady agentów — `../agent-rules.md` (P17). Źródło decyzji: `.ai/decisions.md` (P12).
 
 ## Przepływ
 
@@ -43,6 +43,8 @@ flowchart TD
 - Układ: Epik > Story > Subtask. Epiki: kosztorys, harmonogram, projekty i dokumentacja, follow-upy v2. Tablicę prowadzi Organizator.
 - Cezar dzieli brief (5 pól, P14) na epik i tnie go na story. Story: kryteria akceptacji, numery D i TC, wersja (MVP / v1 / v2); na tyle małe, żeby Kod zbudował je w jednej świeżej sesji. Bez estymat w dniach (P11).
 - GitHub zostaje na kod i PR-y; każde story linkuje swój PR.
+- Story przechodzi do „zrobione” dopiero po merge PR (P5) i werdykcie PASS Weryfikatora („spełnione”, P18). Merge nie dostaje osobnego statusu: story z werdyktem PASS i niezmergowanym PR zostaje w „weryfikacja” do merge (zmiana 2026-10-31).
+- Speki, plany testów i PR doc-only nie wymagają story (`agent-rules.md` Z13).
 
 ```mermaid
 flowchart LR
@@ -50,7 +52,8 @@ flowchart LR
     r --> w["w budowie<br/>(Kod; PR podlinkowany w story)"]
     w --> v{"weryfikacja<br/>werdykt Weryfikatora (P18)"}
     v -- "niespełnione TC" --> w
-    v -- "spełnione" --> z["zrobione"]
+    v -- "spełnione (PASS)" --> mg{"merge PR (P5)<br/>bez osobnego statusu"}
+    mg -- "tak" --> z["zrobione"]
 ```
 
 | Status | Wejście do statusu | Kroki przepływu powyżej |
@@ -58,5 +61,5 @@ flowchart LR
 | backlog | story wycięte z epiku (P22) | 1–3 |
 | gotowe do budowy | „implementujemy” i PASS bramki gotowości (P3, P13) | 4 |
 | w budowie | Kod buduje story; PR podlinkowany w story | 5 |
-| weryfikacja | PR gotowy do sprawdzenia na TC | 6 (P18) |
-| zrobione | werdykt Weryfikatora „spełnione” | 7 |
+| weryfikacja | PR gotowy do sprawdzenia na TC; story zostaje tu po PASS do merge PR | 6–7 (P18) |
+| zrobione | werdykt Weryfikatora PASS („spełnione”) i merge PR (P5, P18) | 8 |

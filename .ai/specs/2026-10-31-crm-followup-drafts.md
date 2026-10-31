@@ -6,7 +6,7 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-31 |
-| **Rewizja** | 2026-10-31 (rev 4b — rozstrzygnięcia Cezara: grupowanie części po kluczu D189, jedno przypomnienie na postępowanie i termin, D192 na słowniku `sales.deal_loss_reason`; rev 4 — odpowiedzi Marka na Q-FU-1…Q-FU-6, nity review rev 3, merge `develop_OM_CRM` @2faa964; wcześniej rev 3: łatki po review rev 2, rev 2: B2–B5, N1–N16) |
+| **Rewizja** | 2026-10-31 (rev 5 — doc-PR po #33: literały statusów `approved`/`rejected` (D175, D176), brak widoku obiektu przy zatwierdzeniu → `403 FORBIDDEN` (D179), pierwszeństwo limitów (D181), lista części w treści (D184), pytania techniczne §13.1; rev 4b — rozstrzygnięcia Cezara: grupowanie części po kluczu D189, jedno przypomnienie na postępowanie i termin, D192 na słowniku `sales.deal_loss_reason`; rev 4 — odpowiedzi Marka na Q-FU-1…Q-FU-6, nity review rev 3, merge `develop_OM_CRM` @2faa964; wcześniej rev 3: łatki po review rev 2, rev 2: B2–B5, N1–N16) |
 | **Faza** | v2 |
 | **Moduł** | `crm_followups` (`apps/mercato/src/modules/crm_followups`; prefiks tabel `fu_`), opcjonalny per organizacja (D47) |
 | **Zależności upstream** | `customers` (deale, interakcje, komentarze, ustawienia), `configs` (ModuleConfigService), `audit_logs`, `notifications`, `@open-mercato/queue`, `auth`/`directory` (scope), opcjonalnie `@open-mercato/scheduler` (wyzwalacz cron, D180) |
@@ -236,6 +236,8 @@ Lista dozwolonych rodzajów per firma: `followups.kinds`.
 
 Szablony per `kind` × `target_type`, i18n pl/en w kodzie modułu, nadpisywalne w ustawieniach firmy (`followups.templates`). Zmienne: nazwa obiektu, kontakt, etap, liczba dni bez aktywności, termin, opiekun, lista pozostałych części postępowania (§3.1). Bez LLM i bez nowych zależności (Q-FU-1, D184).
 
+Lista pozostałych części (szkic follow-upu: pozostałe kwalifikujące się części grupy, §3.1; przypomnienie: części z tym samym terminem, §4.1) jest zmienną szablonu: treść wymienia każdą pozostałą część tytułem jej deala; układ i formatowanie listy wyznacza szablon (D184, zmiana 2026-10-31).
+
 ### 4.3 Idempotencja szkiców (D174)
 
 - Najwyżej jeden otwarty szkic follow-upu na obiekt i na postępowanie: częściowe unikalne indeksy (§2.2). Kolejny przebieg pomija obiekt z otwartym szkicem (`skipped_open_draft`). Przypomnienie ma osobną deduplikację po `(group_key, term_value)` (§4.1).
@@ -274,7 +276,7 @@ Odrzucenie: status `rejected`, powód opcjonalny (metadane komendy), `muted_unti
 | `crm_followups.settings.manage` | — | tak | ustawienia §8 |
 | `crm_followups.run` | — | tak | ręczne uruchomienie przebiegu, klucz API dla n8n/agenta, `schedulerRequiredFeatures` |
 
-Zatwierdzenie wymaga dodatkowo uprawnień celu: zadanie/przypomnienie — `customers.interactions.manage`; mail — `customers.email.compose`; widok obiektu — `customers.deals.view` albo `customers.people.view` / `customers.companies.view`. Granty domyślne w `setup.ts`. Role tylko OM (superadmin/admin/employee). Handlowiec nie widzi szkiców cudzych obiektów (Q-FU-4).
+Zatwierdzenie wymaga dodatkowo uprawnień celu: zadanie/przypomnienie — `customers.interactions.manage`; mail — `customers.email.compose`; widok obiektu — `customers.deals.view` albo `customers.people.view` / `customers.companies.view`. Brak któregokolwiek z nich → `403 FORBIDDEN`, szkic zostaje `open`, interakcja nie powstaje (D179, zmiana 2026-10-31). Granty domyślne w `setup.ts`. Role tylko OM (superadmin/admin/employee). Handlowiec nie widzi szkiców cudzych obiektów (Q-FU-4).
 
 - **Widoczność (Q-FU-4, D179):** szkic widzi i rozstrzyga opiekun obiektu i administrator. **Obiekt bez opiekuna** (lub opiekun nieaktywny/usunięty): szkic dla administratorów (`assignee_user_id = NULL`, widok przez `manage_all`). Deal z n8n ma opiekuna z ustawienia `crm.n8n_default_deal_owner_user_id` albo żadnego (D193).
 - **Klucz API n8n:** wyłącznie `crm_followups.run`. Bez `crm_followups.drafts.*`, bez `crm_followups.settings.manage` i bez `customers.email.compose`.
@@ -335,9 +337,9 @@ Ustawia administrator instancji (env serwera, Dokploy), nie organizacja; nie tra
 
 | Parametr | Typ | Domyślnie | Uwagi |
 |---|---|---|---|
-| `OM_CRM_FOLLOWUPS_ENABLED` | bool | `true` | globalny wyłącznik workera na instancji |
+| `OM_CRM_FOLLOWUPS_ENABLED` | bool | `true` | globalny wyłącznik workera na instancji; skutek `false` dla crona i `POST /runs` — Q-FU-T3 (§13.1) |
 | `OM_CRM_FOLLOWUPS_SCAN_BATCH_SIZE` | int | 500 | rozmiar partii odczytu obiektów |
-| `OM_CRM_FOLLOWUPS_MAX_DRAFTS_PER_RUN` | int | 1000 | twardy limit instancji; wygrywa z ustawieniem firmy |
+| `OM_CRM_FOLLOWUPS_MAX_DRAFTS_PER_RUN` | int | 1000 | twardy limit instancji; wygrywa z ustawieniem firmy: limit efektywny = min(`followups.max_drafts_per_run`, ta wartość) (D181, zmiana 2026-10-31) |
 | `OM_CRM_FOLLOWUPS_WORKER_CONCURRENCY` | int | 1 | współbieżność workera w procesie `queue worker --all` (D115) |
 | `OM_CRM_FOLLOWUPS_RUN_STALE_MINUTES` | int | 60 | po tylu minutach od `heartbeat_at` przebieg `running` uznany za porzucony i wznawiany (D180) |
 
@@ -387,6 +389,18 @@ Odpowiedzi: Marek 2026-10-31 (via Koordynator); części techniczne: Cezar 2026-
 Rozstrzygnięcia techniczne po review #33 (Cezar 2026-10-31 (techniczne)): `mute_days` = N, min 1; limit 200 szkiców na przebieg na firmę z liczbą pominiętych w notce; obiekt bez opiekuna → administratorzy; właściciel zatwierdzonego zadania = opiekun obiektu, autor = zatwierdzający; zaplanowana przyszła interakcja = aktywność; przebieg przy wyłączonym module = wpis `skipped`; rev 4: klucz grupowania z pola deala (`followups.tender_group_field_key`), deduplikacja przypomnień po `term_value`, `superseded_reason` wg przyczyny i `superseded_via`; rev 4b: grupowanie po kluczu D189 bez części (parametr usunięty), deduplikacja przypomnień po `(group_key, term_value)`, D192 na słowniku `sales.deal_loss_reason`, D193 potwierdzone.
 
 Do Koordynatora (P20, bez rozstrzygnięcia w tej speki): pole deala z kluczem D189 (`cf_source` + `cf_external_id` z pushu n8n; rejestr go nie wskazuje — Enka przy kodzie). R-FU-13 i R-FU-14 zamknięte w rev 4b. Pytania techniczne: brak otwartych.
+
+
+### 13.1 Pytania techniczne otwarte (do Cezara, zmiana 2026-10-31)
+
+Wnioski planu testów z #33, których rejestr i przyjęte wzorce nie rozstrzygają jednoznacznie. Do odpowiedzi plan sprawdza tylko skutek (odrzucenie, brak zmian), bez literału kodu.
+
+- **Q-FU-T1 (wniosek 1):** kod 422 odrzucenia ustawień spoza zakresu (`mute_days` < 1, etap zamknięty w `deal_stage_keys`, D175, D181). Propozycja: `INVALID_SETTING_VALUE` (wspólny z walidacją ustawienia D193, Q-LR-1).
+- **Q-FU-T2 (wniosek 2):** status i kod `POST /api/crm-followups/runs` bez nagłówka `Idempotency-Key` (D180). Propozycja: 422 `IDEMPOTENCY_KEY_REQUIRED`.
+- **Q-FU-T3 (wniosek 3):** co robi `OM_CRM_FOLLOWUPS_ENABLED = false` z wyzwalaczami: (a) worker nie przetwarza, `POST /runs` przyjmuje przebieg, który czeka; (b) `POST /runs` i job crona tworzą przebieg `skipped` z powodem w notce; (c) `POST /runs` odrzucony kodem. Pierwszeństwo limitów i `WORKER_CONCURRENCY` — rozstrzygnięte w D181 (zmiana 2026-10-31).
+- **Q-FU-T4 (wniosek 6):** obiekt kwalifikuje się do maila, a `email` nie ma w `followups.kinds`: (a) powstaje zadanie (jeśli `task` jest w `kinds`); (b) szkic nie powstaje i obiekt jest liczony w notce jako pominięty. D177 wybiera rodzaj, ale nie opisuje zastępstwa.
+
+Wnioski 8 (źródło klucza części na dealu — Enka) i 9 (warunek wstępny schedulera — zgoda Marka) zostają w sekcji „Otwarte” rejestru; to nie są pytania do Cezara.
 
 ## 14. Uwagi dla planu testów (niezależny plan, osobna sesja)
 
@@ -498,3 +512,4 @@ Powiązane wcześniejsze: D33, D34 (lejek „Przetargi”), D47 (włączanie per
 - 2026-10-31 rev 3 — łatki po review rev 2 (Cezar): filtr `deal_id IS NULL OR deal_id = <ten deal>` dla aktywności osób i firm deala, R-FU-11 z firmami, Q-FU-7 zamknięte (D172); jeden predykat zamknięcia dla eventu i rekoncyliacji (D174); pole terminu `cf_deadline` = `expected_close_at` z n8n (D177, D181); `auth.isApiKey` → 403 w trasach i komendach, klucze sesji `ai_assistant`, R-FU-4 (D176, D179); heartbeat i `skipped`/`concurrent` przy wznowieniu, zachowanie godziny joba, scheduler wyłączony bez błędu (D180); D177 zależne od Q-FU-6; pomijanie kontaktu przy otwartym szkicu deala z wcześniejszego przebiegu (D173); §16 `encryption.ts`, `notifications.ts`. Zaktualizowane D172–D174, D176, D177, D179–D181.
 - 2026-10-31 rev 4 — merge `develop_OM_CRM` @2faa964 do gałęzi (commit merge z dwoma rodzicami); odpowiedzi Marka na Q-FU-1…Q-FU-6 (via Koordynator; części techniczne — Cezar): tylko szablony bez LLM (D184), kontakty tylko z otwartym dealem i etapy od `result_lead` (D173), widoczność opiekun + administrator (D179), jeden szkic na postępowanie, jeden na osobę na dobę, reguła kolizji i pominięcia w notce (D173, D182), przypomnienie jako wyjątek `kind = reminder` z deduplikacją po terminie (D174, D175, D177, D181); nity review rev 3: §0.2 odsyła do §4.3, `superseded_reason` wg przyczyny + `superseded_via`, R-FU-11 z poziomem ryzyka; zapis `403 FORBIDDEN`; R-FU-13, R-FU-14; odesłania do D192 i D193. Zaktualizowane D173–D177, D179, D181, D182, D184.
 - 2026-10-31 rev 4b — rozstrzygnięcia Cezara 2026-10-31 (techniczne): części grupowane po kluczu D189 bez części (`ezamowienia:<tender_id>` z `cf_source` + `cf_external_id`), parametr `followups.tender_group_field_key` usunięty, R-FU-13 zamknięte (D173, D181, §2.2, §3.1, §8); jedno przypomnienie na postępowanie i termin, indeks `(organization_id, group_key, term_value)`, zamknięcie przypomnienia per grupa, R-FU-14 zamknięte (D174, D177, §2.2, §4.1, §4.3); D192 — powód z `sales.deal_loss_reason` zamiast `rejection_reason` (§19); D193 potwierdzone (§19). Zaktualizowane D173, D174, D177, D181; poza modułem D185, D188, D191, D192, D193.
+- 2026-10-31 rev 5 — doc-PR po #33 (polecenie Cezara 2026-10-31): wnioski planu `crm_followups` §17 — status odrzuconego szkicu `rejected` (D175) i zatwierdzonego zadania/przypomnienia `approved` (D176) przeniesione do rejestru; brak widoku obiektu lub feature'a celu przy zatwierdzeniu → `403 FORBIDDEN`, szkic zostaje `open` (D179, §6); limit efektywny = min(firma, instancja) i znaczenie `WORKER_CONCURRENCY` (D181, §8.1); lista części jako zmienna szablonu (D184, §4.2); pytania Q-FU-T1…Q-FU-T4 (§13.1) dla wniosków 1, 2, 3 (część) i 6; wnioski 8 i 9 bez zmian (sekcja „Otwarte” rejestru).
