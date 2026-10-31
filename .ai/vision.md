@@ -79,7 +79,7 @@
 - Przed kodem powstaje osobny plan testów, pisany innym modelem niż spec i bez czytania speki.
 - Merge tylko po „merguj”.
 - „Gotowe” = dowód: testy + zrzuty ekranu albo przebieg na instancji testowej open-mercato.pl.
-- Cezar pracuje na Copilocie (limit odnawia się 1. dnia miesiąca). Gdy limit się skończy, runnerem jest Kod.
+- Cezar buduje: na własnym VPS dobiera model, skille i agentów kodujących (m.in. Copilot, limit odnawia się 1. dnia miesiąca). Kod jest niezależnym kontrolerem: plan TC, spec-check, review i bramka gotowości; nie buduje tego, co weryfikuje, i nie jest runnerem (P23; zmiana 2026-10-31, źródło: Marek 2026-10-31 (via Koordynator)).
 - Kod robi niezależny przegląd architektury przed kodem (lista: `om-architecture-checklist.md`).
 - Własne moduły jako moduły aplikacji w forku, bez zmian w `packages/core`.
 
@@ -100,4 +100,4 @@
 - Hałaśliwy scoring: dostroić słowa kluczowe segmentu prefab.
 - Publikacja godzinnej automatyki n8n: nieopublikowana; przed publikacją próg ≥ 50 dla nowych deali i publikacja workflow podrzędnego `E_zamowienia_om_request`; wymaga zgody Marka.
 - Przegląd pól fazy 0 w OM przez Marka.
-- Rev 8 speki: wnieść uwagi Kod i wnioski z planu testów (Cezar; gdy brak limitu Copilota, runnerem jest Kod).
+- Rev 8 speki: wnieść uwagi Kod i wnioski z planu testów (Cezar albo jego agent kodujący; Kod kontroluje wynik spec-checkiem i review, P23; zmiana 2026-10-31, źródło: Marek 2026-10-31 (via Koordynator)).

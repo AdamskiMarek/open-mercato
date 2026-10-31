@@ -1,6 +1,6 @@
 # Klin #1 — kręgosłup architektury
 
-**Status:** 2026-10-31 (P16; luki L1–L6 przeniesione do D185–D190, `lost → open` — D191, nity po merge #35; Q-ARCH-1 → D192, Q-ARCH-2 → D193; punkty zapisu D192 rozstrzygnięte 2026-10-31 przez Cezara; otwarte tylko skutki merge z L3). Krótki przegląd: kto jest właścicielem jakiego bytu, jakie są przejścia stanów, granice modułów i klucze. Każde zdanie wskazuje decyzję D z `.ai/decisions.md`; czego nie da się wyprowadzić z D, jest oznaczone jako **Luka** (sekcja 5). Ten plik niczego nie rozstrzyga — przy rozbieżności obowiązuje rejestr (P12).
+**Status:** 2026-10-31 (P16; zmiana 2026-10-31: zapis `403 FORBIDDEN` w §2 (inwestycja), doc-PR po #33; luki L1–L6 przeniesione do D185–D190, `lost → open` — D191, nity po merge #35; Q-ARCH-1 → D192, Q-ARCH-2 → D193; punkty zapisu D192 rozstrzygnięte 2026-10-31 przez Cezara; otwarte tylko skutki merge z L3). Krótki przegląd: kto jest właścicielem jakiego bytu, jakie są przejścia stanów, granice modułów i klucze. Każde zdanie wskazuje decyzję D z `.ai/decisions.md`; czego nie da się wyprowadzić z D, jest oznaczone jako **Luka** (sekcja 5). Ten plik niczego nie rozstrzyga — przy rozbieżności obowiązuje rejestr (P12).
 
 ## 1. Właściciele bytów
 
@@ -92,7 +92,7 @@ stateDiagram-v2
 
 ### 2.4 Inwestycja
 
-Status domyślny `active`; `archived` w MVP (tylko odczyt, ukryta w listach, bez nowych deali — 422 `INVESTMENT_ARCHIVED`, archiwizacja i przywrócenie z `project_costing.manage_investments` i audytem, bez feature'a → 403 `FORBIDDEN`; CHECK na `status`), `merged` z `merged_into_id` od v1 (D187). Split od v1 (D83). Skutki merge dla ofert, projektu i harmonogramu — **Luka L3** (do decyzji przed v1); po tej decyzji TC-DEAL-009 (scalanie) wymaga przeglądu. Właściciel inwestycji = `created_by` (D190).
+Status domyślny `active`; `archived` w MVP (tylko odczyt, ukryta w listach, bez nowych deali — 422 `INVESTMENT_ARCHIVED`, archiwizacja i przywrócenie z `project_costing.manage_investments` i audytem, bez feature'a → `403 FORBIDDEN`; CHECK na `status`), `merged` z `merged_into_id` od v1 (D187). Split od v1 (D83). Skutki merge dla ofert, projektu i harmonogramu — **Luka L3** (do decyzji przed v1); po tej decyzji TC-DEAL-009 (scalanie) wymaga przeglądu. Właściciel inwestycji = `created_by` (D190).
 
 ## 3. Granice modułów
 

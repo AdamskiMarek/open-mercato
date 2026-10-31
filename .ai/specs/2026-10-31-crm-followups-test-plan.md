@@ -3,8 +3,8 @@
 **Dokument**: SPEC ONLY — plan testów niezależny od specyfikacji, bez kodu
 **Data**: 2026-10-31
 **Autor**: Grok Bot (niezależna sesja planu testów, P4: specyfikacji modułu ani briefu nie czytał)
-**Rewizja**: rev 1 (2026-10-31) — pierwsza wersja: TC dla D170–D184 (moduł `crm_followups`, v2)
-**Podstawa**: wyłącznie rejestr decyzji `.ai/decisions.md` @0be9356 (PR #33, gałąź `spec/v2-nightly-followup-drafts`), sekcja „Decyzje D170–D184” oraz decyzje kontekstowe (D31, D33, D34, D47, D69, D94, D132, D147, D189, D193). Bez speki i bez briefu (P4).
+**Rewizja**: rev 3 (2026-10-31) — rozstrzygnięcia Q-FU-T1…T4 w D177, D180, D181, D182 (rejestr @32bf708, PR #38): nowe TC-FU-SET-002, TC-FU-RUN-007, TC-FU-KIND-004; kody w TC-FU-SET-001, TC-FU-SCAN-004, TC-FU-MUTE-001, TC-FU-RUN-002; TC-FU-KIND-001, TC-FU-RUN-003, TC-FU-RUN-004, TC-FU-RUN-006 wg nowych reguł; wnioski 1, 2, 3, 6 rozstrzygnięte; poprzednio rev 2 (2026-10-31) — doprecyzowania D175, D176, D179, D181, D184 (rejestr @cdf27dc, PR #38): nowe TC-FU-DEC-004, TC-FU-ACL-003, TC-FU-RUN-006, TC-FU-TPL-002; wnioski 3 (częściowo), 4, 5, 7 rozstrzygnięte; poprzednio rev 1 (2026-10-31) — pierwsza wersja: TC dla D170–D184 (moduł `crm_followups`, v2)
+**Podstawa**: wyłącznie rejestr decyzji `.ai/decisions.md` — rev 1: @0be9356 (PR #33, gałąź `spec/v2-nightly-followup-drafts`); rev 2: @cdf27dc (PR #38, gałąź `docs/d192-d193-impl-403-gaps`, wiersze z adnotacją „zmiana 2026-10-31”); rev 3: @32bf708 (PR #38, rozstrzygnięcia Q-FU-T1…T4); sekcja „Decyzje D170–D184” oraz decyzje kontekstowe (D31, D33, D34, D47, D69, D94, D132, D147, D189, D193). Bez speki i bez briefu (P4).
 
 ---
 
@@ -15,16 +15,16 @@
 | Kwalifikacja obiektów i aktywność (TC-FU-SCAN) | 7 |
 | Idempotencja i zamykanie szkiców (TC-FU-IDEM) | 4 |
 | Wyciszenie po odrzuceniu (TC-FU-MUTE) | 1 |
-| Rodzaje szkiców i przypomnienia o terminie (TC-FU-KIND) | 3 |
-| Decyzje o szkicach (TC-FU-DEC) | 3 |
-| Uprawnienia i widoczność (TC-FU-ACL) | 2 |
-| Wyzwalacze i przebiegi (TC-FU-RUN) | 5 |
+| Rodzaje szkiców i przypomnienia o terminie (TC-FU-KIND) | 4 |
+| Decyzje o szkicach (TC-FU-DEC) | 4 |
+| Uprawnienia i widoczność (TC-FU-ACL) | 3 |
+| Wyzwalacze i przebiegi (TC-FU-RUN) | 7 |
 | Moduł i dane (TC-FU-MOD) | 1 |
-| Ustawienia firmy (TC-FU-SET) | 1 |
+| Ustawienia firmy (TC-FU-SET) | 2 |
 | Izolacja organizacji (TC-FU-TEN) | 1 |
 | Audyt i szyfrowanie (TC-FU-AUD) | 1 |
-| Treść z szablonów (TC-FU-TPL) | 1 |
-| **Razem** | **30** (wszystkie etap v2) |
+| Treść z szablonów (TC-FU-TPL) | 2 |
+| **Razem** | **37** (wszystkie etap v2) |
 
 ---
 
@@ -35,9 +35,9 @@
 | R1 | Coś wychodzi do klienta bez decyzji użytkownika (mail wysłany automatycznie) | Niski | Krytyczny | P0 | Decyzje | TC-FU-DEC-002, TC-FU-DEC-003, TC-FU-SCAN-001 |
 | R2 | Spam szkiców: duplikaty, kilka szkiców na postępowanie z częściami albo na osobę | Średni | Wysoki | P0 | Kwalifikacja, idempotencja | TC-FU-SCAN-005, TC-FU-SCAN-006, TC-FU-SCAN-007, TC-FU-IDEM-001, TC-FU-KIND-003 |
 | R3 | Szkic dla obiektu aktywnego albo zamkniętego (błędna miara aktywności) | Średni | Wysoki | P0 | Kwalifikacja, idempotencja | TC-FU-SCAN-002, TC-FU-SCAN-003, TC-FU-SCAN-004, TC-FU-IDEM-002, TC-FU-IDEM-003 |
-| R4 | Handlowiec widzi szkice cudzych obiektów; klucz API (także sesji `ai_assistant`) zatwierdza szkic | Niski | Krytyczny | P0 | Uprawnienia | TC-FU-ACL-001, TC-FU-ACL-002, TC-FU-DEC-003 |
+| R4 | Handlowiec widzi szkice cudzych obiektów; klucz API (także sesji `ai_assistant`) zatwierdza szkic | Niski | Krytyczny | P0 | Uprawnienia | TC-FU-ACL-001, TC-FU-ACL-002, TC-FU-ACL-003, TC-FU-DEC-003 |
 | R5 | Wyciek między organizacjami | Niski | Krytyczny | P0 | Izolacja | TC-FU-TEN-001 |
-| R6 | Podwójny albo zablokowany przebieg (współbieżność, ponowienia, zawieszony `running`) | Średni | Średni | P0 | Przebiegi | TC-FU-RUN-002, TC-FU-RUN-003 |
+| R6 | Podwójny albo zablokowany przebieg (współbieżność, ponowienia, zawieszony `running`) | Średni | Średni | P0 | Przebiegi | TC-FU-RUN-002, TC-FU-RUN-003, TC-FU-RUN-006, TC-FU-RUN-007 |
 | R7 | Pominięte przypomnienie o terminie składania ofert | Średni | Wysoki | P0 | Przypomnienia | TC-FU-KIND-002, TC-FU-KIND-003, TC-FU-IDEM-004 |
 | R8 | Treść maili, adresy lub nazwy w logach i audycie | Niski | Wysoki | P1 | Audyt | TC-FU-AUD-001 |
 
@@ -120,7 +120,7 @@ Dane testowe: zegar testowy (wstrzykiwany czas) dla granic N, doby i terminu; st
 - **Oczekiwane wyniki**:
   - Krok 1: szkice tylko dla deali na `result_lead`, `qualify`, `contact`, `offer` z `closure_outcome` NULL w lejku „Przetargi”; brak dla `new`, `won`, `lost`, `rejected`, `cancelled`, deala z `closure_outcome`, deala z L2 i deala usuniętego; kontakty tylko powiązane z otwartym, nieusuniętym dealem
   - Krok 2: deal na `contact` bez nowego szkicu; jego otwarty szkic zamknięty jako `out_of_scope`
-  - Krok 3: zapis odrzucony (etapy zamknięte niedozwolone), ustawienia bez zmian
+  - Krok 3: 422 `INVALID_SETTING_VALUE` (etapy zamknięte niedozwolone), ustawienia bez zmian
   - `target_types` bez kontaktów → brak szkiców kontaktów
 
 #### TC-FU-SCAN-005: Przetarg z częściami — jeden szkic na postępowanie
@@ -252,11 +252,11 @@ Dane testowe: zegar testowy (wstrzykiwany czas) dla granic N, doby i terminu; st
   - Krok 1: `muted_until = decyzja + mute_days`; decyzja liczy się jako aktywność (D172)
   - Krok 2: po N — DL1 dostaje szkic (przy `mute_days ≤ N` decyduje N), DL2 nie; po 30 — DL2 dostaje szkic
   - Krok 3: DL3 nie jest wyciszony (`muted_until` bez zmian); przypomnienie dla X nie wraca
-  - Krok 4: zapis odrzucony (minimum 1)
+  - Krok 4: 422 `INVALID_SETTING_VALUE` (minimum 1), ustawienia bez zmian
 
 ---
 
-## 6. Scenariusze testowe: Rodzaje szkiców i przypomnienia (TC-FU-KIND) — 3 TC
+## 6. Scenariusze testowe: Rodzaje szkiców i przypomnienia (TC-FU-KIND) — 4 TC
 
 #### TC-FU-KIND-001: Mail albo zadanie
 
@@ -269,7 +269,7 @@ Dane testowe: zegar testowy (wstrzykiwany czas) dla granic N, doby i terminu; st
   2. Organizacja O2: deal jak DA; wyzwól przebieg
 - **Oczekiwane wyniki**:
   - Krok 1: DA → `mail`; DB i DC → zadanie
-  - Krok 2: brak szkicu `mail` (rodzaj spoza listy dozwolonych nie powstaje)
+  - Krok 2: brak szkicu `mail` i brak zadania w zastępstwie; obiekt w liczniku `skipped_kind_disabled` (TC-FU-KIND-004)
 
 #### TC-FU-KIND-002: Przypomnienie o terminie — okno, pole terminu, niezależność od aktywności
 
@@ -302,9 +302,24 @@ Dane testowe: zegar testowy (wstrzykiwany czas) dla granic N, doby i terminu; st
   - Krok 3: odrzucone przez unikalny indeks `(organization_id, group_key, term_value) WHERE kind = 'reminder' AND deleted_at IS NULL` (wszystkie statusy)
   - Krok 4: nowe przypomnienie Z; przypomnienie Y → `superseded`, `term_changed`
 
+#### TC-FU-KIND-004: Rodzaj spoza `followups.kinds` — bez szkicu, bez zastępstwa, licznik `skipped_kind_disabled`
+
+> Decyzje: D177, D182 (doprecyzowania 2026-10-31, Q-FU-T4), D181.
+
+- **Priorytet**: P1 | **Etap**: v2 | **Poziom**: Integration
+- **Warunki wstępne**: Bezczynne deale: KA (reguła D177 wybiera `mail`), KB (reguła wybiera zadanie), KC (deal z terminem w oknie przypomnienia); organizacje: OK1 z `kinds` bez `mail`, OK2 z `kinds` bez zadania, OK3 z `kinds` bez przypomnienia — w każdej komplet KA, KB, KC
+- **Kroki**:
+  1. Wyzwól przebieg w OK1, OK2 i OK3
+  2. Odczytaj szkice, `fu_runs.note` i liczniki
+- **Oczekiwane wyniki**:
+  - OK1: brak szkicu dla KA (ani `mail`, ani zadania); KB i KC — szkice zgodnie z regułą
+  - OK2: brak szkicu dla KB (bez zastępstwa mailem); KA i KC — szkice
+  - OK3: brak przypomnienia dla KC; KA i KB — szkice
+  - W każdej organizacji `skipped_kind_disabled` = 1 w notce; pozostałe liczniki pominięć bez zmian
+
 ---
 
-## 7. Scenariusze testowe: Decyzje o szkicach (TC-FU-DEC) — 3 TC
+## 7. Scenariusze testowe: Decyzje o szkicach (TC-FU-DEC) — 4 TC
 
 #### TC-FU-DEC-001: Zatwierdzenie zadania i przypomnienia — interakcja `task`
 
@@ -318,7 +333,7 @@ Dane testowe: zegar testowy (wstrzykiwany czas) dla granic N, doby i terminu; st
 - **Oczekiwane wyniki**:
   - Interakcje utworzone komendą `customers.interactions.create`, `interaction_type = 'task'`, widoczne w widżecie todo
   - DL1: właściciel interakcji U1, autor U1; DL2 i DL3: właściciel = zatwierdzający A1 (opiekun nieaktywny albo brak), autor A1
-  - Szkice w statusie zatwierdzonym; decyzja jest aktywnością obiektu (D172)
+  - Szkice w statusie `approved` (literał — TC-FU-DEC-004); decyzja jest aktywnością obiektu (D172)
 
 #### TC-FU-DEC-002: Zatwierdzenie maila = przekazanie do okna wysyłki CRM
 
@@ -350,9 +365,26 @@ Dane testowe: zegar testowy (wstrzykiwany czas) dla granic N, doby i terminu; st
   - Krok 2: komenda odmawia (sprawdzenie powtórzone w komendach); S1 bez zmian
   - Krok 3: zatwierdzenie przyjęte
 
+#### TC-FU-DEC-004: Status szkicu po decyzji — `approved`, `handed_off`, `rejected`
+
+> Decyzje: D175, D176 (doprecyzowania 2026-10-31: literały statusów).
+
+- **Priorytet**: P0 | **Etap**: v2 | **Poziom**: Integration + `pg`
+- **Warunki wstępne**: Otwarte szkice opiekuna U1 (z `crm_followups.drafts.decide`, `customers.interactions.manage`, `customers.email.compose` i widokiem obiektów): zadanie Z1, przypomnienie R1, mail M1 do zatwierdzenia; zadanie Z2, przypomnienie R2, mail M2 do odrzucenia
+- **Kroki**:
+  1. U1 zatwierdza Z1 i R1
+  2. U1 zatwierdza M1
+  3. U1 odrzuca Z2, R2 i M2
+  4. `pg`: `fu_drafts.status` wszystkich szkiców; spróbuj zapisać szkic ze statusem spoza listy (np. `sent`)
+- **Oczekiwane wyniki**:
+  - Krok 1: Z1 i R1 → `approved`; interakcje utworzone po stronie OM (TC-FU-DEC-001)
+  - Krok 2: M1 → `handed_off` (nie `approved`); żaden mail nie wysłany przez moduł (TC-FU-DEC-002)
+  - Krok 3: Z2, R2 i M2 → `rejected` (każdy rodzaj, także przypomnienie); R2 nie wycisza obiektu (TC-FU-MUTE-001)
+  - Krok 4: statusy zgodne z krokami 1–3; zapis spoza listy odrzucony przez CHECK `fu_drafts.status` (`open`, `approved`, `handed_off`, `rejected`, `superseded`)
+
 ---
 
-## 8. Scenariusze testowe: Uprawnienia i widoczność (TC-FU-ACL) — 2 TC
+## 8. Scenariusze testowe: Uprawnienia i widoczność (TC-FU-ACL) — 3 TC
 
 #### TC-FU-ACL-001: Kto widzi szkice
 
@@ -385,9 +417,25 @@ Dane testowe: zegar testowy (wstrzykiwany czas) dla granic N, doby i terminu; st
   - Krok 4: `403 FORBIDDEN`, ustawienia bez zmian
   - Klucz n8n nie ma `crm_followups.drafts.*` ani `customers.email.compose` (asercja na konfiguracji klucza)
 
+#### TC-FU-ACL-003: Zatwierdzanie bez widoku obiektu albo feature'a celu → `403 FORBIDDEN`
+
+> Decyzje: D179 (doprecyzowanie 2026-10-31), D176, D147.
+
+- **Priorytet**: P0 | **Etap**: v2 | **Poziom**: API + Integration + `pg`
+- **Warunki wstępne**: Szkice zadania opiekuna H1: SD (deal), SP (osoba), SC (firma); szkic maila SM (osoba) opiekuna H1; H1 z `crm_followups.view` i `crm_followups.drafts.decide`; warianty ról H1: bez `customers.deals.view`; bez `customers.people.view`; bez `customers.companies.view`; bez `customers.interactions.manage`; bez `customers.email.compose`
+- **Kroki**:
+  1. H1 bez `customers.deals.view` zatwierdza SD; bez `customers.people.view` — SP; bez `customers.companies.view` — SC
+  2. H1 bez `customers.interactions.manage` zatwierdza SD; bez `customers.email.compose` — SM
+  3. `pg`: status szkiców; `customer_interactions` dla SD, SP, SC
+  4. H1 z kompletem uprawnień zatwierdza SD
+- **Oczekiwane wyniki**:
+  - Krok 1 i 2: każde wywołanie → `403 FORBIDDEN` (jak brak feature'a, D147); nie 404
+  - Krok 3: wszystkie szkice nadal `open`; brak nowych interakcji; SM nie przechodzi w `handed_off`
+  - Krok 4: SD → `approved`, interakcja utworzona
+
 ---
 
-## 9. Scenariusze testowe: Wyzwalacze i przebiegi (TC-FU-RUN) — 5 TC
+## 9. Scenariusze testowe: Wyzwalacze i przebiegi (TC-FU-RUN) — 7 TC
 
 #### TC-FU-RUN-001: Job schedulera zakładany i usuwany komendą ustawień
 
@@ -420,7 +468,7 @@ Dane testowe: zegar testowy (wstrzykiwany czas) dla granic N, doby i terminu; st
   5. Przebieg K4 `running` z bieżącym `heartbeat_at`; POST z K5
   6. CLI: wyzwól przebieg
 - **Oczekiwane wyniki**:
-  - Krok 1: żądanie odrzucone, brak wiersza w `fu_runs`
+  - Krok 1: 422 `IDEMPOTENCY_KEY_REQUIRED`, brak wiersza w `fu_runs`
   - Krok 2: ponowienie zwraca istniejący przebieg `finished`, bez nowego wiersza (`run_key` unikalny per organizacja)
   - Krok 3 i 4: wznowienie tego samego wiersza
   - Krok 5: wiersz K5 `skipped` z `skip_reason = 'concurrent'`
@@ -441,11 +489,11 @@ Dane testowe: zegar testowy (wstrzykiwany czas) dla granic N, doby i terminu; st
   - Krok 1: jeden przebieg O1 `running`, drugi `skipped` z `skip_reason`; O2 działa równolegle
   - Krok 2: odrzucone przez częściowy unikalny indeks `fu_runs (organization_id) WHERE status = 'running'`
   - Krok 3: `heartbeat_at` rośnie po każdej partii
-  - Krok 4: wiersz `skipped` z `skip_reason`, brak szkiców
+  - Krok 4: wiersz `skipped` z `skip_reason = disabled` (wyłączenie w firmie przy włączonej instancji), brak szkiców; wyłącznik instancji — TC-FU-RUN-007
 
 #### TC-FU-RUN-004: Notka z przebiegu i powiadomienia in-app
 
-> Decyzje: D182, D170.
+> Decyzje: D182 (z doprecyzowaniem 2026-10-31: `skipped_kind_disabled`), D170.
 
 - **Priorytet**: P1 | **Etap**: v2 | **Poziom**: Integration + E2E/UI
 - **Warunki wstępne**: Przebieg tworzący szkice dla opiekunów U1 i U2 oraz szkic bez opiekuna; pominięcia przez `max_drafts_per_run`, grupowanie części i limit na osobę; szkic zamknięty w rekoncyliacji; druga organizacja bez kandydatów
@@ -453,7 +501,7 @@ Dane testowe: zegar testowy (wstrzykiwany czas) dla granic N, doby i terminu; st
   1. Wyzwól przebieg; odczytaj `fu_runs.note`, `notifications`, `progress_jobs`
   2. Wyzwól przebieg w organizacji bez kandydatów
 - **Oczekiwane wyniki**:
-  - Krok 1: notka z licznikami (utworzone, pominięte przez limit przebiegu, przez grupowanie części, przez limit na osobę, zamknięte w rekoncyliacji) i linkiem do listy szkiców przebiegu; powiadomienie in-app dla U1, U2 i administratorów (szkic bez opiekuna); brak wpisu w `progress_jobs`; słownictwo „przekazano do wysyłki”, nigdy „wysłano”
+  - Krok 1: notka z licznikami (utworzone, pominięte przez limit przebiegu, przez grupowanie części, przez limit na osobę, przez wyłączony rodzaj `skipped_kind_disabled`, zamknięte w rekoncyliacji) i linkiem do listy szkiców przebiegu; powiadomienie in-app dla U1, U2 i administratorów (szkic bez opiekuna); brak wpisu w `progress_jobs`; słownictwo „przekazano do wysyłki”, nigdy „wysłano”
   - Krok 2: tylko notka w `fu_runs`, brak powiadomień
 
 #### TC-FU-RUN-005: Limit `max_drafts_per_run`
@@ -468,7 +516,42 @@ Dane testowe: zegar testowy (wstrzykiwany czas) dla granic N, doby i terminu; st
 - **Oczekiwane wyniki**:
   - Krok 1: 200 szkiców łącznie z przypomnieniami; pozostałe policzone w notce jako pominięte przez limit
   - Krok 2: najwyżej 20 nowych szkiców
-  - Relacja z `OM_CRM_FOLLOWUPS_MAX_DRAFTS_PER_RUN` — bez asercji (wniosek 3)
+  - Relacja z `OM_CRM_FOLLOWUPS_MAX_DRAFTS_PER_RUN` (limit efektywny = minimum) — TC-FU-RUN-006
+
+#### TC-FU-RUN-006: Limit efektywny = minimum (firma, instancja); `WORKER_CONCURRENCY` nie zmienia reguły jednego przebiegu
+
+> Decyzje: D181 (doprecyzowanie 2026-10-31), D180, D115.
+
+- **Priorytet**: P1 | **Etap**: v2 | **Poziom**: Integration + `pg`
+- **Warunki wstępne**: Osobny zbiór danych na każdy krok: organizacja ze 120 kwalifikującymi się obiektami; organizacje O1 i O2 z obiektami kwalifikującymi się; proces `queue worker --all`
+- **Kroki**:
+  1. `followups.max_drafts_per_run` = 200, `OM_CRM_FOLLOWUPS_MAX_DRAFTS_PER_RUN` = 50; wyzwól przebieg
+  2. `followups.max_drafts_per_run` = 20, `OM_CRM_FOLLOWUPS_MAX_DRAFTS_PER_RUN` = 50; wyzwól przebieg
+  3. `OM_CRM_FOLLOWUPS_WORKER_CONCURRENCY` = 4; równocześnie dwa wyzwalacze O1 (różne klucze) i jeden O2
+- **Oczekiwane wyniki**:
+  - Krok 1: 50 szkiców (limit instancji wygrywa z ustawieniem firmy); pozostałe w notce jako pominięte przez limit przebiegu
+  - Krok 2: 20 szkiców (minimum = ustawienie firmy)
+  - Krok 3: dla O1 jeden przebieg `running`, drugi `skipped` z `skip_reason = 'concurrent'`; O2 działa równolegle; częściowy unikalny indeks `fu_runs (organization_id) WHERE status = 'running'` bez naruszeń
+  - Skutek `OM_CRM_FOLLOWUPS_ENABLED = false` dla wyzwalaczy — TC-FU-RUN-007
+
+#### TC-FU-RUN-007: Wyłącznik instancji `OM_CRM_FOLLOWUPS_ENABLED = false`
+
+> Decyzje: D180 (doprecyzowanie 2026-10-31, Q-FU-T2, Q-FU-T3), D181.
+
+- **Priorytet**: P0 | **Etap**: v2 | **Poziom**: API + Integration + `pg`
+- **Warunki wstępne**: Instancja z `OM_CRM_FOLLOWUPS_ENABLED = false`; organizacja O1 z `followups.enabled = true` i istniejącymi otwartymi szkicami S1 (zadanie), S2 (mail), S3; klucz API z `crm_followups.run`; opiekun U1 szkiców z uprawnieniami decyzji
+- **Kroki**:
+  1. Uruchom proces i odczytaj rejestrację joba crona (`scheduled_jobs`)
+  2. `POST /api/crm-followups/runs` z `Idempotency-Key`; wyzwól przebieg z CLI
+  3. `pg`: wiersze `fu_runs` O1
+  4. U1: lista szkiców, odczyt S1; zatwierdza S1, S2; odrzuca S3
+  5. Instancja z `OM_CRM_FOLLOWUPS_ENABLED = true`, O1 z `followups.enabled = false`; `POST /runs` z nowym kluczem
+- **Oczekiwane wyniki**:
+  - Krok 1: job crona nie jest zarejestrowany
+  - Krok 2: oba → 409 `FOLLOWUPS_DISABLED`
+  - Krok 3: brak nowego wiersza (także bez `skipped`)
+  - Krok 4: przegląd działa; S1 → `approved`, S2 → `handed_off`, S3 → `rejected`
+  - Krok 5: wiersz `skipped` z `skip_reason = disabled` (ten powód tylko dla wyłączenia w firmie)
 
 ---
 
@@ -493,7 +576,7 @@ Dane testowe: zegar testowy (wstrzykiwany czas) dla granic N, doby i terminu; st
 
 ---
 
-## 11. Scenariusze testowe: Ustawienia firmy (TC-FU-SET) — 1 TC
+## 11. Scenariusze testowe: Ustawienia firmy (TC-FU-SET) — 2 TC
 
 #### TC-FU-SET-001: Parametry firmy w ModuleConfigService i parametry instancji
 
@@ -507,9 +590,23 @@ Dane testowe: zegar testowy (wstrzykiwany czas) dla granic N, doby i terminu; st
   3. Zmień `followups.timezone` na Europe/London; odczytaj liczenie doby i strefę joba
 - **Oczekiwane wyniki**:
   - Krok 1: `followups.enabled`, `inactivity_days` 14, `mute_days` = N, `timezone`, `target_types`, `deal_pipeline_ids`, `deal_stage_keys` (`result_lead`, `qualify`, `contact`, `offer`), `kinds`, `reminder_days_before` 3, `reminder_term_field_key` `cf_deadline`, `max_drafts_per_run` 200, `templates`; brak `tender_group_field_key`, `contact_scope`, `contact_lifecycle_stages`, `content_mode`
-  - Krok 2: oba zapisy odrzucone, ustawienia bez zmian
+  - Krok 2: oba zapisy → 422 `INVALID_SETTING_VALUE`, ustawienia bez zmian (TC-FU-SET-002)
   - Krok 3: jedna strefa dla liczenia dni i joba schedulera (TC-FU-RUN-001)
   - Parametry instancji (env) obecne w konfiguracji: `OM_CRM_FOLLOWUPS_ENABLED`, `OM_CRM_FOLLOWUPS_SCAN_BATCH_SIZE`, `OM_CRM_FOLLOWUPS_MAX_DRAFTS_PER_RUN`, `OM_CRM_FOLLOWUPS_WORKER_CONCURRENCY`, `OM_CRM_FOLLOWUPS_RUN_STALE_MINUTES` (od `heartbeat_at`, TC-FU-RUN-002)
+
+#### TC-FU-SET-002: Wartość ustawienia spoza zakresu → 422 `INVALID_SETTING_VALUE`
+
+> Decyzje: D181 (doprecyzowanie 2026-10-31, Q-FU-T1), D175, D173.
+
+- **Priorytet**: P1 | **Etap**: v2 | **Poziom**: API + Integration
+- **Warunki wstępne**: Administrator z `crm_followups.settings.manage`; zapisane ustawienia z wartościami domyślnymi
+- **Kroki**:
+  1. Zapisz `followups.mute_days = 0`
+  2. Zapisz `followups.deal_stage_keys` z etapem `lost`; z etapem `new`
+  3. Odczytaj ustawienia; zapisz `followups.mute_days = 1`
+- **Oczekiwane wyniki**:
+  - Krok 1–2: każdy zapis → 422 `INVALID_SETTING_VALUE`
+  - Krok 3: ustawienia identyczne z zapisanymi przed krokiem 1; zapis `mute_days = 1` przyjęty
 
 ---
 
@@ -552,7 +649,7 @@ Dane testowe: zegar testowy (wstrzykiwany czas) dla granic N, doby i terminu; st
 
 ---
 
-## 14. Scenariusze testowe: Treść z szablonów (TC-FU-TPL) — 1 TC
+## 14. Scenariusze testowe: Treść z szablonów (TC-FU-TPL) — 2 TC
 
 #### TC-FU-TPL-001: Treść wyłącznie z szablonów pl/en
 
@@ -566,6 +663,20 @@ Dane testowe: zegar testowy (wstrzykiwany czas) dla granic N, doby i terminu; st
 - **Oczekiwane wyniki**:
   - Treść = szablon w języku kontaktu; w O1 — nadpisany szablon
   - Zero wywołań LLM; brak nowych zależności w module
+
+#### TC-FU-TPL-002: Treść wymienia każdą pozostałą część tytułem jej deala
+
+> Decyzje: D184 (doprecyzowanie 2026-10-31), D173, D177.
+
+- **Priorytet**: P1 | **Etap**: v2 | **Poziom**: Unit + Integration
+- **Warunki wstępne**: Postępowanie T1 z częściami (deale o różnych tytułach): P1, P2, P3 bezczynne i kwalifikujące się, P4 zamknięta; postępowanie T2: części P5 i P6 z terminem X za 2 doby, P7 z innym terminem; organizacja O1 z nadpisanym szablonem (inny układ listy)
+- **Kroki**:
+  1. Wyzwól przebieg w organizacji z szablonem domyślnym; odczytaj treść szkicu follow-upu T1 i przypomnienia X dla T2
+  2. Powtórz w O1
+- **Oczekiwane wyniki**:
+  - Krok 1: szkic T1 (cel wg reguły kolizji D173) wymienia tytuły deali obu pozostałych kwalifikujących się części; brak tytułu P4; przypomnienie X wymienia tytuł drugiej części z terminem X; brak tytułu P7
+  - Krok 2: w O1 te same tytuły w treści, układ wg nadpisanego szablonu
+  - Układ i formatowanie listy — bez asercji (wyznacza szablon, rejestr ich nie ustala)
 
 ---
 
@@ -597,13 +708,13 @@ Dane testowe: zegar testowy (wstrzykiwany czas) dla granic N, doby i terminu; st
 
 ## 17. Wnioski do specyfikacji (luki — reguł brak w rejestrze @0be9356; nie zgadywano)
 
-1. **Kod odrzucenia ustawień spoza zakresu** (TC-FU-SCAN-004 krok 3, TC-FU-MUTE-001 krok 4, TC-FU-SET-001 krok 2) — D175 i D181 podają ograniczenia (`mute_days` min 1, etapy zamknięte niedozwolone), nie podają kodu błędu. TC sprawdza odrzucenie i brak zmian.
-2. **Kod odrzucenia `POST /runs` bez `Idempotency-Key`** (TC-FU-RUN-002 krok 1) — D180 mówi „wymagany”, bez kodu.
-3. **Relacja `max_drafts_per_run` (firma) i `OM_CRM_FOLLOWUPS_MAX_DRAFTS_PER_RUN` (instancja)** oraz znaczenie `OM_CRM_FOLLOWUPS_ENABLED` i `OM_CRM_FOLLOWUPS_WORKER_CONCURRENCY` (TC-FU-RUN-005, TC-FU-SET-001) — D181 wymienia parametry, nie reguły pierwszeństwa.
-4. **Brak uprawnienia widoku obiektu przy zatwierdzaniu** (TC-FU-ACL-002) — D179 wymaga widoku obiektu, kodu nie podaje (404 dotyczy szkicu cudzego, `403 FORBIDDEN` — braku feature'a).
-5. **Nazwa statusu po zatwierdzeniu zadania i odrzuceniu** (TC-FU-DEC-001, TC-FU-MUTE-001) — rejestr nazywa `open`, `superseded`, `handed_off`, `running`/`finished`/`failed`/`skipped`; nazw statusów zatwierdzonego zadania i odrzuconego szkicu nie podaje. TC sprawdza skutek, nie literał.
-6. **Rodzaj spoza listy `kinds`** (TC-FU-KIND-001 krok 2) — czy przy braku `mail` powstaje zadanie, czy nic; TC sprawdza tylko brak szkicu `mail`.
-7. **Treść szkicu przy częściach** (TC-FU-SCAN-005, TC-FU-KIND-003) — rejestr mówi, że pozostałe części są „wymienione w treści”; formatu nie podaje.
+1. ~~**Kod odrzucenia ustawień spoza zakresu**~~ — ✅ **ROZSTRZYGNIĘTE (D181 @32bf708, Q-FU-T1)**: 422 `INVALID_SETTING_VALUE`, ustawienia bez zmian (TC-FU-SET-002, TC-FU-SCAN-004, TC-FU-MUTE-001, TC-FU-SET-001).
+2. ~~**Kod odrzucenia `POST /runs` bez `Idempotency-Key`**~~ — ✅ **ROZSTRZYGNIĘTE (D180 @32bf708, Q-FU-T2)**: 422 `IDEMPOTENCY_KEY_REQUIRED` (TC-FU-RUN-002).
+3. ~~**Relacja `max_drafts_per_run` i parametry instancji**~~ — ✅ **ROZSTRZYGNIĘTE (D181 @cdf27dc; D180 @32bf708, Q-FU-T3)**: limit = minimum (TC-FU-RUN-006); `OM_CRM_FOLLOWUPS_ENABLED = false` — cron bez rejestracji, 409 `FOLLOWUPS_DISABLED` bez `fu_runs`, decyzje działają (TC-FU-RUN-007).
+4. ~~**Brak uprawnienia widoku obiektu przy zatwierdzaniu**~~ — ✅ **ROZSTRZYGNIĘTE (D179 @cdf27dc)**: `403 FORBIDDEN`, szkic zostaje `open`, interakcja nie powstaje (TC-FU-ACL-003).
+5. ~~**Nazwa statusu po zatwierdzeniu zadania i odrzuceniu**~~ — ✅ **ROZSTRZYGNIĘTE (D175, D176 @cdf27dc)**: `approved` (zadanie, przypomnienie), `handed_off` (mail), `rejected` (każdy rodzaj); CHECK `fu_drafts.status` (TC-FU-DEC-004).
+6. ~~**Rodzaj spoza listy `kinds`**~~ — ✅ **ROZSTRZYGNIĘTE (D177, D182 @32bf708, Q-FU-T4)**: bez szkicu i bez zastępstwa, licznik `skipped_kind_disabled` (TC-FU-KIND-004, TC-FU-KIND-001).
+7. ~~**Treść szkicu przy częściach**~~ — ✅ **ROZSTRZYGNIĘTE (D184 @cdf27dc)**: lista pozostałych części jest zmienną szablonu, każda część tytułem jej deala; układ wyznacza szablon (TC-FU-TPL-002, bez asercji formatu).
 8. **`cf_external_id` deala części po wdrożeniu klucza D189** — rejestr („Otwarte”) zostawia do potwierdzenia przez Enkę, czy zostaje `tender_id` bez `#<nr części>`; TC-FU-SCAN-005 zakłada stan obecny (`tender_id`) i wymaga przeglądu po potwierdzeniu.
 9. **Warunek etapu kodu `scheduler` i `QUEUE_STRATEGY`** (TC-FU-RUN-001) — scenariusz niewykonywalny do zgody Marka (D180, D94).
 
@@ -611,15 +722,15 @@ Dane testowe: zegar testowy (wstrzykiwany czas) dla granic N, doby i terminu; st
 
 ## 18. Podsumowanie
 
-**Liczba scenariuszy**: 30 (wszystkie v2; P0: 17, P1: 13)
-**Liczba wniosków do speki**: 9 (otwarte: 1–9)
+**Liczba scenariuszy**: 37 (wszystkie v2; P0: 20, P1: 17)
+**Liczba wniosków do speki**: 9 (otwarte: 8, 9; rozstrzygnięte: 1–7)
 **Status**: SPEC ONLY — bez kodu
 
 ---
 
 ## Załącznik: Traceability D → TC (macierz decyzji)
 
-Źródło: `.ai/decisions.md` @0be9356 (PR #33), sekcja „Decyzje D170–D184”: 15 decyzji, wszystkie aktywne (v2). Każda ma co najmniej jeden TC.
+Źródło: `.ai/decisions.md` @0be9356 (PR #33), od rev 2 — @cdf27dc, od rev 3 — @32bf708 (PR #38), sekcja „Decyzje D170–D184”: 15 decyzji, wszystkie aktywne (v2). Każda ma co najmniej jeden TC.
 
 | D | Treść skrócona | TC | Uwagi |
 |---|---|---|---|
@@ -628,21 +739,38 @@ Dane testowe: zegar testowy (wstrzykiwany czas) dla granic N, doby i terminu; st
 | **D172** | Aktywność = maksimum ze źródeł; osoby i firmy deala z filtrem `deal_id` od daty linku; zaplanowana interakcja = aktywność; `updated_at` się nie liczy; dni kalendarzowe w `followups.timezone` | TC-FU-SCAN-002, TC-FU-SCAN-003, TC-FU-IDEM-002 | R-FU-10 w TC-FU-SCAN-002 |
 | **D173** | Zakres deali i kontaktów; jeden szkic na postępowanie (klucz D189 bez części, `group_key`); reguła kolizji; jeden szkic na osobę na dobę; deale przed kontaktami | TC-FU-SCAN-004, TC-FU-SCAN-005, TC-FU-SCAN-006, TC-FU-SCAN-007, TC-FU-KIND-003, TC-FU-RUN-005 | wnioski 7, 8 |
 | **D174** | Częściowe unikalne indeksy; predykat zamknięcia `superseded` z `superseded_reason` i `superseded_via`; zamknięcie przypomnienia per postępowanie i termin; rekoncyliacja na starcie przebiegu | TC-FU-IDEM-001, TC-FU-IDEM-002, TC-FU-IDEM-003, TC-FU-IDEM-004 | |
-| **D175** | Odrzucenie wycisza (`muted_until`, `mute_days` min 1); decyzja = aktywność; przypomnienie nie wycisza | TC-FU-MUTE-001 | wnioski 1, 5 |
-| **D176** | Zatwierdzenie zadania → `customers.interactions.create`, właściciel i autor; mail → `handed_off` i okno wysyłki CRM; decyzje tylko z sesji, klucz API → `403 FORBIDDEN` także w komendach | TC-FU-DEC-001, TC-FU-DEC-002, TC-FU-DEC-003 | |
-| **D177** | Mail albo zadanie; przypomnienie `reminder` w oknie `reminder_days_before` niezależnie od aktywności; pole terminu po kluczu; deduplikacja `(group_key, term_value)`; `term_changed` | TC-FU-KIND-001, TC-FU-KIND-002, TC-FU-KIND-003, TC-FU-IDEM-004 | wniosek 6 |
+| **D175** | Odrzucenie wycisza (`muted_until`, `mute_days` min 1); decyzja = aktywność; przypomnienie nie wycisza; odrzucony szkic każdego rodzaju → `rejected` (zmiana 2026-10-31) | TC-FU-MUTE-001, TC-FU-DEC-004 | wniosek 1; wniosek 5 rozstrzygnięty |
+| **D176** | Zatwierdzenie zadania → `customers.interactions.create`, właściciel i autor; mail → `handed_off` i okno wysyłki CRM; decyzje tylko z sesji, klucz API → `403 FORBIDDEN` także w komendach; zadanie i przypomnienie → `approved` (zmiana 2026-10-31) | TC-FU-DEC-001, TC-FU-DEC-002, TC-FU-DEC-003, TC-FU-DEC-004 | |
+| **D177** | Mail albo zadanie; przypomnienie `reminder` w oknie `reminder_days_before` niezależnie od aktywności; pole terminu po kluczu; deduplikacja `(group_key, term_value)`; `term_changed`; rodzaj spoza `kinds` — bez szkicu i zastępstwa (zmiana 2026-10-31) | TC-FU-KIND-001, TC-FU-KIND-002, TC-FU-KIND-003, TC-FU-KIND-004, TC-FU-IDEM-004 | wniosek 6 rozstrzygnięty |
 | **D178** | `organization_id` i `tenant_id` w każdym rekordzie i zapytaniu; scope z payloadu schedulera albo klucza API; `followups.enabled` per organizacja; `feature_toggles` jako kill-switch | TC-FU-TEN-001, TC-FU-RUN-003 | |
-| **D179** | Feature'y `crm_followups.*`; widoczność opiekun/administrator; obiekt bez opiekuna → administratorzy; cudzy szkic → 404; brak feature'a → `403 FORBIDDEN`; klucz n8n tylko `run` | TC-FU-ACL-001, TC-FU-ACL-002, TC-FU-DEC-003 | wniosek 4 |
-| **D180** | Wyzwalacze → kolejka `crm-followups-scan`: scheduler, `POST /runs` z `Idempotency-Key`, CLI; `run_key`; jeden przebieg naraz; `skipped`; `heartbeat_at`; wznowienie | TC-FU-RUN-001, TC-FU-RUN-002, TC-FU-RUN-003 | wnioski 2, 9 |
-| **D181** | Parametry firmy (`org:{id}:settings`) z domyślnymi; usunięte parametry; parametry instancji (env) | TC-FU-SET-001, TC-FU-SCAN-001, TC-FU-SCAN-004, TC-FU-KIND-002, TC-FU-RUN-005, TC-FU-MUTE-001, TC-FU-TPL-001 | wnioski 1, 3 |
-| **D182** | Notka `fu_runs.note` z licznikami i linkiem; powiadomienia in-app do właścicieli i administratorów; „przekazano do wysyłki”; nie w `progress_jobs` | TC-FU-RUN-004, TC-FU-RUN-005, TC-FU-DEC-002 | |
+| **D179** | Feature'y `crm_followups.*`; widoczność opiekun/administrator; obiekt bez opiekuna → administratorzy; cudzy szkic → 404; brak feature'a → `403 FORBIDDEN`; klucz n8n tylko `run`; przy zatwierdzaniu brak widoku obiektu albo feature'a celu → `403 FORBIDDEN`, szkic `open`, bez interakcji (zmiana 2026-10-31) | TC-FU-ACL-001, TC-FU-ACL-002, TC-FU-ACL-003, TC-FU-DEC-003 | wniosek 4 rozstrzygnięty |
+| **D180** | Wyzwalacze → kolejka `crm-followups-scan`: scheduler, `POST /runs` z `Idempotency-Key` (brak → 422 `IDEMPOTENCY_KEY_REQUIRED`), CLI; `run_key`; jeden przebieg naraz; `skipped` (`disabled` tylko dla firmy); `heartbeat_at`; wznowienie; `OM_CRM_FOLLOWUPS_ENABLED = false` → bez crona, 409 `FOLLOWUPS_DISABLED`, decyzje działają (zmiana 2026-10-31) | TC-FU-RUN-001, TC-FU-RUN-002, TC-FU-RUN-003, TC-FU-RUN-006, TC-FU-RUN-007 | wniosek 2 rozstrzygnięty; wniosek 9 |
+| **D181** | Parametry firmy (`org:{id}:settings`) z domyślnymi; usunięte parametry; parametry instancji (env); limit efektywny = min(firma, instancja), `WORKER_CONCURRENCY` bez wpływu na jeden przebieg na organizację; wartość spoza zakresu → 422 `INVALID_SETTING_VALUE` (zmiana 2026-10-31) | TC-FU-SET-001, TC-FU-SET-002, TC-FU-SCAN-001, TC-FU-SCAN-004, TC-FU-KIND-002, TC-FU-RUN-005, TC-FU-RUN-006, TC-FU-RUN-007, TC-FU-MUTE-001, TC-FU-TPL-001 | wnioski 1, 3 rozstrzygnięte |
+| **D182** | Notka `fu_runs.note` z licznikami (także `skipped_kind_disabled`, zmiana 2026-10-31) i linkiem; powiadomienia in-app do właścicieli i administratorów; „przekazano do wysyłki”; nie w `progress_jobs` | TC-FU-RUN-004, TC-FU-RUN-005, TC-FU-DEC-002, TC-FU-KIND-004 | |
 | **D183** | Audyt przez komendy, tylko ID i statusy; powód i źródło w metadanych; szyfrowanie `payload`, `target_label_snapshot`, adresu; logger bez treści | TC-FU-AUD-001 | |
-| **D184** | Treść tylko z szablonów pl/en, nadpisywalnych per firma; bez LLM i nowych zależności | TC-FU-TPL-001 | |
+| **D184** | Treść tylko z szablonów pl/en, nadpisywalnych per firma; bez LLM i nowych zależności; lista pozostałych części — zmienna szablonu, każda część tytułem deala (zmiana 2026-10-31) | TC-FU-TPL-001, TC-FU-TPL-002 | format listy bez asercji; wniosek 7 rozstrzygnięty |
 | **D193** | Domyślny opiekun deala z n8n — kontekst: szkice deala bez opiekuna do administratorów | TC-FU-ACL-001 | reguła główna: plan costing TC-DEAL-022 |
 
 ---
 
 ## Changelog
+
+### Rev 3 — 2026-10-31 (rozstrzygnięcia Q-FU-T1…T4; rejestr @32bf708, PR #38)
+
+- Niezależna sesja planu (P4): jedyne źródło — `.ai/decisions.md` @32bf708; speki nieczytane
+- Nowe TC: TC-FU-SET-002 (D181 — 422 `INVALID_SETTING_VALUE`; P1), TC-FU-RUN-007 (D180 — `OM_CRM_FOLLOWUPS_ENABLED = false`: bez crona, 409 `FOLLOWUPS_DISABLED`, bez `fu_runs`, decyzje działają; P0), TC-FU-KIND-004 (D177, D182 — bez szkicu i zastępstwa, `skipped_kind_disabled`; P1)
+- Zmienione TC (kod zamiast „zapis odrzucony”): TC-FU-SET-001 krok 2, TC-FU-SCAN-004 krok 3, TC-FU-MUTE-001 krok 4 → 422 `INVALID_SETTING_VALUE`; TC-FU-RUN-002 krok 1 → 422 `IDEMPOTENCY_KEY_REQUIRED`
+- Zmienione TC (nowe reguły): TC-FU-KIND-001 krok 2 (bez zastępstwa, licznik), TC-FU-RUN-003 krok 4 (`skip_reason = disabled`), TC-FU-RUN-004 (licznik `skipped_kind_disabled`), TC-FU-RUN-006 (odesłanie do TC-FU-RUN-007)
+- Wnioski 1, 2, 3, 6 rozstrzygnięte; macierz R6; załącznik — wiersze D177, D180, D181, D182
+- Liczba scenariuszy: 34 → 37 (P0: 19 → 20, P1: 15 → 17)
+
+### Rev 2 — 2026-10-31 (doprecyzowania D175, D176, D179, D181, D184; rejestr @cdf27dc, PR #38)
+
+- Niezależna sesja planu (P4): jedyne źródło — `.ai/decisions.md` @cdf27dc; bez speki i bez briefu
+- Nowe TC: TC-FU-DEC-004 (D175, D176 — `approved`, `handed_off`, `rejected`, CHECK; P0), TC-FU-ACL-003 (D179 — brak widoku obiektu albo feature'a celu → `403 FORBIDDEN`, szkic `open`; P0), TC-FU-RUN-006 (D181 — limit = minimum, `WORKER_CONCURRENCY`; P1), TC-FU-TPL-002 (D184 — tytuły pozostałych części, bez asercji formatu; P1)
+- TC-FU-DEC-001: literał `approved`; TC-FU-RUN-005: odesłanie do TC-FU-RUN-006 zamiast „bez asercji”
+- Wnioski 4, 5, 7 rozstrzygnięte, 3 częściowo; macierz ryzyka R4, R6; załącznik — wiersze D175, D176, D179, D181, D184
+- Liczba scenariuszy: 30 → 34 (P0: 17 → 19, P1: 13 → 15)
 
 ### Rev 1 — 2026-10-31 (pierwsza wersja; rejestr @0be9356, PR #33)
 
