@@ -3,7 +3,7 @@
 **Dokument**: SPEC ONLY (plan testów niezależny od specyfikacji PR #10, brak kodu)
 **Data**: 2026-10-19
 **Autor**: Copilot (plan testów na podstawie wymagań biznesowych Marka Adamskiego)
-**Rewizja**: rev 9a (2026-10-31) — asercje TC-DEAL-019 (D187), TC-DEAL-020 (D190), TC-DEAL-021 (D189), TC-EXEC-006 (D188) wg decisions @49384e6 (PR #35, runda 2: rozstrzygnięcia techniczne Cezara 2026-10-31); notatka przy TC-DEAL-009 (L3); poprzednio rev 9 (2026-10-31) — nowe TC dla D185 (etapy lejka a kosztorys), D187 (status inwestycji), D189 (klucz push części, etap kodu), D190 (właściciel inwestycji) i D188 w części harmonogramu (`reopened_at` po usunięciu deala), rejestr decisions @730b77d (PR #35, `docs/arch-gaps-d185`); poprzednio rev 8e (2026-10-31) — meta: data rev 8d poprawiona na faktyczną; poprzednio rev 8d (2026-10-31) — TC-DEAL-017: priorytet P1 → P0 (spójnie z TC-PD-PRJ-012, reguła D31/D132); poprzednio rev 8c (2026-10-23) — TC-DEAL-016: lookup po postępowaniu + części (etap kodu, D32); poprzednio rev 8b (2026-10-23, rozstrzygnięcie D31) — wiersz D31 wg nowej treści (przetarg bez części = 1 deal, z częściami — deal i inwestycja na część), nowy TC-DEAL-017 (przetarg z częściami, D132); poprzednio rev 8a (2026-10-23, odbiór #20) — TC-CUR-012: usunięta zbędna linia „Krok 3: kurs ręczny nie odblokowuje…” (treść w linii kroku 3); poprzednio rev 8 (2026-10-23, runda PR D) — TC-CUR-012 i TC-CUR-014: wskazany krok zwracający 422 (samo ustawienie kursu ręcznego nie zwraca 422; 422 przy wysłaniu, odpowiednio przy powtórzeniu dodania pozycji); poprzednio runda rev 8h — waluta bez kursu w żadnej tabeli NBP: TC-CUR-012 przepisany (422 dla waluty oferty, kurs ręczny nie odblokowuje, CNY przechodzi), nowy TC-CUR-014 (v1, 422 dla waluty pozycji), wniosek 26 zamknięty, annex do D97; poprzednio runda rev 8g — TC-CUR-011: wyszukiwanie modułu Waluty o 00:30 czasu warszawskiego daje kurs z dnia poprzedniego, wysłanie oferty liczy datę w Europe/Warsaw, suma deali zaokrąglona do całości, godziny graniczne lato/zima; TC-CUR-001: zamrożony obraz bez źródła kursu; poprzednio rev 7 (runda rev 8f) — waluty przez moduł Waluty platformy (TC-CUR-002..007 przepisane, nowe TC-CUR-008..013), annex do D94; poprzednio rev 6 — zgodność z decyzjami koordynacyjnymi (`.ai/vision.md`, `.ai/decisions.md`, `.ai/om-architecture-checklist.md`) i rozstrzygnięciami Koordynatora z 2026-10-23; mapowanie scenariuszy na decyzje w załączniku „Traceability TC → D”
+**Rewizja**: rev 9b (2026-10-31) — meta (P21): numery D w TC-DEAL-018..021 i TC-EXEC-006; poprzednio rev 9a (2026-10-31) — asercje TC-DEAL-019 (D187), TC-DEAL-020 (D190), TC-DEAL-021 (D189), TC-EXEC-006 (D188) wg decisions @49384e6 (PR #35, runda 2: rozstrzygnięcia techniczne Cezara 2026-10-31); notatka przy TC-DEAL-009 (L3); poprzednio rev 9 (2026-10-31) — nowe TC dla D185 (etapy lejka a kosztorys), D187 (status inwestycji), D189 (klucz push części, etap kodu), D190 (właściciel inwestycji) i D188 w części harmonogramu (`reopened_at` po usunięciu deala), rejestr decisions @730b77d (PR #35, `docs/arch-gaps-d185`); poprzednio rev 8e (2026-10-31) — meta: data rev 8d poprawiona na faktyczną; poprzednio rev 8d (2026-10-31) — TC-DEAL-017: priorytet P1 → P0 (spójnie z TC-PD-PRJ-012, reguła D31/D132); poprzednio rev 8c (2026-10-23) — TC-DEAL-016: lookup po postępowaniu + części (etap kodu, D32); poprzednio rev 8b (2026-10-23, rozstrzygnięcie D31) — wiersz D31 wg nowej treści (przetarg bez części = 1 deal, z częściami — deal i inwestycja na część), nowy TC-DEAL-017 (przetarg z częściami, D132); poprzednio rev 8a (2026-10-23, odbiór #20) — TC-CUR-012: usunięta zbędna linia „Krok 3: kurs ręczny nie odblokowuje…” (treść w linii kroku 3); poprzednio rev 8 (2026-10-23, runda PR D) — TC-CUR-012 i TC-CUR-014: wskazany krok zwracający 422 (samo ustawienie kursu ręcznego nie zwraca 422; 422 przy wysłaniu, odpowiednio przy powtórzeniu dodania pozycji); poprzednio runda rev 8h — waluta bez kursu w żadnej tabeli NBP: TC-CUR-012 przepisany (422 dla waluty oferty, kurs ręczny nie odblokowuje, CNY przechodzi), nowy TC-CUR-014 (v1, 422 dla waluty pozycji), wniosek 26 zamknięty, annex do D97; poprzednio runda rev 8g — TC-CUR-011: wyszukiwanie modułu Waluty o 00:30 czasu warszawskiego daje kurs z dnia poprzedniego, wysłanie oferty liczy datę w Europe/Warsaw, suma deali zaokrąglona do całości, godziny graniczne lato/zima; TC-CUR-001: zamrożony obraz bez źródła kursu; poprzednio rev 7 (runda rev 8f) — waluty przez moduł Waluty platformy (TC-CUR-002..007 przepisane, nowe TC-CUR-008..013), annex do D94; poprzednio rev 6 — zgodność z decyzjami koordynacyjnymi (`.ai/vision.md`, `.ai/decisions.md`, `.ai/om-architecture-checklist.md`) i rozstrzygnięciami Koordynatora z 2026-10-23; mapowanie scenariuszy na decyzje w załączniku „Traceability TC → D”
 
 ---
 
@@ -773,6 +773,8 @@ Inwestycję zakłada handlowiec w module kalkulacji; n8n inwestycji nie tworzy. 
 
 #### TC-DEAL-018: Etap deala z n8n tylko `result_lead` i `cancelled`; etap nie zmienia kosztorysu
 
+> Decyzje: D185 (meta, P21 — odesłanie dla macierzy spec-check; treść TC bez zmian).
+
 - **Priorytet**: P1 | **Etap**: MVP | **Poziom**: Integration + API (kontrakt n8n)
 - **Warunki wstępne**: Lejek „Przetargi” (D33); deale z kalkulacją i partiami, `closure_outcome` = NULL: A i D na etapie `new`, B na `result_lead`, C na `offer` i E na `qualify` (ustawione przez użytkownika); deal F na `contact`, z kalkulacją, wersją wysłaną i partiami w prognozie
 - **Kroki**:
@@ -788,6 +790,8 @@ Inwestycję zakłada handlowiec w module kalkulacji; n8n inwestycji nie tworzy. 
   - Znaczenie etapu `rejected` — bez asercji (Q-ARCH-1, wniosek 28)
 
 #### TC-DEAL-019: Status inwestycji — `active`/`archived` w MVP, `merged` od v1
+
+> Decyzje: D187 (meta, P21 — odesłanie dla macierzy spec-check; treść TC bez zmian).
 
 - **Priorytet**: P2 | **Etap**: MVP (`active`, `archived`), v1 (`merged`) | **Poziom**: Integration + API + `pg`
 - **Warunki wstępne**: Inwestycje I-A, I-B; użytkownik U-I z feature `project_costing.manage_investments`, użytkownik U-N bez niego; deal D-N bez inwestycji
@@ -811,6 +815,8 @@ Inwestycję zakłada handlowiec w module kalkulacji; n8n inwestycji nie tworzy. 
 
 #### TC-DEAL-020: Właściciel inwestycji = `created_by`; zapis kluczem API
 
+> Decyzje: D190 (meta, P21 — odesłanie dla macierzy spec-check; treść TC bez zmian).
+
 - **Priorytet**: P2 | **Etap**: MVP | **Poziom**: Integration + API + `pg`
 - **Warunki wstępne**: Użytkownicy U1 i U2 z prawem zakładania i edycji inwestycji; klucz API K-U należący do U1; klucz API K-0 bez użytkownika; administratorzy organizacji A1 i A2; integracja n8n
 - **Kroki**:
@@ -830,6 +836,8 @@ Inwestycję zakłada handlowiec w module kalkulacji; n8n inwestycji nie tworzy. 
   - Rodzaje szkiców i powiadomień inwestycji (reguła z `crm_followups`, PR #33, poza rejestrem) oraz właściciel deala z n8n (Q-ARCH-2) — bez asercji (wniosek 31)
 
 #### TC-DEAL-021: Klucz push części postępowania `ezamowienia:<tender_id>#<nr części>`
+
+> Decyzje: D189 (meta, P21 — odesłanie dla macierzy spec-check; treść TC bez zmian).
 
 - **Priorytet**: P0 | **Etap**: etap kodu kontraktu push (D32; zadanie Enki), test razem z kontraktem push | **Poziom**: Integration (kontrakt n8n) + `pg`
 - **Warunki wstępne**: Postępowanie z `tender_id` = TP i częściami 1, 2 (jak TC-DEAL-017); postępowanie T-S bez części z dealem i kluczem push sprzed zmiany kontraktu; lista kluczy wszystkich istniejących deali zapisana przed wdrożeniem
@@ -2041,6 +2049,8 @@ Automatyczne przejście w fazę wykonawczą, idempotentność, ponowne otwarcie,
 
 #### TC-EXEC-006: Usunięcie i przywrócenie deala z harmonogramem wykonawczym — `reopened_at` bez kaskady
 
+> Decyzje: D188 (meta, P21 — odesłanie dla macierzy spec-check; treść TC bez zmian).
+
 - **Priorytet**: P1 | **Etap**: v1 | **Poziom**: Integration + API + `pg`
 - **Warunki wstępne**: Organizacja z modułem harmonogramu; inwestycja I-1: harmonogram wykonawczy bez fazy projektu, deal X wygrany; inwestycja I-2: rekord z fazą projektu (zadanie `ps_schedule_tasks` z `execution_project_id`) włączoną z dealem Y (`execution_deal_id`), projekt P-Y; inwestycja I-3: harmonogram wykonawczy bez fazy projektu, deal W wygrany; użytkownik U-E z feature `project_schedule.edit`, użytkownik U-R bez niego; subskrybent eventów
 - **Kroki**:
@@ -2666,6 +2676,11 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 ---
 
 ## Changelog
+
+### Rev 9b — 2026-10-31 (meta, P21; wykonawca, nity po merge #35)
+
+- Linie „> Decyzje: …” pod nagłówkami TC-DEAL-018 (D185), TC-DEAL-019 (D187), TC-DEAL-020 (D190), TC-DEAL-021 (D189), TC-EXEC-006 (D188) — odesłanie dla macierzy spec-check
+- Kroki i asercje TC bez zmian (P4, P21)
 
 ### Rev 9a — 2026-10-31 (rozstrzygnięcia Cezara do D187–D190; rejestr @49384e6, PR #35)
 
