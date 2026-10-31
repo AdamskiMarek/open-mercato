@@ -6,7 +6,7 @@
 |------|---------|
 | **Status** | draft |
 | **Data** | 2026-10-31 |
-| **Rewizja** | 2026-10-31 (rev 2 — rozstrzygnięcia Cezara Q-LR-1…Q-LR-7: moduł `crm_deal_rules` (`cdr_`), `INVALID_SETTING_VALUE`, `crm.n8n_api_key_ids`, przeliczenie i czyszczenie przy `rejected`, `INVALID_LOSS_REASON`, własne okno powodu w UI (§6, wariant A z rev 1 skorygowany); rev 1 — pierwsza wersja, doc-PR po #33) |
+| **Rewizja** | 2026-10-31 (rev 3 — Q-LR-8 zamknięte: przechwycenie wystarcza na MVP; Q-LR-9: walidacja `crm.n8n_api_key_ids`; D191 z wyjątkiem wyjścia z `rejected`; R-LR-7 jako warunek testu na etapie kodu; rev 2 — rozstrzygnięcia Cezara Q-LR-1…Q-LR-7: moduł `crm_deal_rules` (`cdr_`), `INVALID_SETTING_VALUE`, `crm.n8n_api_key_ids`, przeliczenie i czyszczenie przy `rejected`, `INVALID_LOSS_REASON`, własne okno powodu w UI (§6, wariant A z rev 1 skorygowany); rev 1 — pierwsza wersja, doc-PR po #33) |
 | **Faza** | MVP (D192, D193); S24 gotowe dopiero z działającym UI (§6) |
 | **Moduł** | `crm_deal_rules` — moduł aplikacji forka w `apps/mercato/src/modules/crm_deal_rules` (D45); prefiks tabel `cdr_` (D192, Q-LR-6) |
 | **Zależności upstream** | `customers` (komendy `customers.deals.create` / `customers.deals.update`, strona lejka, hooki strony szczegółów), `dictionaries` (słownik `sales.deal_loss_reason`), `configs` (ModuleConfigService, `org:{id}:settings`, D69), `auth` / `directory` (użytkownicy, scope), `api_keys`, `progress` (job postępu), kontrakty: interceptory komend (`@open-mercato/shared/lib/commands/command-interceptor`), interceptory API (`@open-mercato/shared/lib/crud/api-interceptor`), widgety wstrzykiwane (`onBeforeSave`), rejestr podmiany komponentów (SPEC-041h) |
@@ -22,7 +22,7 @@
 - Zmiana powodu na `rejected` przelicza `closure_outcome` (`lost` ↔ NULL); wyjście z `rejected` samym etapem czyści `closure_outcome` i `loss_reason_id` (Q-LR-4).
 - UI: własne okno powodu modułu, wywoływane przy zmianie etapu na `rejected` w formularzu deala (widget `onBeforeSave` + interceptor API), na kanbanie i w oknie masowym (podmiana statycznej strony lejka + trasa masowa modułu); samo API nie wystarcza na MVP (§6).
 - Seed: 3 nowe wpisy (`rejected_by_buyer`, `our_withdrawal`, `other`) i 12 jawnych mapowań (D41, D192).
-- Pozostałość P20: okno „Oznacz jako przegrany” z core nadal pokazuje cały słownik (Q-LR-8, §6.3, §11).
+- „Oznacz jako przegrany”: lista w oknie core zostaje pełna; na MVP wystarcza przechwycenie przez moduł (okno tylko z powodami `lost`, API 422 `INVALID_LOSS_REASON`), bez zmiany core (Q-LR-8, §6.3). Zgłoszenie issue w upstream — opcja na później.
 
 ## Streszczenie
 
@@ -146,7 +146,7 @@ Etap `rejected` rozpoznawany po kluczu etapu lejka „Przetargi” (D33), nie po
 
 Niezmiennik (D192, Q-LR-4): po każdym zapisie przez komendy `closure_outcome = lost` ma powód typu `lost`.
 
-Czyszczenie w pkt 2 i 3 — sposób: schemat zod deala nie przyjmuje `null` dla `closureOutcome` ani `lossReasonId` (validators l.186–187), a core czyści `closure_outcome`, `loss_reason_id` i `loss_notes` przy `status` niezamkniętym (`deals.ts` l.870–886). Interceptor ustawia więc w `modifiedInput` niezamknięty `status` deala (i, w pkt 2, nowe `lossReasonId`); `loss_notes` przekazuje z bieżącą wartością, żeby core ich nie wyczyścił. Na etapie kodu test komendy potwierdza, że ta droga nie przesuwa etapu ani nie zmienia innych pól (R-LR-7).
+Czyszczenie w pkt 2 i 3 — sposób: schemat zod deala nie przyjmuje `null` dla `closureOutcome` ani `lossReasonId` (validators l.186–187), a core czyści `closure_outcome`, `loss_reason_id` i `loss_notes` przy `status` niezamkniętym (`deals.ts` l.870–886). Interceptor ustawia więc w `modifiedInput` niezamknięty `status` deala (i, w pkt 2, nowe `lossReasonId`); `loss_notes` przekazuje z bieżącą wartością, żeby core ich nie wyczyścił. **Warunek testu na etapie kodu (R-LR-7):** test komendy potwierdza, że ta droga nie przesuwa etapu ani nie zmienia innych pól deala (poza `closure_outcome`, `loss_reason_id` i `status`); bez tego testu pkt 2 i 3 nie są gotowe.
 
 Zakres i skutki:
 
@@ -154,7 +154,7 @@ Zakres i skutki:
 - **Ścieżka masowa core** (`POST /api/customers/deals/bulk-update-stage`, np. bezpośrednio przez API): worker nie przenosi `lossReasonId` (§1), więc każdy deal przenoszony na `rejected` dostaje 422 `REASON_REQUIRED` w `failedItems` (`id`, `message`) podsumowania joba; pozostałe deale są przetwarzane (D192). `message` zawiera kod `REASON_REQUIRED`. UI forka używa trasy modułu (§5).
 - n8n nie ustawia `rejected` i nie zmienia `closure_outcome` ani powodu (D185, D42) — interceptor nie ma wyjątku dla n8n.
 - Prognoza kosztorysu wyklucza `rejected` niezależnie od `closure_outcome` (D185, D191) — interceptor tego nie dotyczy. Oferta `primary` deala na `rejected` zostaje (historia); widget i suma inwestycji wykluczają deal i pokazują go jako „odrzucony” (D185, Q-LR-3) — realizacja w kosztorysie, nie w tym module.
-- D191 (`lost → open` w core) bez zmian: pkt 3 dotyczy tylko wyjścia z etapu `rejected`.
+- D191 (`lost → open` w core) bez zmian, z wyjątkiem wyjścia z `rejected` (D192, pkt 3; zmiana 2026-10-31).
 
 Format odpowiedzi 422: `body` jak w trasach CRUD core (`error` z kodem i komunikatem); w ścieżce masowej — `message` błędu pozycji.
 
@@ -182,11 +182,11 @@ Rozstrzygnięcie Cezara (Q-LR-5): wariant okna bez zmian w OM core; najpierw spr
 - Strona `/backend/customers/deals/pipeline` jest statyczna, więc uchwyt `page:/backend/customers/deals/pipeline` da się podmienić rejestrem (`[...slug]/page.tsx` l.45, l.117–119; `component-registry.ts` l.101–105, l.142–146). Moduł rejestruje kopię strony, w której przejście na `rejected` (przeciągnięcie, `ChangeStageDialog` pojedynczy i masowy, `pipeline/page.tsx` l.87, l.3007–3027) najpierw otwiera okno powodu, a potem woła ścieżki z §5.
 - Kopia jest przypięta do SHA upstream, z którego powstała; przy każdej synchronizacji z upstream diff oryginału z tym SHA decyduje o aktualizacji kopii (D45, R-LR-6).
 
-### 6.3 „Oznacz jako przegrany” — widget na globalnym spocie (pozostałość P20)
+### 6.3 „Oznacz jako przegrany” — widget na globalnym spocie (Q-LR-8)
 
 - Okno core `ConfirmDealLostDialog` jest importowane bezpośrednio (`deals/[id]/page.tsx` l.27, l.703–710) i ładuje cały słownik (l.55); strony szczegółów nie da się podmienić, bo uchwyt `page:` zawiera UUID deala (§1). Listy w tym oknie nie da się więc zawęzić bez zmiany core.
 - Widget modułu na globalnym spocie przechwytuje `operation: 'closeLost'` (`useDealClosure.ts` l.84–105): powód `lost` → zapis bez zmian; powód spoza `lost` → okno powodu modułu tylko z powodami `lost` (z notatką z okna core), wybrany powód idzie nagłówkiem (§6.1); anulowanie → `ok: false`. API i tak odrzuca powód spoza `lost` (§4 pkt 4).
-- Rozbieżność z D192 („UI pokazuje w tym oknie tylko powody `lost`”): lista w oknie core zostaje pełna — Q-LR-8 (§11).
+- Lista w oknie core zostaje pełna. Na MVP wystarcza to przechwycenie, bez wyjątku od D45 i bez PR do upstream (D192, Q-LR-8). Zgłoszenie w upstream (issue: rejestracja okna albo filtr listy) — opcja na później, w sekcji „Otwarte” rejestru.
 
 ### 6.4 Okno powodu modułu
 
@@ -207,7 +207,7 @@ Rozstrzygnięcie Cezara (Q-LR-5): wariant okna bez zmian w OM core; najpierw spr
 ## 7. D193 — ustawienia `crm.n8n_default_deal_owner_user_id` i `crm.n8n_api_key_ids`
 
 - Miejsce: ModuleConfigService, `org:{id}:settings` (D69). `crm.n8n_default_deal_owner_user_id` — domyślnie `null` (D193). `crm.n8n_api_key_ids` — lista ID kluczy API (uuid[]), domyślnie pusta (D193, Q-LR-2).
-- Zapis: komenda `crm_deal_rules.settings.update` z walidacją — opiekun aktywny i należy do organizacji; inaczej 422 `INVALID_SETTING_VALUE`, ustawienie bez zmian (D193, Q-LR-1). Lista kluczy: elementy to UUID, inaczej 422 `INVALID_SETTING_VALUE`; dalsze kryteria (np. istnienie klucza w organizacji) — Q-LR-9.
+- Zapis: komenda `crm_deal_rules.settings.update` z walidacją — opiekun aktywny i należy do organizacji; inaczej 422 `INVALID_SETTING_VALUE`, ustawienie bez zmian (D193, Q-LR-1). Lista kluczy: każdy ID musi być UUID istniejącego, nieodwołanego klucza API tej organizacji, inaczej 422 `INVALID_SETTING_VALUE`, ustawienie bez zmian (D193, Q-LR-9). Klucz odwołany później nie wymaga czyszczenia ustawienia: odwołany klucz nie uwierzytelni pushu, więc nie założy deala.
 - Interceptor `customers.deals.create` (`modifiedInput.ownerUserId`), tylko gdy: (1) aktor to klucz API, którego ID jest na liście `crm.n8n_api_key_ids` (bez rozpoznania po nazwie klucza i bez osobnego feature'a, Q-LR-2), (2) push nie podaje `ownerUserId`, (3) `crm.n8n_default_deal_owner_user_id` ≠ `null`.
 - W chwili importu użytkownik nieaktywny, usunięty albo poza organizacją → deal bez opiekuna, ostrzeżenie w logu (tylko ID deala i użytkownika) (D193).
 - Bez interceptora na `customers.deals.update`; bez wstecznego przypisania; późniejsze pushe nie zmieniają opiekuna (D193).
@@ -231,12 +231,12 @@ Rozstrzygnięcie Cezara (Q-LR-5): wariant okna bez zmian w OM core; najpierw spr
 | # | Ryzyko | Skutek | Mitygacja | Rezydualne |
 |---|---|---|---|---|
 | R-LR-1 | UI core nie wysyła `lossReasonId` przy zmianie etapu | 422 przy przejściu na `rejected` | widget `onBeforeSave` + interceptor API (§6.1), kopia lejka i trasa masowa (§6.2) | Niskie |
-| R-LR-2 | Okno „Oznacz jako przegrany” z core pokazuje powody `no_result` | użytkownik wybiera powód spoza `lost` | widget otwiera okno tylko z powodami `lost` (§6.3); API 422 `INVALID_LOSS_REASON` | Średnie do odpowiedzi na Q-LR-8 |
+| R-LR-2 | Okno „Oznacz jako przegrany” z core pokazuje powody `no_result` | użytkownik wybiera powód spoza `lost` | widget otwiera okno tylko z powodami `lost` (§6.3); API 422 `INVALID_LOSS_REASON`; przechwycenie przyjęte na MVP (Q-LR-8) | Niskie (zbędny krok dla użytkownika) |
 | R-LR-3 | Aktualizacja core zmienia identyfikatory komend, kontrakty interceptorów, spoty albo hooki | reguła albo okno przestaje działać | test kontraktu w module; przegląd przy merge upstream | Niskie |
 | R-LR-4 | Zmiana powodu na `rejected` albo wyjście z `rejected` zostawia `closure_outcome` | rozjazd metryk (D192) | §4 pkt 2–3 (Q-LR-4) | Niskie |
-| R-LR-5 | Lista `crm.n8n_api_key_ids` niekompletna albo z obcym kluczem | opiekun pominięty albo nadany dealom spoza n8n | ustawienie tylko dla administratora, audyt zmian; Q-LR-9 | Niskie |
+| R-LR-5 | Lista `crm.n8n_api_key_ids` niekompletna albo z obcym kluczem | opiekun pominięty albo nadany dealom spoza n8n | ustawienie tylko dla administratora, audyt zmian; walidacja istnienia i nieodwołania klucza w organizacji (Q-LR-9) | Niskie |
 | R-LR-6 | Kopia strony lejka rozjeżdża się z upstream | brak poprawek upstream na kanbanie | przypięcie do SHA upstream i diff przy każdej synchronizacji (D45); TC kanbanu | Średnie |
-| R-LR-7 | Czyszczenie przez niezamknięty `status` zmienia inne pola deala | nieoczekiwana zmiana statusu albo etapu | test komendy przy kodzie (§4); `loss_notes` przekazywane | Niskie |
+| R-LR-7 | Czyszczenie przez niezamknięty `status` zmienia inne pola deala | nieoczekiwana zmiana statusu albo etapu | warunek testu na etapie kodu: test komendy (§4); `loss_notes` przekazywane | Niskie po teście |
 
 ## 11. Pytania techniczne
 
@@ -250,20 +250,22 @@ Zamknięte 2026-10-31 (Cezar 2026-10-31 (techniczne), Z7):
 - **Q-LR-6:** moduł `crm_deal_rules`, prefiks `cdr_`, tabela `cdr_loss_reason_outcomes`; D192 i D193 w jednym module; `value`: `rejected_by_buyer`, `our_withdrawal`, `other` (§2, §3).
 - **Q-LR-7:** powód spoza aktywnych wpisów słownika → 422 `INVALID_LOSS_REASON` na obu ścieżkach (§4).
 
-Otwarte (do Cezara, P20; rejestr — sekcja „Otwarte”):
+Zamknięte 2026-10-31 (Cezar 2026-10-31 (techniczne / proces, Z7)):
 
-- **Q-LR-8:** okno „Oznacz jako przegrany” z core nadal pokazuje cały słownik (§6.3); D192 mówi, że UI pokazuje w tym oknie tylko powody `lost`. Bez zmiany core nie da się zawęzić listy. Czy przechwycenie w §6.3 wystarcza, czy potrzebna jest zmiana w core (wyjątek od D45 albo PR do upstream)?
-- **Q-LR-9:** kryteria walidacji `crm.n8n_api_key_ids` przy zapisie poza formatem UUID (np. czy klucz musi istnieć w organizacji i nie być odwołany).
+- **Q-LR-8:** na MVP wystarcza przechwycenie `closeLost` przez moduł (§6.3); lista w oknie core zostaje pełna; bez wyjątku od D45 i bez PR do upstream. Zgłoszenie w upstream (issue) — opcja na później, w sekcji „Otwarte” rejestru (D192).
+- **Q-LR-9:** każdy ID w `crm.n8n_api_key_ids` to UUID istniejącego, nieodwołanego klucza API organizacji, inaczej 422 `INVALID_SETTING_VALUE`; klucz odwołany później bez czyszczenia ustawienia (§7, D193).
+
+Otwarte: brak.
 
 ## 12. Uwagi dla planu testów (niezależny plan, osobna sesja)
 
-Plan pisze niezależna sesja z rejestru (P4). Zakres nowy względem planu kosztorysu: D192 — ścieżka „lost” bez powodu → 422 `REASON_REQUIRED`; ścieżka masowa core → `failedItems` z `REASON_REQUIRED`; rev 2: powód spoza aktywnych wpisów → 422 `INVALID_LOSS_REASON` na obu ścieżkach (Q-LR-7), zmiana powodu na `rejected` przelicza `closure_outcome` (`lost` ↔ NULL), wyjście z `rejected` czyści `closure_outcome` i `loss_reason_id` (Q-LR-4), okno powodu modułu w formularzu, na stronie szczegółów, na kanbanie i w oknie masowym oraz trasa masowa modułu (Q-LR-5), „Oznacz jako przegrany” z powodem spoza `lost` → okno tylko z powodami `lost` (§6.3), seed z `value` `rejected_by_buyer` / `our_withdrawal` / `other` (Q-LR-6); D185 — oferta `primary` na `rejected` zostaje, widget pokazuje „odrzucony” (Q-LR-3); D193 — 422 `INVALID_SETTING_VALUE` (Q-LR-1), rozpoznanie n8n po `crm.n8n_api_key_ids` (Q-LR-2).
+Plan pisze niezależna sesja z rejestru (P4). Zakres nowy względem planu kosztorysu: D192 — ścieżka „lost” bez powodu → 422 `REASON_REQUIRED`; ścieżka masowa core → `failedItems` z `REASON_REQUIRED`; rev 2: powód spoza aktywnych wpisów → 422 `INVALID_LOSS_REASON` na obu ścieżkach (Q-LR-7), zmiana powodu na `rejected` przelicza `closure_outcome` (`lost` ↔ NULL), wyjście z `rejected` czyści `closure_outcome` i `loss_reason_id` (Q-LR-4), okno powodu modułu w formularzu, na stronie szczegółów, na kanbanie i w oknie masowym oraz trasa masowa modułu (Q-LR-5), „Oznacz jako przegrany” z powodem spoza `lost` → okno tylko z powodami `lost` (§6.3), seed z `value` `rejected_by_buyer` / `our_withdrawal` / `other` (Q-LR-6); rev 3: zapis `crm.n8n_api_key_ids` z ID nieistniejącym, odwołanym albo z innej organizacji → 422 `INVALID_SETTING_VALUE`, ustawienie bez zmian; klucz odwołany po zapisie nie tworzy deala, ustawienie zostaje (Q-LR-9); wyjście z `rejected` czyści `closure_outcome` i `loss_reason_id`, a `lost → open` poza `rejected` działa jak w core (D191); R-LR-7 — warunek testu komendy na etapie kodu (§4); D185 — oferta `primary` na `rejected` zostaje, widget pokazuje „odrzucony” (Q-LR-3); D193 — 422 `INVALID_SETTING_VALUE` (Q-LR-1), rozpoznanie n8n po `crm.n8n_api_key_ids` (Q-LR-2).
 
 ## 13. Final Compliance Report (vs `AGENTS.md`)
 
 | Punkt | Stan |
 |---|---|
-| Bez zmian w `packages/core` (D45) | tak — interceptory, widgety, podmiana strony lejka przez rejestr, nowa tabela i trasy w module aplikacji; pozostałość Q-LR-8 |
+| Bez zmian w `packages/core` (D45) | tak — interceptory, widgety, podmiana strony lejka przez rejestr, nowa tabela i trasy w module aplikacji; okno core „Oznacz jako przegrany” bez zmian (Q-LR-8) |
 | Brak FK między modułami | tak — `dictionary_entry_id` bez FK |
 | Scope `organization_id` / `tenant_id` | tak — tabela, seed i trasy per organizacja |
 | Zapisy przez komendy z audytem | tak — §0.2, §8 |
@@ -284,7 +286,7 @@ Plan pisze niezależna sesja z rejestru (P4). Zakres nowy względem planu koszto
 | D147 | §8 — `403 FORBIDDEN` |
 | D179 | §7 — deal bez opiekuna → administratorzy |
 | D185 | §4 — n8n nie ustawia `rejected`; prognoza i suma bez `rejected`; oferta `primary` jako historia, „odrzucony” (Q-LR-3) |
-| D191 | §4 — `lost → open` bez zmian; wyjście z `rejected` osobno |
+| D191 | §4 — `lost → open` bez zmian, z wyjątkiem wyjścia z `rejected` (D192) |
 | D192 | §2–§6, Q-LR-4…Q-LR-8 |
 | D193 | §7, Q-LR-1, Q-LR-2, Q-LR-9 |
 
@@ -294,3 +296,4 @@ Plan pisze niezależna sesja z rejestru (P4). Zakres nowy względem planu koszto
 |------|--------|
 | 2026-10-31 | **rev 1** — pierwsza wersja (doc-PR po #33, polecenie Cezara 2026-10-31): moduł forka, tabela mapująca, seed 12 wpisów, interceptor D192 (`REASON_REQUIRED`, `INVALID_LOSS_REASON`, ścieżka masowa), okno „Oznacz jako przegrany” (warianty), ustawienie D193; pytania Q-LR-1…Q-LR-7. |
 | 2026-10-31 | **rev 2** — rozstrzygnięcia Cezara 2026-10-31 (techniczne), Z7 (Q-LR-1…Q-LR-7): moduł `crm_deal_rules`, prefiks `cdr_`, tabela `cdr_loss_reason_outcomes`, `value` seedu `rejected_by_buyer` / `our_withdrawal` / `other` (§2, §3); 422 `INVALID_LOSS_REASON` dla powodu spoza słownika na obu ścieżkach, przeliczenie przy zmianie powodu na `rejected` i czyszczenie przy wyjściu z `rejected` (§4); mechanizm UI z dowodami w kodzie @41549820 — widget `onBeforeSave` + interceptor API, podmiana strony lejka, trasa masowa modułu, okno powodu modułu (§1, §5, §6); korekta wariantu A z rev 1 (strony szczegółów deala nie da się podmienić — uchwyt dynamiczny); D193: `INVALID_SETTING_VALUE`, `crm.n8n_api_key_ids` (§7); D185: oferta `primary` na `rejected` (Q-LR-3); nowe pytania Q-LR-8 (okno core „Oznacz jako przegrany”, P20) i Q-LR-9 (walidacja listy kluczy). |
+| 2026-10-31 | **rev 3** — rozstrzygnięcia: Cezar 2026-10-31 (techniczne / proces, Z7): Q-LR-8 zamknięte — przechwycenie `closeLost` wystarcza na MVP, bez wyjątku od D45 i bez PR do upstream, issue w upstream jako opcja na później (TLDR, §6.3, R-LR-2, §11, §13); Q-LR-9 — każdy ID w `crm.n8n_api_key_ids` to UUID istniejącego, nieodwołanego klucza API organizacji, inaczej 422 `INVALID_SETTING_VALUE`, klucz odwołany później bez czyszczenia (§7, R-LR-5, §11); D191 z wyjątkiem wyjścia z `rejected` (§4, §14); R-LR-7 zapisane jako warunek testu na etapie kodu (§4, §10); §12 — uwagi dla planu. |
