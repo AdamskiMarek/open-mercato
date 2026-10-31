@@ -3,7 +3,7 @@
 **Dokument**: SPEC ONLY (plan testów niezależny od specyfikacji PR #10, brak kodu)
 **Data**: 2026-10-19
 **Autor**: Copilot (plan testów na podstawie wymagań biznesowych Marka Adamskiego)
-**Rewizja**: rev 9b (2026-10-31) — meta (P21): numery D w TC-DEAL-018..021 i TC-EXEC-006; poprzednio rev 9a (2026-10-31) — asercje TC-DEAL-019 (D187), TC-DEAL-020 (D190), TC-DEAL-021 (D189), TC-EXEC-006 (D188) wg decisions @49384e6 (PR #35, runda 2: rozstrzygnięcia techniczne Cezara 2026-10-31); notatka przy TC-DEAL-009 (L3); poprzednio rev 9 (2026-10-31) — nowe TC dla D185 (etapy lejka a kosztorys), D187 (status inwestycji), D189 (klucz push części, etap kodu), D190 (właściciel inwestycji) i D188 w części harmonogramu (`reopened_at` po usunięciu deala), rejestr decisions @730b77d (PR #35, `docs/arch-gaps-d185`); poprzednio rev 8e (2026-10-31) — meta: data rev 8d poprawiona na faktyczną; poprzednio rev 8d (2026-10-31) — TC-DEAL-017: priorytet P1 → P0 (spójnie z TC-PD-PRJ-012, reguła D31/D132); poprzednio rev 8c (2026-10-23) — TC-DEAL-016: lookup po postępowaniu + części (etap kodu, D32); poprzednio rev 8b (2026-10-23, rozstrzygnięcie D31) — wiersz D31 wg nowej treści (przetarg bez części = 1 deal, z częściami — deal i inwestycja na część), nowy TC-DEAL-017 (przetarg z częściami, D132); poprzednio rev 8a (2026-10-23, odbiór #20) — TC-CUR-012: usunięta zbędna linia „Krok 3: kurs ręczny nie odblokowuje…” (treść w linii kroku 3); poprzednio rev 8 (2026-10-23, runda PR D) — TC-CUR-012 i TC-CUR-014: wskazany krok zwracający 422 (samo ustawienie kursu ręcznego nie zwraca 422; 422 przy wysłaniu, odpowiednio przy powtórzeniu dodania pozycji); poprzednio runda rev 8h — waluta bez kursu w żadnej tabeli NBP: TC-CUR-012 przepisany (422 dla waluty oferty, kurs ręczny nie odblokowuje, CNY przechodzi), nowy TC-CUR-014 (v1, 422 dla waluty pozycji), wniosek 26 zamknięty, annex do D97; poprzednio runda rev 8g — TC-CUR-011: wyszukiwanie modułu Waluty o 00:30 czasu warszawskiego daje kurs z dnia poprzedniego, wysłanie oferty liczy datę w Europe/Warsaw, suma deali zaokrąglona do całości, godziny graniczne lato/zima; TC-CUR-001: zamrożony obraz bez źródła kursu; poprzednio rev 7 (runda rev 8f) — waluty przez moduł Waluty platformy (TC-CUR-002..007 przepisane, nowe TC-CUR-008..013), annex do D94; poprzednio rev 6 — zgodność z decyzjami koordynacyjnymi (`.ai/vision.md`, `.ai/decisions.md`, `.ai/om-architecture-checklist.md`) i rozstrzygnięciami Koordynatora z 2026-10-23; mapowanie scenariuszy na decyzje w załączniku „Traceability TC → D”
+**Rewizja**: rev 9c (2026-10-31) — nowy TC-FCST-007 (D191: deal `lost` → otwarty wraca do prognozy, bez reakcji modułów własnych); asercje TC-DEAL-019 (D187: 403 `FORBIDDEN`, 422 `INVESTMENT_ARCHIVED`, kto archiwizuje, CHECK) i TC-EXEC-006 (D188: 403 bez `project_schedule.edit`, bez powodu, audyt); decisions @fa3c15d (PR #36, doprecyzowania D186–D188 „zmiana 2026-10-31”, nowa D191); poprzednio rev 9b (2026-10-31) — meta (P21): numery D w TC-DEAL-018..021 i TC-EXEC-006; poprzednio rev 9a (2026-10-31) — asercje TC-DEAL-019 (D187), TC-DEAL-020 (D190), TC-DEAL-021 (D189), TC-EXEC-006 (D188) wg decisions @49384e6 (PR #35, runda 2: rozstrzygnięcia techniczne Cezara 2026-10-31); notatka przy TC-DEAL-009 (L3); poprzednio rev 9 (2026-10-31) — nowe TC dla D185 (etapy lejka a kosztorys), D187 (status inwestycji), D189 (klucz push części, etap kodu), D190 (właściciel inwestycji) i D188 w części harmonogramu (`reopened_at` po usunięciu deala), rejestr decisions @730b77d (PR #35, `docs/arch-gaps-d185`); poprzednio rev 8e (2026-10-31) — meta: data rev 8d poprawiona na faktyczną; poprzednio rev 8d (2026-10-31) — TC-DEAL-017: priorytet P1 → P0 (spójnie z TC-PD-PRJ-012, reguła D31/D132); poprzednio rev 8c (2026-10-23) — TC-DEAL-016: lookup po postępowaniu + części (etap kodu, D32); poprzednio rev 8b (2026-10-23, rozstrzygnięcie D31) — wiersz D31 wg nowej treści (przetarg bez części = 1 deal, z częściami — deal i inwestycja na część), nowy TC-DEAL-017 (przetarg z częściami, D132); poprzednio rev 8a (2026-10-23, odbiór #20) — TC-CUR-012: usunięta zbędna linia „Krok 3: kurs ręczny nie odblokowuje…” (treść w linii kroku 3); poprzednio rev 8 (2026-10-23, runda PR D) — TC-CUR-012 i TC-CUR-014: wskazany krok zwracający 422 (samo ustawienie kursu ręcznego nie zwraca 422; 422 przy wysłaniu, odpowiednio przy powtórzeniu dodania pozycji); poprzednio runda rev 8h — waluta bez kursu w żadnej tabeli NBP: TC-CUR-012 przepisany (422 dla waluty oferty, kurs ręczny nie odblokowuje, CNY przechodzi), nowy TC-CUR-014 (v1, 422 dla waluty pozycji), wniosek 26 zamknięty, annex do D97; poprzednio runda rev 8g — TC-CUR-011: wyszukiwanie modułu Waluty o 00:30 czasu warszawskiego daje kurs z dnia poprzedniego, wysłanie oferty liczy datę w Europe/Warsaw, suma deali zaokrąglona do całości, godziny graniczne lato/zima; TC-CUR-001: zamrożony obraz bez źródła kursu; poprzednio rev 7 (runda rev 8f) — waluty przez moduł Waluty platformy (TC-CUR-002..007 przepisane, nowe TC-CUR-008..013), annex do D94; poprzednio rev 6 — zgodność z decyzjami koordynacyjnymi (`.ai/vision.md`, `.ai/decisions.md`, `.ai/om-architecture-checklist.md`) i rozstrzygnięciami Koordynatora z 2026-10-23; mapowanie scenariuszy na decyzje w załączniku „Traceability TC → D”
 
 ---
 
@@ -22,12 +22,12 @@
 | Testy wydajności (TC-PERF) | 3 |
 | Waluty (TC-CUR) | 14 |
 | Firmy bez modułu harmonogramu (TC-NOSCHED) | 5 |
-| Prognoza produkcji (TC-FCST) | 6 |
+| Prognoza produkcji (TC-FCST) | 7 |
 | Harmonogram ofertowy → wykonawczy (TC-EXEC) | 6 |
 | Bezpieczeństwo plików (TC-SEC) | 6 |
 | Izolacja multi-tenant (TC-TEN) | 7 |
 | Edycja równoległa (TC-CONC) | 5 |
-| **Razem** | **148** |
+| **Razem** | **149** |
 
 ---
 
@@ -47,7 +47,7 @@
 | R8 | Ataki plikowe (XLSX bomb, formula injection) na VPS | Wysoki | Krytyczny | P0 | Bezpieczeństwo plików | TC-SEC-001 do TC-SEC-006 |
 | R9 | Utrata danych przy równoległej edycji (race condition) | Średni | Krytyczny | P0 | Edycja równoległa | TC-CONC-001 do TC-CONC-005 |
 | R10 | Błędy walutowe (kursy, zamrożenie, zaokrąglenia per waluta) | Średni | Wysoki | P1 | Waluty | TC-CUR-001 do TC-CUR-014 |
-| R11 | Nieprawidłowa prognoza produkcji (suma ≠ partie, prob) | Niski | Średni | P2 | Prognoza | TC-FCST-001 do TC-FCST-006 |
+| R11 | Nieprawidłowa prognoza produkcji (suma ≠ partie, prob) | Niski | Średni | P2 | Prognoza | TC-FCST-001 do TC-FCST-007 |
 | R12 | Wyciek danych przez eksport / PDF (marża, koszty) | Wysoki | Wysoki | P1 | Uprawnienia, Waluty, Tenant | TC-PERM-007, TC-TEN-004, TC-CUR-005 |
 | R13 | Wartość deala niezgodna z ofertą (automatyczna zmiana, nadpisanie z n8n, wersja nieaktywna) | Średni | Wysoki | P0 | Powiązania, Wersje | TC-DEAL-002, TC-DEAL-016, TC-VER-007, TC-VER-010 |
 | R14 | Wysłanie oferty z błędem (brak pozycji, ujemna cena, błędy importu) albo wyciek znaku marży przy blokadzie | Średni | Wysoki | P0 | Wersje | TC-VER-008, TC-VER-009 |
@@ -791,27 +791,27 @@ Inwestycję zakłada handlowiec w module kalkulacji; n8n inwestycji nie tworzy. 
 
 #### TC-DEAL-019: Status inwestycji — `active`/`archived` w MVP, `merged` od v1
 
-> Decyzje: D187 (meta, P21 — odesłanie dla macierzy spec-check; treść TC bez zmian).
+> Decyzje: D187 (z doprecyzowaniem 2026-10-31), D83.
 
 - **Priorytet**: P2 | **Etap**: MVP (`active`, `archived`), v1 (`merged`) | **Poziom**: Integration + API + `pg`
 - **Warunki wstępne**: Inwestycje I-A, I-B; użytkownik U-I z feature `project_costing.manage_investments`, użytkownik U-N bez niego; deal D-N bez inwestycji
 - **Kroki**:
   1. Załóż inwestycję I-C; odczytaj `status`
-  2. Ustaw I-C na `archived`; spróbuj edytować I-C (nazwa)
+  2. Archiwizacja I-C: U-N; U-I; potem spróbuj edytować I-C (nazwa)
   3. Lista inwestycji bez filtra; potem z filtrem statusu `archived`
   4. Spróbuj podpiąć deal D-N do I-C
   5. Przywrócenie I-C do `active`: U-N; U-I; odczytaj `audit_logs`
-  6. MVP: spróbuj zapisać w I-C `status = 'merged'` oraz wartość spoza listy
+  6. MVP: `pg` — spróbuj zapisać w I-C `status = 'merged'` oraz wartość spoza listy; v1: zapis `merged` z `merged_into_id`
   7. v1: scal I-B do I-A (TC-DEAL-009); odczytaj `status` i `merged_into_id` I-B
 - **Oczekiwane wyniki**:
   - Krok 1: `status = 'active'` (domyślny)
-  - Krok 2: `archived` zapisane; edycja odrzucona (tylko odczyt), dane bez zmian
+  - Krok 2: U-N → 403 `FORBIDDEN`, I-C zostaje `active`; U-I → `archived`; edycja odrzucona (tylko odczyt), dane bez zmian
   - Krok 3: bez filtra I-C niewidoczna; z filtrem `archived` I-C na liście
-  - Krok 4: podpięcie odrzucone, D-N bez inwestycji
-  - Krok 5: U-N → odrzucone, I-C zostaje `archived`; U-I → `active`, wpis w `audit_logs` z autorem U-I
-  - Krok 6: zapis odrzucony, rekord bez zmian
+  - Krok 4: 422 `INVESTMENT_ARCHIVED`, D-N bez inwestycji
+  - Krok 5: U-N → 403 `FORBIDDEN`, I-C zostaje `archived`; U-I → `active`, wpis w `audit_logs` z autorem U-I
+  - Krok 6: MVP — oba zapisy odrzucone przez CHECK (lista wartości fazy: `active`, `archived`), rekord bez zmian; v1 — CHECK przyjmuje `merged`
   - Krok 7: I-B `status = 'merged'`, `merged_into_id` = ID I-A; I-A `active`
-  - Kody błędów kroków 2, 4, 5 i uprawnienie do archiwizacji — bez asercji (wniosek 29); skutki merge dla ofert, projektu i harmonogramu — bez asercji (luka L3, wniosek 30)
+  - Kod błędu edycji inwestycji `archived` — bez asercji (wniosek 29); skutki merge dla ofert, projektu i harmonogramu — bez asercji (luka L3, wniosek 30)
 
 #### TC-DEAL-020: Właściciel inwestycji = `created_by`; zapis kluczem API
 
@@ -1884,7 +1884,7 @@ Firma = organizacja. Harmonogram włącza się per organizacja w ustawieniach mo
 
 ---
 
-## 14. Scenariusze testowe: Prognoza produkcji (TC-FCST) — 6 TC
+## 14. Scenariusze testowe: Prognoza produkcji (TC-FCST) — 7 TC
 
 Horyzont 6 miesięcy, tygodnie/miesiące, ważenie prawdopodobieństwem, partie, zmiana oferty.
 
@@ -1972,6 +1972,24 @@ Horyzont 6 miesięcy, tygodnie/miesiące, ważenie prawdopodobieństwem, partie,
   - Deal A: nie znika, ale oznaczony jako "Alternatywna" w prognozie zbiorczej
   - Zmiana oferty głównej jest audytowana
 
+#### TC-FCST-007: Deal przegrany ponownie otwarty (`lost` → NULL) wraca do prognozy; bez reakcji modułów własnych
+
+> Decyzje: D191, D185, D45, D72, D141.
+
+- **Priorytet**: P1 | **Etap**: MVP | **Poziom**: Integration + API + `pg`
+- **Warunki wstępne**: Deal L z kalkulacją i partiami (8 szt. w listopadzie), nigdy niewygrany, `closure_outcome = 'lost'`; harmonogram ofertowy deala L (gdy moduł harmonogramu włączony); subskrybent eventów
+- **Kroki**:
+  1. Otwórz prognozę; odczytaj pozycję deala L
+  2. Otwórz ponownie deal L standardową ścieżką modułu `customers` OM core (`closure_outcome` `lost` → NULL)
+  3. Otwórz prognozę ponownie
+  4. `pg` i eventy: `ps_schedules.reopened_at`, `ps_schedule_tasks.reopened_at`, `pd_projects` dla deala L, eventy `project_delivery.*` i `project_schedule.*`; kalkulacja, wersje i rola oferty deala L
+- **Oczekiwane wyniki**:
+  - Krok 1: deal L poza prognozą
+  - Krok 2: `closure_outcome` = NULL — przejście wykonuje moduł `customers` bez zmian w forku (D45)
+  - Krok 3: partie deala L wracają do prognozy (8 szt. w listopadzie, ważone prawdopodobieństwem jak TC-FCST-004)
+  - Krok 4: brak flag `reopened_at` (D72) i `deal_reopened_at` (D141), brak projektu dla deala L, brak eventów modułów własnych dla tego przejścia; kalkulacja, wersje i rola oferty bez zmian
+  - Deal `won` → `lost` → otwarty: flagi D72/D141 z przejścia `won` → `lost` — poza tym TC (TC-PD-PRJ-008, TC-EXEC-003)
+
 ---
 
 ## 15. Scenariusze testowe: Harmonogram ofertowy → wykonawczy (TC-EXEC) — 6 TC
@@ -2049,7 +2067,7 @@ Automatyczne przejście w fazę wykonawczą, idempotentność, ponowne otwarcie,
 
 #### TC-EXEC-006: Usunięcie i przywrócenie deala z harmonogramem wykonawczym — `reopened_at` bez kaskady
 
-> Decyzje: D188 (meta, P21 — odesłanie dla macierzy spec-check; treść TC bez zmian).
+> Decyzje: D188 (z doprecyzowaniem 2026-10-31), D72, D131, D140.
 
 - **Priorytet**: P1 | **Etap**: v1 | **Poziom**: Integration + API + `pg`
 - **Warunki wstępne**: Organizacja z modułem harmonogramu; inwestycja I-1: harmonogram wykonawczy bez fazy projektu, deal X wygrany; inwestycja I-2: rekord z fazą projektu (zadanie `ps_schedule_tasks` z `execution_project_id`) włączoną z dealem Y (`execution_deal_id`), projekt P-Y; inwestycja I-3: harmonogram wykonawczy bez fazy projektu, deal W wygrany; użytkownik U-E z feature `project_schedule.edit`, użytkownik U-R bez niego; subskrybent eventów
@@ -2059,7 +2077,7 @@ Automatyczne przejście w fazę wykonawczą, idempotentność, ponowne otwarcie,
   3. `pg`: `ps_schedules.reopened_at`, `ps_schedule_tasks.reopened_at`, zadania, daty, baseline obu rekordów
   4. Wyślij kolejny push n8n dla postępowania deala X
   5. Przywróć deale X i Y (`deleted_at` → NULL); odczytaj flagi i eventy
-  6. `project_schedule.schedules.reopen_flag_clear` dla I-1 i I-2: U-R; U-E; odczytaj `audit_logs`
+  6. `project_schedule.schedules.reopen_flag_clear` dla I-1 i I-2: U-R; U-E bez powodu w żądaniu; odczytaj `audit_logs`
   7. Usuń deal W, przywróć go, potem oznacz W jako wygrany (`customers.deal.won`)
 - **Oczekiwane wyniki**:
   - Krok 1: I-1 — `reopened_at` na rekordzie harmonogramu
@@ -2067,9 +2085,9 @@ Automatyczne przejście w fazę wykonawczą, idempotentność, ponowne otwarcie,
   - Krok 3: nic nie jest usuwane ani archiwizowane (bez kaskady); zadania, daty i baseline bez zmian
   - Krok 4: deal nie jest odtwarzany (D35); harmonogram bez zmian
   - Krok 5: event `project_schedule.schedule.deal_restored` dla I-1 i I-2; flagi zostają (bez automatycznego czyszczenia)
-  - Krok 6: U-R → odrzucone, flagi zostają; U-E → flaga I-1 (rekord) i I-2 (zadanie fazy) = NULL, wpisy w `audit_logs` z autorem U-E
+  - Krok 6: U-R → 403, flagi zostają; U-E bez powodu → flaga I-1 (rekord) i I-2 (zadanie fazy) = NULL (powód nie jest wymagany), wpisy w `audit_logs` z autorem U-E
   - Krok 7: po przywróceniu flaga I-3 zostaje; po `won` czyszczona automatycznie (D140 bez zmian)
-  - Kod odmowy dla U-R i wymóg powodu przy zdjęciu flagi harmonogramu — bez asercji (wniosek 32)
+  - Event `customers`, którym przychodzi przywrócenie deala — do potwierdzenia na etapie kodu (D188); krok 5 sprawdza wyłącznie skutek w module harmonogramu
 
 ---
 
@@ -2541,22 +2559,22 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 ### Nowe wnioski (rev 9 — D185, D187, D188, D189, D190; reguł brak w rejestrze @730b77d, nie zgadywano; rozstrzygnięcia rev 9a z rejestru @49384e6)
 
 28. **Znaczenie etapu `rejected`** (TC-DEAL-018) — otwarte (Q-ARCH-1, Marek); TC bez asercji.
-29. **Status inwestycji — kody i archiwizacja** (TC-DEAL-019) — częściowo ✅ (D187 @49384e6): domyślnie `active`, `archived` tylko do odczytu, ukryta w listach (filtr ją pokazuje), bez podpięcia nowego deala, przywrócenie z `project_costing.manage_investments` i audytem. Otwarte: kody błędów (edycja, podpięcie, przywrócenie bez feature'a) i uprawnienie do archiwizacji.
+29. **Status inwestycji — kody i archiwizacja** (TC-DEAL-019) — ✅ prawie w całości (D187, zmiana 2026-10-31 @fa3c15d): archiwizuje i przywraca użytkownik z `project_costing.manage_investments`, bez niego 403 `FORBIDDEN`; podpięcie deala do `archived` → 422 `INVESTMENT_ARCHIVED`; CHECK na listę wartości fazy. Otwarte: kod błędu edycji inwestycji `archived`.
 30. **Skutki merge inwestycji (luka L3)** (TC-DEAL-009, TC-DEAL-019) — skutki dla ofert (primary, D51, D65), projektu (D116) i harmonogramu (D23) nierozstrzygnięte do v1. TC-DEAL-009 nie jest unieważniony (nie ma asercji o ofertach, projekcie i harmonogramie), ale po decyzji wymaga uzupełnienia.
-31. **Właściciel przy zakładaniu automatycznym** (TC-DEAL-020) — częściowo ✅ (D190 @49384e6): klucz API z użytkownikiem → ten użytkownik, bez użytkownika → `created_by = NULL`, szkice i powiadomienia do administratorów; n8n inwestycji nie zakłada (D63). Otwarte: właściciel deala z n8n (Q-ARCH-2) i lista szkiców/powiadomień inwestycji (reguła `crm_followups`, PR #33, poza rejestrem).
-32. ~~**Przywrócenie usuniętego deala**~~ — ✅ **ROZSTRZYGNIĘTE (D188 @49384e6)**: event `project_schedule.schedule.deal_restored`, flaga zostaje, zdjęcie `project_schedule.schedules.reopen_flag_clear` (feature `project_schedule.edit`) z audytem; czyszczenie przy `won` bez zmian. Scenariusz: TC-EXEC-006. Otwarte drobne: kod odmowy i wymóg powodu.
+31. **Właściciel przy zakładaniu automatycznym** (TC-DEAL-020) — częściowo ✅ (D190 @49384e6): klucz API z użytkownikiem → ten użytkownik, bez użytkownika → `created_by = NULL`, szkice i powiadomienia do administratorów; n8n inwestycji nie zakłada (D63). Otwarte: właściciel deala z n8n (Q-ARCH-2); zakres szkiców i powiadomień inwestycji — do rozstrzygnięcia w PR #33 (`crm_followups`).
+32. ~~**Przywrócenie usuniętego deala**~~ — ✅ **ROZSTRZYGNIĘTE (D188, zmiana 2026-10-31 @fa3c15d)**: event `project_schedule.schedule.deal_restored`, flaga zostaje; `project_schedule.schedules.reopen_flag_clear` bez `project_schedule.edit` → 403, bez powodu, wpis w `audit_logs` z autorem; czyszczenie przy `won` bez zmian. Scenariusz: TC-EXEC-006. Do etapu kodu: event `customers` przywrócenia deala.
 33. ~~**Format istniejącego klucza bez części**~~ — ✅ **ROZSTRZYGNIĘTE warunkowo (D189 @49384e6)**: `ezamowienia:<tender_id>`, do potwierdzenia przez Enkę przy kodzie. Scenariusz: TC-DEAL-021 krok 3.
 ---
 
 ## 23. Podsumowanie
 
 **Dokument**: Niezależny plan testów — spec only
-**Liczba scenariuszy**: 148 (rev 9: +5; rev 8b: +1; runda rev 8h: +1; rev 7: +6; rev 6: +1; rev 5: +25; rev 2–4: 109; rev 1: 72)
+**Liczba scenariuszy**: 149 (rev 9c: +1; rev 9: +5; rev 8b: +1; runda rev 8h: +1; rev 7: +6; rev 6: +1; rev 5: +25; rev 2–4: 109; rev 1: 72)
 **Liczba wniosków do speki**: 33 (15 oryginalnych + 5 z rev 2 + 5 z rev 5 + 2 z rev 7 + 6 z rev 9)
 **Status**: SPEC ONLY — bez kodu, bez testów wykonywalnych
 
 **Kolejne kroki**:
-1. Sprecyzować odpowiedzi na otwarte wnioski (9, 10, 11, 12, 13, 15, 20–25, 28–31 w sekcji 22; 29 i 31 częściowo rozstrzygnięte)
+1. Sprecyzować odpowiedzi na otwarte wnioski (9, 10, 11, 12, 13, 15, 20–25, 28, 30, 31 w sekcji 22; 29 i 31 częściowo rozstrzygnięte)
 2. Zatwierdzić dokument (review przez Marka + PO)
 3. Przejść do fazy implementacji
 
@@ -2658,10 +2676,11 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 | D97 | Poprawka platformy dla jednej waluty bazowej pobrana z pierwszym PR modułu | N/A | zależność etapu kodu, brak zachowania modułu |
 | D132 | Postępowanie z częściami: inwestycja i deal na część, wspólny `tender_notice_number` (tylko do odczytu, bez unikalności, poza dopasowaniem); primary per inwestycja; v1 identyfikator `bzp_notice_part` `{numer}#{część}`, bez `bzp_notice_number` | TC-DEAL-017, TC-DEAL-016 (krok 7) | decisions @develop (po PR #30); aktywna bez warunku |
 | D185 | n8n zmienia etap deala tylko na `result_lead` i `cancelled` (z D34), nie zmienia `closure_outcome` (D42); inne zmiany etapu w UI nie wpływają na kosztorys, etap tylko grupuje prognozę; `rejected` otwarte (Q-ARCH-1) | TC-DEAL-018 | MVP; rejestr @730b77d (PR #35); wniosek 28 |
-| D187 | Status inwestycji: domyślnie `active`; MVP `active`/`archived` (tylko odczyt, ukryta w listach, filtr pokazuje, bez podpięcia nowego deala, przywrócenie z `project_costing.manage_investments` i audytem); v1 `merged` z `merged_into_id`; skutki merge nierozstrzygnięte (L3) | TC-DEAL-019, TC-DEAL-009 (notatka L3) | MVP, v1; rejestr @49384e6; wnioski 29 (częściowo), 30 |
-| D188 | Usunięcie deala z harmonogramem wykonawczym: bez kaskady, `reopened_at` na rekordzie albo na zadaniu fazy projektu (D72, D131); flagi zostają; przywrócenie → `project_schedule.schedule.deal_restored`, zdjęcie `project_schedule.schedules.reopen_flag_clear` (`project_schedule.edit`) z audytem; czyszczenie przy `won` bez zmian; n8n deala nie odtwarza (D35); część projektu — plan `project_delivery` (TC-PD-PRJ-015) | TC-EXEC-006 | v1 (harmonogram); rejestr @49384e6 |
+| D187 | Status inwestycji: domyślnie `active`; MVP `active`/`archived` (tylko odczyt, ukryta w listach, filtr pokazuje); archiwizacja i przywrócenie z `project_costing.manage_investments` (bez niego 403 `FORBIDDEN`), przywrócenie z audytem; podpięcie deala do `archived` → 422 `INVESTMENT_ARCHIVED`; CHECK na listę wartości fazy; v1 `merged` z `merged_into_id`; skutki merge nierozstrzygnięte (L3) | TC-DEAL-019, TC-DEAL-009 (notatka L3) | MVP, v1; rejestr @fa3c15d (zmiana 2026-10-31); wnioski 29 (kod edycji), 30 |
+| D188 | Usunięcie deala z harmonogramem wykonawczym: bez kaskady, `reopened_at` na rekordzie albo na zadaniu fazy projektu (D72, D131); flagi zostają; przywrócenie → `project_schedule.schedule.deal_restored`; zdjęcie `project_schedule.schedules.reopen_flag_clear` — bez `project_schedule.edit` 403, bez powodu, audyt z autorem; event `customers` przywrócenia — etap kodu; czyszczenie przy `won` bez zmian; n8n deala nie odtwarza (D35); część projektu — plan `project_delivery` (TC-PD-PRJ-015) | TC-EXEC-006 | v1 (harmonogram); rejestr @fa3c15d (zmiana 2026-10-31) |
 | D189 | Klucz push części `ezamowienia:<tender_id>#<nr części>`; klucz bez części `ezamowienia:<tender_id>` bez zmian (do potwierdzenia przez Enkę), bez migracji; wdrożenie n8n — Enka, etap kodu (D32) | TC-DEAL-021 | etap kodu kontraktu push; rejestr @49384e6 |
 | D190 | Właściciel inwestycji = `created_by`, bez osobnego pola; klucz API z użytkownikiem → ten użytkownik, bez użytkownika → NULL i powiadomienia do administratorów; n8n inwestycji nie zakłada (D63); właściciel deala z n8n otwarty (Q-ARCH-2) | TC-DEAL-020 | MVP; rejestr @49384e6; wniosek 31 (częściowo) |
+| D191 | Ponowne otwarcie deala po przegranej (`lost` → NULL) — zachowanie `customers` OM core, fork go nie zmienia (D45); deal wraca do prognozy (logika kosztorysu z `closure_outcome` i `deleted_at`, D185); bez reakcji modułów własnych (flagi D72/D141 tylko dla deala, który był `won`) | TC-FCST-007 | MVP; rejestr @fa3c15d (PR #36) |
 
 **Decyzje zastąpione — nie testujemy:**
 - D3 — zastąpione przez D4
@@ -2676,6 +2695,16 @@ Optimistic locking, wyścig zamrożenia wersji, równoległe zmiany oferty głó
 ---
 
 ## Changelog
+
+### Rev 9c — 2026-10-31 (D191, doprecyzowania D187 i D188; rejestr @fa3c15d, PR #36)
+
+- Niezależna sesja planu (P4): jedyne źródło — `.ai/decisions.md` @fa3c15d; bez speki i bez briefów
+- Nowy TC-FCST-007 (D191, P1, MVP): deal `lost` → otwarty ścieżką `customers` OM core wraca do prognozy; brak flag D72/D141, projektu i eventów modułów własnych
+- TC-DEAL-019 (D187, zmiana 2026-10-31): archiwizacja i przywrócenie bez `project_costing.manage_investments` → 403 `FORBIDDEN`; podpięcie deala do `archived` → 422 `INVESTMENT_ARCHIVED`; CHECK statusu na listę wartości fazy
+- TC-EXEC-006 (D188, zmiana 2026-10-31): `project_schedule.schedules.reopen_flag_clear` bez `project_schedule.edit` → 403; działa bez powodu, wpis w `audit_logs` z autorem; event `customers` przywrócenia — etap kodu
+- TC-DEAL-020 (D190): bez zmian — zakres szkiców i powiadomień zostaje do rozstrzygnięcia w PR #33
+- §22: wniosek 29 prawie zamknięty (kod edycji `archived`), 31 z odesłaniem do PR #33, 32 rozstrzygnięty; §23; załącznik — wiersze D187, D188, D191; liczniki i macierz ryzyka R11
+- Liczba scenariuszy: 148 → 149 (TC-FCST 6 → 7)
 
 ### Rev 9b — 2026-10-31 (meta, P21; wykonawca, nity po merge #35)
 
