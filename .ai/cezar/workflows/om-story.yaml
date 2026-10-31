@@ -1,0 +1,116 @@
+# om-story — jedno story (ClickUp, P22) -> draft PR do develop_OM_CRM.
+# zmiana 2026-10-31 — źródło: Koordynator (proces, Z7) 2026-10-31.
+# Format: Cezar v0.15.1 docs/reference.md „Workflow graphs (version: 2)”.
+# Instrukcja uruchomienia, szablon zadania i stała odpowiedź na pytanie
+# om-implement-spec (extension vs core, D45): .ai/cezar/README.md.
+# Bez bramki człowieka w grafie: merge tylko po „merguj” Marka (P5), poza Cezarem.
+version: 2
+name: om-story
+description: >-
+  OM story: setup (yarn, skille, build, generate), implementacja om-implement-spec
+  (copilot / claude-sonnet-4.6), weryfikacja (i18n, typecheck, lint, test),
+  max 2 rundy poprawek, self-review om-code-review, commit, push, draft PR.
+nodes:
+  - { id: start, type: start }
+  - id: setup
+    type: check
+    name: Setup (install, skills, build, generate)
+    command: "yarn install --immutable && yarn install-skills && yarn build:packages && yarn generate && yarn build:packages"
+  - id: skill-bases
+    type: check
+    name: Shared skill bases present
+    command: "node .ai/cezar/check-skill-bases.mjs"
+  - id: implement
+    type: agent
+    name: Implement (om-implement-spec)
+    skill: om-implement-spec
+    runner: copilot
+    model: claude-sonnet-4.6
+    prompt: "{{task}}"
+  - id: verify
+    type: check
+    name: Verify (i18n, typecheck, lint, test)
+    command: "yarn i18n:check-sync && yarn i18n:check-usage && yarn typecheck && yarn lint && yarn test"
+  - { id: fix-loop, type: loop, name: Fix rounds, max: 2 }
+  - id: fix
+    type: agent
+    name: Fix verify failures
+    runner: copilot
+    model: claude-sonnet-4.6
+    session: { continue: implement }
+    prompt: |-
+      Weryfikacja nie przeszła (runda {{nodes.fix-loop.iteration}}/{{nodes.fix-loop.max}}).
+      Komenda: yarn i18n:check-sync && yarn i18n:check-usage && yarn typecheck && yarn lint && yarn test
+
+      {{nodes.verify.output}}
+
+      Zadanie (bez zmian): {{task}}
+
+      Popraw przyczynę w kodzie tego worktree. Zakres bez zmian: tylko to story,
+      zero zmian w packages/core (D45). Nie wyłączaj testów ani reguł lint.
+  - id: review
+    type: agent
+    name: Self-review (om-code-review)
+    skill: om-code-review
+    runner: copilot
+    model: claude-sonnet-4.6
+    verdicts: [approve, changes]
+    prompt: |-
+      Zrób review zmian w tym worktree względem origin/develop_OM_CRM dla zadania:
+      {{task}}
+
+      Tylko realne błędy: poprawność, bezpieczeństwo (tenant/organization scoping),
+      brakujące testy dla TC ze story, zmiany w packages/core (D45 — zawsze „changes”).
+      Bramkę walidacji uruchom lokalnie (Step 0 override'u om-code-review).
+      Zakończ dokładnie jednym werdyktem: approve albo changes (z listą poprawek).
+  - { id: review-loop, type: loop, name: Review rounds, max: 2 }
+  - id: address
+    type: agent
+    name: Address review
+    runner: copilot
+    model: claude-sonnet-4.6
+    session: { continue: implement }
+    prompt: |-
+      Self-review poprosił o zmiany (runda {{nodes.review-loop.iteration}}/{{nodes.review-loop.max}}):
+
+      {{nodes.review.summary}}
+
+      Zadanie (bez zmian): {{task}}
+
+      Wprowadź poprawki w kodzie tego worktree. Zero zmian w packages/core (D45).
+  - id: commit
+    type: git.commit
+    name: Commit
+    message: "feat(crm): implementacja story (workflow om-story)"
+  - { id: push, type: git.push, name: Push }
+  - { id: pr, type: github.draft-pr, name: Draft PR }
+  - { id: done, type: end, name: Draft PR opened, status: success }
+  - { id: stopped, type: end, name: Stopped, status: failed }
+edges:
+  - { from: start, to: setup }
+  - { from: setup.pass, to: skill-bases }
+  - { from: setup.fail, to: stopped }
+  - { from: skill-bases.pass, to: implement }
+  - { from: skill-bases.fail, to: stopped }
+  - { from: implement.done, to: verify }
+  - { from: implement.failed, to: stopped }
+  - { from: verify.pass, to: review }
+  - { from: verify.fail, to: fix-loop }
+  - { from: fix-loop.repeat, to: fix }
+  - { from: fix-loop.exhausted, to: stopped }
+  - { from: fix.done, to: verify }
+  - { from: fix.failed, to: stopped }
+  - { from: review.approve, to: commit }
+  - { from: review.changes, to: review-loop }
+  - { from: review.failed, to: stopped }
+  - { from: review-loop.repeat, to: address }
+  - { from: review-loop.exhausted, to: stopped }
+  - { from: address.done, to: verify }
+  - { from: address.failed, to: stopped }
+  - { from: commit.done, to: push }
+  - { from: commit.nothing, to: push }   # agent mógł już sam zacommitować
+  - { from: commit.failed, to: stopped }
+  - { from: push.done, to: pr }
+  - { from: push.failed, to: stopped }
+  - { from: pr.created, to: done }
+  - { from: pr.failed, to: stopped }
