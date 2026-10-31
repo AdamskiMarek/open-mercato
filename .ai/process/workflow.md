@@ -1,6 +1,6 @@
 # Przepływ pracy Klin #1 (od speki do merge)
 
-**Status:** 2026-10-31 (P18). Opis kolejności kroków i ról. Szczegóły kroków: bramka — `readiness-gate.md` (P13), review — `review-format.md` (P15), zasady agentów — `../agent-rules.md` (P17). Źródło decyzji: `.ai/decisions.md` (P12).
+**Status:** 2026-10-31 (P18; praca w ClickUp — P22). Opis kolejności kroków i ról. Szczegóły kroków: bramka — `readiness-gate.md` (P13), review — `review-format.md` (P15), zasady agentów — `../agent-rules.md` (P17). Źródło decyzji: `.ai/decisions.md` (P12).
 
 ## Przepływ
 
@@ -37,3 +37,26 @@ flowchart TD
 - Nie wdraża, nie merguje i nie ma dostępu do produkcji (P18). Niespełnione TC wracają do kroku 5 z listą TC i dowodem.
 - Brak TC dla zachowania albo TC sprzeczne z D → ustalenie „Do poprawy” dla niezależnej sesji planu (treść TC zmienia tylko ona, `agent-rules.md` Z11); pytanie biznesowe → „Do decyzji człowieka”, przez Koordynatora (P1, P15).
 - PR doc-only (bez kodu) nie wymaga Weryfikatora: kontrolą jest spec-check bez flag @head.
+
+## Praca w ClickUp (P22)
+
+- Układ: Epik > Story > Subtask. Epiki: kosztorys, harmonogram, projekty i dokumentacja, follow-upy v2. Tablicę prowadzi Organizator.
+- Cezar dzieli brief (5 pól, P14) na epik i tnie go na story. Story: kryteria akceptacji, numery D i TC, wersja (MVP / v1 / v2); na tyle małe, żeby Kod zbudował je w jednej świeżej sesji. Bez estymat w dniach (P11).
+- GitHub zostaje na kod i PR-y; każde story linkuje swój PR.
+
+```mermaid
+flowchart LR
+    b["backlog"] -- "„implementujemy” (P3)<br/>+ PASS bramki (P13)" --> r["gotowe do budowy"]
+    r --> w["w budowie<br/>(Kod; PR podlinkowany w story)"]
+    w --> v{"weryfikacja<br/>werdykt Weryfikatora (P18)"}
+    v -- "niespełnione TC" --> w
+    v -- "spełnione" --> z["zrobione"]
+```
+
+| Status | Wejście do statusu | Kroki przepływu powyżej |
+|---|---|---|
+| backlog | story wycięte z epiku (P22) | 1–3 |
+| gotowe do budowy | „implementujemy” i PASS bramki gotowości (P3, P13) | 4 |
+| w budowie | Kod buduje story; PR podlinkowany w story | 5 |
+| weryfikacja | PR gotowy do sprawdzenia na TC | 6 (P18) |
+| zrobione | werdykt Weryfikatora „spełnione” | 7 |
