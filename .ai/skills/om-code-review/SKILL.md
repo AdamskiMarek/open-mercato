@@ -5,6 +5,8 @@ description: Open Mercato repo-local extension of the shared `om-code-review` sk
 
 # Code Review — Open Mercato extension
 
+> **Base required (fork; zmiana 2026-10-31 — źródło: Koordynator (proces, Z7) 2026-10-31).** This file only extends the shared `om-code-review` skill. Before acting, read the base at `.agents/skills/om-code-review/SKILL.md`, or at `.claude/skills/om-code-review/SKILL.md`, where `yarn install-skills` puts external skills by default (`--agent claude-code`). If neither exists, run `yarn install-skills`; if the base is still missing, STOP and report `missing base skill om-code-review` — never apply this override on its own. Check: `node .ai/cezar/check-skill-bases.mjs`.
+
 This file extends the shared `om-code-review` skill from [open-mercato/skills](https://github.com/open-mercato/skills) (installed at `.agents/skills/om-code-review/SKILL.md`). Follow the shared skill's full workflow — config loading, validation gate, checklists, breaking-change gate, output format — with the repo-specific rules below layered on top. The validation commands come from `.ai/agentic.config.json`; the full repo checklist is `.ai/review-checklist.md` (wired via the config's `reviewChecklist` field).
 
 ## Step 0 — Decide where to run the gate (execute ONCE before any gate command)

@@ -5,6 +5,8 @@ description: Open Mercato repo-local extension of the shared `om-pr-autopilot` s
 
 # PR Autopilot — Open Mercato extension
 
+> **Base required (fork; zmiana 2026-10-31 — źródło: Koordynator (proces, Z7) 2026-10-31).** This file only extends the shared `om-pr-autopilot` skill. Before acting, read the base at `.agents/skills/om-pr-autopilot/SKILL.md`, or at `.claude/skills/om-pr-autopilot/SKILL.md`, where `yarn install-skills` puts external skills by default (`--agent claude-code`). If neither exists, run `yarn install-skills`; if the base is still missing, STOP and report `missing base skill om-pr-autopilot` — never apply this override on its own. Check: `node .ai/cezar/check-skill-bases.mjs`.
+
 This file extends the shared `om-pr-autopilot` skill from [open-mercato/skills](https://github.com/open-mercato/skills) (installed at `.agents/skills/om-pr-autopilot/SKILL.md`). Follow the shared skill's full workflow — agentic setup, PR resolution, outer claim, the ten diagnosis signals, the state matrix, chain execution, the summary report, lock release — with the repo-specific rules below layered on top.
 
 The shared skill's own references (`references/diagnose.md`, `references/state-matrix.md`, `references/report-templates.md`, `references/claim-pr.md`, …) live next to it under `.agents/skills/om-pr-autopilot/`; they are not committed here. When the shared skill or any companion it dispatches to is missing, run `yarn install-skills` and re-enter — never improvise a substitute procedure for the claim, worktree, diagnosis, or setup mechanics.

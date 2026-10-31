@@ -2,6 +2,8 @@
 
 # Open Mercato release-upgrade companion contract
 
+> **Base required (fork; zmiana 2026-10-31 — źródło: Koordynator (proces, Z7) 2026-10-31).** This file only extends the shared `om-auto-update-changelog` skill. Before acting, read the base at `.agents/skills/om-auto-update-changelog/SKILL.md`, or at `.claude/skills/om-auto-update-changelog/SKILL.md`, where `yarn install-skills` puts external skills by default (`--agent claude-code`). If neither exists, run `yarn install-skills`; if the base is still missing, STOP and report `missing base skill om-auto-update-changelog` — never apply this override on its own. Check: `node .ai/cezar/check-skill-bases.mjs`.
+
 Open Mercato releases must keep `CHANGELOG.md`, `UPGRADE_NOTES.md`, and version-specific downstream migration skills aligned. Apply this contract after the external skill resolves `{version}`, `{date}`, and the previous changelog release, but before it edits files or delegates to `om-auto-create-pr`.
 
 ## 1. Resolve the matching upgrade window

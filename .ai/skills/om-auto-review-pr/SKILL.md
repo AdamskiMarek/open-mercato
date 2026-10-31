@@ -5,6 +5,8 @@ description: Open Mercato repo-local extension of the shared `om-auto-review-pr`
 
 # Auto Review PR — Open Mercato extension
 
+> **Base required (fork; zmiana 2026-10-31 — źródło: Koordynator (proces, Z7) 2026-10-31).** This file only extends the shared `om-auto-review-pr` skill. Before acting, read the base at `.agents/skills/om-auto-review-pr/SKILL.md`, or at `.claude/skills/om-auto-review-pr/SKILL.md`, where `yarn install-skills` puts external skills by default (`--agent claude-code`). If neither exists, run `yarn install-skills`; if the base is still missing, STOP and report `missing base skill om-auto-review-pr` — never apply this override on its own. Check: `node .ai/cezar/check-skill-bases.mjs`.
+
 This file extends the shared `om-auto-review-pr` skill from [open-mercato/skills](https://github.com/open-mercato/skills) (installed at `.agents/skills/om-auto-review-pr/SKILL.md`). Follow the shared skill's full workflow — claim protocol, worktree isolation, review, verdict, labels, autofix loop, lock release — with the repo-specific rules below layered on top. The `om-code-review` step also picks up this repo's own extension at `.ai/skills/om-code-review/SKILL.md`.
 
 ## GitHub-checks-first validation (saves local resources)

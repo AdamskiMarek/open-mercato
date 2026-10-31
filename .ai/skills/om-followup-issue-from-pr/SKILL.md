@@ -5,6 +5,8 @@ description: Open Mercato repo-local extension of the shared `om-followup-issue-
 
 # Follow-up Issue From PR — Open Mercato extension
 
+> **Base required (fork; zmiana 2026-10-31 — źródło: Koordynator (proces, Z7) 2026-10-31).** This file only extends the shared `om-followup-issue-from-pr` skill. Before acting, read the base at `.agents/skills/om-followup-issue-from-pr/SKILL.md`, or at `.claude/skills/om-followup-issue-from-pr/SKILL.md`, where `yarn install-skills` puts external skills by default (`--agent claude-code`). If neither exists, run `yarn install-skills`; if the base is still missing, STOP and report `missing base skill om-followup-issue-from-pr` — never apply this override on its own. Check: `node .ai/cezar/check-skill-bases.mjs`.
+
 This file extends the shared `om-followup-issue-from-pr` skill from [open-mercato/skills](https://github.com/open-mercato/skills) (installed at `.agents/skills/om-followup-issue-from-pr/SKILL.md`). Follow the shared workflow with these repo specifics:
 
 ## Spec detection (design-doc mode)
