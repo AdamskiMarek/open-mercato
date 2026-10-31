@@ -4,7 +4,7 @@
 **Docelowa ścieżka w repo**: `.ai/specs/2026-10-23-project-delivery-docs-test-plan.md`
 **Data**: 2026-10-23
 **Autor**: Grok Bot (runner planu testów; specyfikacji modułu nie czytał); rev 4–7 — niezależna sesja testerska, wyłącznie na podstawie `.ai/decisions.md` (rev 4: commit 865714e, rev 5: b0e097f, rev 5a: a75dc9f, rev 6: 932fac6, rev 6a: 35b305a, rev 7: f81c58c, rev 7a: ea6a101, rev 8: 82c4ec3) i plików recenzji, bez dostępu do spek
-**Rewizja**: rev 8c (2026-10-31) — meta: data rev 8b poprawiona na faktyczną; poprzednio rev 8b (2026-10-31) — nity Cezara po r8: §27 wstęp bez „poza wnioskiem 34” (rozstrzygnięty), TC-PD-PRJ-012 P0 spójnie z TC-DEAL-017; poprzednio rev 8a (2026-10-23) — inputy Cezara do r8: PRJ-012 z asercją aktualizacji deala części (etap kodu, D32), podstawa = decisions @develop, TC-DEAL-016 z lookupem postępowanie + część; poprzednio rev 8 (2026-10-23) — rozstrzygnięcie D31 przez Marka (przetarg z częściami: deal i inwestycja na część, wspólny `tender_notice_number`; bez części: jeden deal), D132 bez warunku, D154 zastąpiona przez D132; TC-PD-PRJ-012 zwykły, TC-PD-PRJ-013 usunięty; poprzednio rev 7a (2026-10-23) — wpisy `project_role` przodka `restricted` w podfolderach `inherit` wg D169 (rejestr z commita ea6a101, PR #29); poprzednio rev 7 (2026-10-23) — dopasowanie do D166–D169 (rejestr z commita f81c58c, po merge #27): dolna granica retencji z polityki, rola `manager` bez `view`, `read` dla `projects.view_all` bez roli, dziedziczenie ACL pod folderem `restricted`; poprzednio rev 6a (2026-10-23) — poprawki odbioru PR #26 i dopasowanie do rejestru z commita 35b305a (po merge #25): dostęp U-A w TC-PD-PRJ-008, `Content-Length` w TC-PD-WRK-009, flaga tagu stagingu i status `degraded` w TC-PD-STOR-010; poprzednio rev 6 (2026-10-23) — dopasowanie do D159–D165 i zmienionych D121, D129, D144, D158 (rejestr z commita 932fac6): role projektu i prawa folderu, rola `manager`, automatyczne zdjęcie flagi deala, usuwanie folderu i projektu, niemutowalność rewizji, limit pliku, granty pracownika, klucze i staging z segmentem tenanta, lifecycle wariant (c); poprzednio rev 5a (2026-10-23) — limit paczki ZIP wg D158 (rejestr z commita a75dc9f, po merge #22): wartość domyślna, zmiana przez administratora, komunikat z dwiema drogami; poprzednio rev 5 (2026-10-23) — dopasowanie do D133–D157 (rejestr z commita b0e097f, po merge #19 i #21): kody błędów zamiast „albo”, macierz feature'ów, flaga ponownego otwarcia deala na projekcie, MIME z zawartości, rekoncyliacja wersji spoza aplikacji, limity ZIP, kody linków i akceptacji, wariant D154 (warunkowy); poprzednio rev 4a (2026-10-23) — poprawki odbioru rundy 3 (`STORAGE_NOT_CONFIGURED`, jednoznaczne kody, warunkowy TC-PD-QUOTA-009); poprzednio rev 4 (2026-10-23) — dopasowanie do D116–D132 (rejestr z commita 865714e, po merge #20): projekt bez oferty i podpięcie oferty, jeden projekt na deal i na inwestycję, limit miękki quota z alertami 80/100% i blokadą od 110%, oryginał ZIP jako dowód, strzeżona funkcja usuwania i purge po potwierdzeniu, wpis atomowy importu, worker checksum, progi pomiaru RAM, faza projektu w harmonogramie; postępowania z częściami — warunkowo; poprzednio rev 3 — rejestr z commita 4f83bd4: bufor tylko w RAM (partSize × queueSize), zero plików tymczasowych także w workerze, współbieżność 1 tylko dla kolejki modułu, dwa parametry presji RAM; PoC dostawcy domyślnego jako kryterium akceptacji etapu kodu z fallbackiem na B2; poprzednio rev 2 — rejestr finalny (akceptacje, worker, linki, dostawca storage, warianty, retencja)
+**Rewizja**: rev 9 (2026-10-31) — nowe TC dla D186 (statusy projektu i przejścia) i D188 w części projektu (usunięcie deala: `deal_reopened_at`, event `project_delivery.project.deal_reopened`), rejestr decisions @730b77d (PR #35, `docs/arch-gaps-d185`); poprzednio rev 8c (2026-10-31) — meta: data rev 8b poprawiona na faktyczną; poprzednio rev 8b (2026-10-31) — nity Cezara po r8: §27 wstęp bez „poza wnioskiem 34” (rozstrzygnięty), TC-PD-PRJ-012 P0 spójnie z TC-DEAL-017; poprzednio rev 8a (2026-10-23) — inputy Cezara do r8: PRJ-012 z asercją aktualizacji deala części (etap kodu, D32), podstawa = decisions @develop, TC-DEAL-016 z lookupem postępowanie + część; poprzednio rev 8 (2026-10-23) — rozstrzygnięcie D31 przez Marka (przetarg z częściami: deal i inwestycja na część, wspólny `tender_notice_number`; bez części: jeden deal), D132 bez warunku, D154 zastąpiona przez D132; TC-PD-PRJ-012 zwykły, TC-PD-PRJ-013 usunięty; poprzednio rev 7a (2026-10-23) — wpisy `project_role` przodka `restricted` w podfolderach `inherit` wg D169 (rejestr z commita ea6a101, PR #29); poprzednio rev 7 (2026-10-23) — dopasowanie do D166–D169 (rejestr z commita f81c58c, po merge #27): dolna granica retencji z polityki, rola `manager` bez `view`, `read` dla `projects.view_all` bez roli, dziedziczenie ACL pod folderem `restricted`; poprzednio rev 6a (2026-10-23) — poprawki odbioru PR #26 i dopasowanie do rejestru z commita 35b305a (po merge #25): dostęp U-A w TC-PD-PRJ-008, `Content-Length` w TC-PD-WRK-009, flaga tagu stagingu i status `degraded` w TC-PD-STOR-010; poprzednio rev 6 (2026-10-23) — dopasowanie do D159–D165 i zmienionych D121, D129, D144, D158 (rejestr z commita 932fac6): role projektu i prawa folderu, rola `manager`, automatyczne zdjęcie flagi deala, usuwanie folderu i projektu, niemutowalność rewizji, limit pliku, granty pracownika, klucze i staging z segmentem tenanta, lifecycle wariant (c); poprzednio rev 5a (2026-10-23) — limit paczki ZIP wg D158 (rejestr z commita a75dc9f, po merge #22): wartość domyślna, zmiana przez administratora, komunikat z dwiema drogami; poprzednio rev 5 (2026-10-23) — dopasowanie do D133–D157 (rejestr z commita b0e097f, po merge #19 i #21): kody błędów zamiast „albo”, macierz feature'ów, flaga ponownego otwarcia deala na projekcie, MIME z zawartości, rekoncyliacja wersji spoza aplikacji, limity ZIP, kody linków i akceptacji, wariant D154 (warunkowy); poprzednio rev 4a (2026-10-23) — poprawki odbioru rundy 3 (`STORAGE_NOT_CONFIGURED`, jednoznaczne kody, warunkowy TC-PD-QUOTA-009); poprzednio rev 4 (2026-10-23) — dopasowanie do D116–D132 (rejestr z commita 865714e, po merge #20): projekt bez oferty i podpięcie oferty, jeden projekt na deal i na inwestycję, limit miękki quota z alertami 80/100% i blokadą od 110%, oryginał ZIP jako dowód, strzeżona funkcja usuwania i purge po potwierdzeniu, wpis atomowy importu, worker checksum, progi pomiaru RAM, faza projektu w harmonogramie; postępowania z częściami — warunkowo; poprzednio rev 3 — rejestr z commita 4f83bd4: bufor tylko w RAM (partSize × queueSize), zero plików tymczasowych także w workerze, współbieżność 1 tylko dla kolejki modułu, dwa parametry presji RAM; PoC dostawcy domyślnego jako kryterium akceptacji etapu kodu z fallbackiem na B2; poprzednio rev 2 — rejestr finalny (akceptacje, worker, linki, dostawca storage, warianty, retencja)
 **Podstawa**: rejestr decyzji (`.ai/decisions.md` @develop (develop_OM_CRM po merge PR #30: nowa treść D31, D132 bez warunku, D154 zastąpiona przez D132; sekcja modułu `project_delivery` D98–D169 oraz decyzje kontekstowe)), research `om-project-docs-research.md`, `odoo-project-docs.md`, `om-overlap-audit.md`, dokumentacja Backblaze B2 S3-Compatible API (stan na X 2026; dotyczy dostawcy zapasowego). Numery decyzji występują w załączniku pokrycia, w changelogu oraz w adnotacjach scenariuszy warunkowych (od rev 8 brak scenariuszy warunkowych).
 **Dostawca storage**: „dostawca domyślny” = najtańszy w UE dostawca w pełni kompatybilny z `storage_s3` i multipartem (wg rejestru: OVHcloud Object Storage, region i klasa jako parametry wdrożenia); „dostawca zapasowy” = Backblaze B2 EU Central z adapterem bez `If-None-Match` (wyłącznie unikalne klucze). Scenariusze storage przechodzą dla obu; różnice opisane w scenariuszu.
 
@@ -14,7 +14,7 @@
 
 | Obszar | Liczba scenariuszy |
 |--------|-------------------|
-| Projekt z wygranego przetargu (TC-PD-PRJ) | 12 |
+| Projekt z wygranego przetargu (TC-PD-PRJ) | 14 |
 | Kamienie milowe (TC-PD-MS) | 4 |
 | Dokumenty i foldery (TC-PD-DOC) | 5 |
 | Rewizje dokumentów (TC-PD-REV) | 6 |
@@ -36,7 +36,7 @@
 | Ryzyka prawne — brak funkcji (TC-PD-LEGAL) | 1 |
 | Izolacja multi-tenant (TC-PD-TEN) | 3 |
 | Bezpieczeństwo plików (TC-PD-SEC) | 4 |
-| **Razem** | **123** (bez scenariuszy warunkowych) |
+| **Razem** | **125** (bez scenariuszy warunkowych) |
 
 ---
 
@@ -97,7 +97,7 @@ Zasady:
 - Asercje komunikatów UI na locale `pl`, klucze i18n z tłumaczeniem `en`.
 
 ---
-## 3. Scenariusze testowe: Projekt z wygranego przetargu (TC-PD-PRJ) — 12 TC
+## 3. Scenariusze testowe: Projekt z wygranego przetargu (TC-PD-PRJ) — 14 TC
 
 #### TC-PD-PRJ-001: Utworzenie projektu jawną komendą z wygranej oferty głównej
 
@@ -271,6 +271,43 @@ Zasady:
   - Krok 3: obie inwestycje na liście; numer nie bierze udziału w dopasowaniu; dokładnie dwie inwestycje i dwa deale — brak jednej wspólnej inwestycji i jednego wspólnego deala dla całego postępowania (kontrola negatywna zamiast dawnego wariantu warunkowego)
   - Krok 4 (v1): `source = 'bzp_notice_part'`, `value = 'N#1'` i `'N#2'`; brak identyfikatora `bzp_notice_number` z samym N; duplikat `(source, value)` odrzucony
   - Krok 5: zaktualizowany deal części 1 (nowa interakcja); deal, inwestycja i projekt części 2 nietknięte; `tender_notice_number` obu inwestycji bez zmian (N); brak nowego deala. Etap kodu (D32): do zmiany kontraktu push klucz bez zmian i krok nie jest wykonywany
+
+#### TC-PD-PRJ-014: Statusy projektu i dozwolone przejścia
+
+> Numer TC-PD-PRJ-013 nie jest używany ponownie (TC usunięty w rev 8).
+
+- **Priorytet**: P1 | **Etap**: MVP | **Poziom**: Integration + API + `pg`
+- **Warunki wstępne**: Projekty P1, P2, P3 utworzone komendą (TC-PD-PRJ-001); w P1: U-B z rolą `member` (bez feature'a `project_delivery.projects.manage`); U-A z feature'ami `project_delivery.projects.manage` i `project_delivery.projects.view_all` (bez członkostwa)
+- **Kroki**:
+  1. Odczytaj `pd_projects.status` nowo utworzonych P1–P3; `pg`: spróbuj zapisać w P3 `status = 'archived'` (wartość spoza listy)
+  2. U-A: P1 `active` → `on_hold` → `active`; P2 `active` → `on_hold`
+  3. U-A, komenda `projects.close`: P1 `active` → `completed`; P2 `on_hold` → `cancelled`; P3 `active` → `cancelled`
+  4. Przejścia spoza listy: P1 `completed` → `on_hold`; P2 `cancelled` → `completed`; P1 `completed` → `cancelled`
+  5. Powrót do `active`: U-B dla P1 (`completed`); U-A dla P1 (`completed`) i dla P2 (`cancelled`)
+  6. Odczytaj `audit_logs` P1 i P2
+- **Oczekiwane wyniki**:
+  - Krok 1: status `active` (domyślny); zapis `archived` odrzucony przez CHECK, rekord bez zmian
+  - Krok 2: przejścia `active` ⇄ `on_hold` przyjęte, status zgodny po każdym kroku
+  - Krok 3: P1 `completed`, P2 `cancelled`, P3 `cancelled`
+  - Krok 4: każde przejście odrzucone, status bez zmian (kod błędu — wniosek 49)
+  - Krok 5: U-B → 403, P1 zostaje `completed`; U-A → P1 i P2 `active`
+  - Krok 6: każdy powrót z `completed` albo `cancelled` do `active` w `audit_logs` z autorem (U-A); dane projektów bez zmian
+  - Soft delete projektu bez zmian (TC-PD-RET-010, D162); rola `manager` przy powrocie do `active` — bez asercji (wniosek 48)
+
+#### TC-PD-PRJ-015: Usunięcie deala z projektem — flaga `deal_reopened_at` bez kaskady
+
+- **Priorytet**: P1 | **Etap**: MVP | **Poziom**: Integration + API + `pg`
+- **Warunki wstępne**: Projekt P5 utworzony z wygranego deala D-G (etapy, zadania, kamienie, foldery, dokumenty); w P5 U-M z rolą `manager`; subskrybent eventów; push n8n dla postępowania deala D-G dostępny
+- **Kroki**:
+  1. Usuń deal D-G w UI OM (`customers.deal.deleted`)
+  2. Odczytaj P5 (API, `pg`): `deal_reopened_at`, `deal_id`, `deal_snapshot`, `status`, etapy, zadania, kamienie, foldery, dokumenty; odczytaj eventy
+  3. Wyślij kolejny push n8n dla postępowania deala D-G
+  4. U-M: `projects.reopen_flag_clear` dla P5 z powodem; odczytaj `audit_logs`
+- **Oczekiwane wyniki**:
+  - Krok 2: `deal_reopened_at` ustawione; event `project_delivery.project.deal_reopened` dla P5; projekt nie jest usunięty (bez kaskady, D134); `deal_id` i `deal_snapshot` bez zmian; status projektu bez zmian; etapy, zadania, kamienie, foldery i dokumenty bez zmian (asercja przez `pg`)
+  - Krok 3: deal nie jest odtwarzany (D35); P5 bez zmian
+  - Krok 4: flaga zdjęta, wpis w `audit_logs` z autorem U-M i powodem (D161)
+  - Przywrócenie usuniętego deala — bez asercji (wniosek 51)
 
 ---
 
@@ -1795,24 +1832,31 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka; jedyna d
 46. ~~**Wpisy `principal_type = project_role` przodka `restricted` w podfolderze `inherit`**~~ — ✅ **ROZSTRZYGNIĘTE (D169)**: wpisy `project_role` najbliższego przodka `restricted` działają dla podfolderów `inherit` (np. `viewer` = `read` → viewer ma `read`); nie poszerzają tylko role bez wpisu i `view_all`. Scenariusz: TC-PD-ACL-002 krok 5.
 
 ---
+### Luki rev 9 (D186, D188 — reguł brak w rejestrze @730b77d; nie zgadywano)
+
+47. **Komendy przejść statusu projektu** (TC-PD-PRJ-014) — D186 nazywa tylko `projects.close`; nie nazywa komendy przejść `active` ⇄ `on_hold` ani powrotu z `completed`/`cancelled` do `active` i nie podaje uprawnienia dla `active` ⇄ `on_hold`. TC wykonuje je użytkownikiem z RBAC `projects.manage`.
+48. **Rola `manager` a powrót do `active`** (TC-PD-PRJ-014) — D186 wymaga `project_delivery.projects.manage`; D160 daje roli `manager` zakres `projects.manage` w swoim projekcie, ale powrotu nie wymienia. TC bez asercji dla roli `manager`.
+49. **Kod błędu przejścia spoza D186** (TC-PD-PRJ-014 krok 4) — np. `completed` → `on_hold`; TC sprawdza tylko odrzucenie i status bez zmian.
+50. **Historia innych przejść i archiwum v2** — D186 wpisuje do `audit_logs` tylko powrót do `active`; czy `on_hold` i `projects.close` też trafiają do historii, nie wiadomo. Relacja statusu do archiwizacji v2 (TC-PD-RET-006, „projekt tylko do odczytu”) nieokreślona.
+51. **Przywrócenie usuniętego deala** (TC-PD-PRJ-015) — D161 zdejmuje `deal_reopened_at` automatycznie tylko przy `won`; zachowanie flagi po przywróceniu (undo) usuniętego deala nie jest w rejestrze.
 
 ## 28. Podsumowanie
 
 **Dokument**: Niezależny plan testów — spec only
-**Liczba scenariuszy**: 123 (MVP 101, v1 15, v2 7; etap liczony z pierwszej fazy scenariusza — TC-PD-STOR-007 obejmuje MVP, v1 i v2); bez scenariuszy warunkowych
-**Liczba wniosków do speki**: 46 (rozstrzygnięte: 1–11, 13–46; otwarte: 12, 17)
+**Liczba scenariuszy**: 125 (MVP 103, v1 15, v2 7; etap liczony z pierwszej fazy scenariusza — TC-PD-STOR-007 obejmuje MVP, v1 i v2); bez scenariuszy warunkowych
+**Liczba wniosków do speki**: 51 (rozstrzygnięte: 1–11, 13–46; otwarte: 12, 17, 47–51)
 **Status**: SPEC ONLY — bez kodu, bez testów wykonywalnych
 
 **Kolejne kroki**:
 1. Na etapie kodu: PoC dostawcy domyślnego na buckecie wersjonowanym (kryterium akceptacji, fallback B2) i pomiar RAM z progami z TC-PD-PERF-003
 2. Etap kodu: kontrakt push n8n z kluczem postępowanie + część (D32) — warunek kroku 3 TC-PD-PRJ-011
-3. Odpowiedzi na wnioski 12 i 17 z §27
+3. Odpowiedzi na wnioski 12, 17 i 47–51 z §27
 
 ---
 
 ## Załącznik: Traceability D → TC (macierz decyzji)
 
-Źródło: `.ai/decisions.md` @develop (develop_OM_CRM po merge PR #30), sekcja modułu D98–D169: 72 decyzje, 70 aktywnych (D99 zastąpiona przez D116; D154 zastąpiona przez D132). Każda aktywna decyzja ma co najmniej jeden TC. Fazy w kolumnie TC wynikają z pola „Etap” scenariuszy.
+Źródło: `.ai/decisions.md` @develop (develop_OM_CRM po merge PR #30), a dla D186 i D188 — decisions @730b77d (PR #35, `docs/arch-gaps-d185`); sekcja modułu D98–D169: 72 decyzje, 70 aktywnych (D99 zastąpiona przez D116; D154 zastąpiona przez D132). Każda aktywna decyzja ma co najmniej jeden TC. Fazy w kolumnie TC wynikają z pola „Etap” scenariuszy.
 
 | D | Treść skrócona | TC | Uwagi |
 |---|---|---|---|
@@ -1888,6 +1932,8 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka; jedyna d
 | **D167** | Rola `manager` nie zastępuje `view` (bez niego brak dostępu → 403); daje tylko zakres `projects.manage` w swoim projekcie i `manage` w folderach `inherit` (z zastrzeżeniem D169); żadnych innych feature'ów ani grantów `pd_folder_acl` | TC-PD-ACL-007, TC-PD-ACL-002 | MVP; wniosek 42 rozstrzygnięty |
 | **D168** | `projects.view_all` bez roli: `read` w folderach `inherit` bez przodka `restricted`; z przodkiem `restricted` — D169; `write`/`manage` tylko z roli albo grantu ACL; brak feature'a → 403 | TC-PD-ACL-001, TC-PD-ACL-002 | MVP; wniosek 44 rozstrzygnięty |
 | **D169** | Folder `inherit` dziedziczy po rodzicu: najwyższy poziom — projekt (mapowanie ról D159); z przodkiem `restricted` — wpisy `pd_folder_acl` najbliższego przodka `restricted`, w tym wpisy `principal_type = project_role` (np. `viewer` = `read` → viewer ma `read`); role bez wpisu i `view_all` nie poszerzają | TC-PD-ACL-002, TC-PD-ACL-007, TC-PD-ACL-001 | MVP; wnioski 45, 46 rozstrzygnięte |
+| **D186** | Statusy projektu `active` (domyślny), `on_hold`, `completed`, `cancelled` (CHECK); `active` ⇄ `on_hold`; do `completed`/`cancelled` komendą `projects.close`; powrót do `active` z `projects.manage`, w `audit_logs` z autorem; soft delete bez zmian (D162) | TC-PD-PRJ-014 | MVP; rejestr @730b77d; wnioski 47–50 |
+| **D188** | Usunięcie deala z projektem: bez kaskady (D134), `deal_reopened_at` i event `project_delivery.project.deal_reopened` (wzorzec D141); dane projektu zostają; n8n deala nie odtwarza (D35); część harmonogramu — plan costing (TC-EXEC-006) | TC-PD-PRJ-015 | MVP (projekt); rejestr @730b77d; wniosek 51 |
 
 **Decyzje kontekstowe (wcześniejsze, aktywne) użyte w scenariuszach:**
 
@@ -1908,6 +1954,14 @@ Pytania techniczne do runnera speki i review (Kod/Cezar), nie do Marka; jedyna d
 ---
 
 ## Changelog
+
+### Rev 9 — 2026-10-31 (D186, D188; rejestr @730b77d, PR #35)
+
+- Niezależna sesja planu (P4): jedyne źródło — `.ai/decisions.md` @730b77d; bez speki i bez briefów
+- Nowe TC: TC-PD-PRJ-014 (D186, P1 — statusy i przejścia projektu), TC-PD-PRJ-015 (D188 część projektu, P1 — usunięcie deala, flaga i event bez kaskady); numer TC-PD-PRJ-013 nie jest używany ponownie
+- §27: nowe luki 47–51; §28; załącznik — wiersze D186, D188
+- Istniejące TC bez zmian (żadna z D186, D188 ich nie unieważnia; TC-PD-ACL-007 krok 3 i TC-PD-RET-010 zgodne z D186)
+- Liczba scenariuszy: 123 → 125 (PRJ 12 → 14)
 
 ### Rev 8c — 2026-10-31 (meta, wykonawca)
 
