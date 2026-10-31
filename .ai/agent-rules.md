@@ -1,6 +1,6 @@
 # Zasady dla agentów (Klin #1)
 
-**Status:** 2026-10-31 (P17; Z4, Z9, Z11 ze źródłem P19–P21, Z8 zgodny z „Zasadą” rejestru; Z13 — praca w ClickUp, P22; brzmienie Z13 zmienione 2026-10-31 — Cezar). Minimum kontekstu: tylko zakazy z alternatywą i pułapki, które już się zdarzyły. Bez map repo i opisów systemu — te są w spekach, w `.ai/architecture.md` i w rejestrze `.ai/decisions.md` (jedyne źródło decyzji, P12).
+**Status:** 2026-10-31 (P17; Z4, Z9, Z11 ze źródłem P19–P21, Z8 zgodny z „Zasadą” rejestru; Z13 — praca w ClickUp, P22; brzmienie Z13 zmienione 2026-10-31 — Cezar; role w Z13 (kto buduje, kto kontroluje) — Marek 2026-10-31 (via Koordynator), P23). Minimum kontekstu: tylko zakazy z alternatywą i pułapki, które już się zdarzyły. Bez map repo i opisów systemu — te są w spekach, w `.ai/architecture.md` i w rejestrze `.ai/decisions.md` (jedyne źródło decyzji, P12).
 
 ## Zakazy i co robić zamiast
 
@@ -18,7 +18,7 @@
 | Z10 | Nie traktuj briefu jak speki. | Brief to cel i zakres; zachowanie, model i kody błędów bierz ze speki i z D. | P14 |
 | Z11 | Wykonawca nie zmienia treści TC w planach testów (kroki, asercje). | Drobne zmiany meta w planach (nagłówki, changelog, daty, odesłania) może zrobić wykonawca, z wpisem w changelogu; zmianę treści TC zgłoś jako zadanie dla niezależnej sesji planu. | P21 (P4) |
 | Z12 | Nie zamykaj zadania bez werdyktu Weryfikatora. | Przekaż Weryfikatorowi TC zadania i środowisko testowe; zamknij dopiero po werdykcie „spełnione” (przepływ: `.ai/process/workflow.md`). | P18 |
-| Z13 | Nie zaczynaj budowy story, które nie przeszło przez „gotowe do budowy” (dalej: „w budowie”, także po niespełnionych TC). Speki, plany testów i PR doc-only nie wymagają story. | Weź story z „gotowe do budowy” (po „implementujemy” i PASS bramki), podlinkuj PR w story, zostaw ocenę Weryfikatorowi; przepływ i statusy: `.ai/process/workflow.md`, „Praca w ClickUp”. | P22 |
+| Z13 | Budujący (Cezar albo jego agent kodujący, P23): nie zaczynaj budowy story, które nie przeszło przez „gotowe do budowy” (dalej: „w budowie”, także po niespełnionych TC). Speki, plany testów i PR doc-only nie wymagają story. | Weź story z „gotowe do budowy” (po „implementujemy” i PASS bramki), podlinkuj PR w story, zostaw ocenę Weryfikatorowi; przepływ i statusy: `.ai/process/workflow.md`, „Praca w ClickUp”. Kod nie buduje story, które sam weryfikuje — uruchamia osobne sesje planu TC, spec-checku, review i bramki gotowości. | P22, P23 (Marek 2026-10-31 (via Koordynator)) |
 
 ## Pułapki, które już się zdarzyły
 
