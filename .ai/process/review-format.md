@@ -1,6 +1,6 @@
 # Format review
 
-**Status:** obowiązuje od 2026-10-31 (P15). Źródło: Marek 2026-10-31 (przez Koordynatora).
+**Status:** obowiązuje od 2026-10-31 (P15). Źródło: Marek 2026-10-31 (przez Koordynatora). Zmiana 2026-10-31: „Werdykt review” (PASS / FAIL) — Koordynator 2026-10-31 (proces, Z7; review #39); FAIL w raporcie Kod blokuje merge (P23 (2)).
 
 Dotyczy każdego review speki, planu testów, briefu, rejestru i (po „implementujemy”) kodu. Recenzent to osobna sesja tylko do odczytu; autor sprawdza każde ustalenie, zanim je przyjmie.
 
@@ -13,6 +13,14 @@ Dotyczy każdego review speki, planu testów, briefu, rejestru i (po „implemen
 | **Do decyzji człowieka** | Rozstrzygnięcie biznesowe albo produktowe (P1): zakres, zachowanie widoczne dla klienta, cennik, prawo. | **Marek, wyłącznie przez Koordynatora.** Recenzent, Cezar i Kod nie piszą do Marka bezpośrednio. |
 
 Ustalenia odrzucone (fałszywy alarm, sprzeczne z D) idą na osobną listę „Odrzucone” z jednym zdaniem powodu.
+
+## Werdykt review (zmiana 2026-10-31)
+
+- Każdy raport review kończy się werdyktem **PASS** albo **FAIL**.
+- **FAIL**: grupa „Do poprawy” nie jest pusta — nawet jedno ustalenie o wadze drobnej daje FAIL. FAIL w raporcie Kod blokuje merge, dopóki autor (Cezar) go nie poprawi (P23 (2)).
+- **PASS**: grupa „Do poprawy” jest pusta. „Na później” nie wpływa na werdykt.
+- „Do decyzji człowieka” nie daje FAIL, ale blokuje dany punkt (bez zmiany w nim i bez merge tej części), dopóki Marek nie odpowie przez Koordynatora (P1).
+- Bramka gotowości (`readiness-gate.md`, „Werdykty”: PASS / CONCERNS / FAIL, P13) to osobna skala — tej reguły do niej nie stosujemy.
 
 ## Pole każdego ustalenia
 
@@ -38,6 +46,7 @@ Ustalenia odrzucone (fałszywy alarm, sprzeczne z D) idą na osobną listę „O
 
 **Recenzent:** <sesja, tylko do odczytu> · **Data:** <RRRR-MM-DD>
 **Podsumowanie:** do poprawy N (krytyczne N, ważne N), na później N, do decyzji człowieka N, odrzucone N
+**Werdykt: PASS / FAIL** (FAIL, gdy „Do poprawy” niepuste; „Do decyzji człowieka” — punkt czeka na Marka przez Koordynatora)
 
 ## Do poprawy
 | ID | Waga | Miejsce | Dowód | Propozycja |

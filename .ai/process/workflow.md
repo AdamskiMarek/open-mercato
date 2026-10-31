@@ -5,12 +5,12 @@
 ## Role (P23)
 
 - **Cezar** — orkiestrator na własnym VPS (`open-mercato/cezar`): dobiera model, skille i agentów kodujących zgodnie z założeniami projektu; planuje, tnie na story i buduje (sam albo przez swojego agenta kodującego). Jest jedynym autorem zmian w repo: speki, plany testów, decyzje i kod (przez swoich agentów kodujących); commituje, otwiera PR i merguje PR doc-only (zmiana 2026-10-31).
-- **Kod** — niezależny obserwator wobec Cezara: uruchamia osobne sesje do planu TC (P4, jako kontrola), spec-checku, review w 3 grupach (P15) i bramki gotowości (P13), a ich wynik przekazuje w raporcie Cezarowi. Nie commituje, nie otwiera PR i nie edytuje plików w repo; nie buduje story, które sam weryfikuje. Werdykt FAIL w raporcie Kod blokuje merge, dopóki Cezar go nie poprawi (zmiana 2026-10-31).
+- **Kod** — niezależny obserwator wobec Cezara: uruchamia osobne sesje do planu TC (P4: niezależna, czyta wyłącznie `.ai/decisions.md`), spec-checku, review w 3 grupach (P15) i bramki gotowości (P13), a ich wynik przekazuje w raporcie Cezarowi. Nie commituje, nie otwiera PR i nie edytuje plików w repo; nie buduje story, które sam weryfikuje. Werdykt FAIL w raporcie Kod blokuje merge, dopóki Cezar go nie poprawi; kiedy review daje FAIL — `review-format.md`, „Werdykt review” (zmiana 2026-10-31).
 - **Weryfikator** — QA na środowisku testowym po merge (P18).
 
 Spory rozstrzyga Koordynator; pytania biznesowe idą do Marka przez Koordynatora (P1, P15).
 
-Plan TC (P4): pisze niezależna sesja wyłącznie z rejestru `.ai/decisions.md`. Kod może ją uruchomić jako kontrolę i przekazać wynik; Cezar commituje go bez zmiany treści TC jako wynik tej sesji — sam robi tylko zmiany meta (P21).
+Plan TC (P4, P23 (5)): sesję planu — niezależną, czytającą wyłącznie `.ai/decisions.md` — uruchamia Kod; Cezar commituje jej wynik bez zmiany treści TC, sam robi tylko zmiany meta (P21).
 
 Źródło: Marek 2026-10-31 (via Koordynator) (zmiana 2026-10-31; Kod jako obserwator — zmiana 2026-10-31).
 
@@ -18,13 +18,13 @@ Plan TC (P4): pisze niezależna sesja wyłącznie z rejestru `.ai/decisions.md`.
 
 ```mermaid
 flowchart TD
-    spec["Speka + plan testów — commit: Cezar<br/>(plan: niezależna sesja z rejestru, P4)"] --> sc{"spec-check bez flag<br/>@head: PASS? (raport Kod → Cezar)"}
+    spec["Speka + plan testów — commit: Cezar<br/>(plan: niezależna sesja z rejestru,<br/>uruchamia Kod, P4)"] --> sc{"spec-check bez flag<br/>@head: PASS? (raport Kod → Cezar)"}
     sc -- "nie" --> spec
     sc -- "tak" --> gate{"Bramka gotowości (P13)<br/>raport Kod → Cezar"}
     gate -- "CONCERNS / FAIL" --> spec
     gate -- "PASS" --> impl["„implementujemy” — Marek (P3)"]
     impl --> code["Implementacja: Cezar albo jego agent kodujący (P2)<br/>review: raport Kod → Cezar (P15)"]
-    code --> fail{"FAIL w raporcie Kod?"}
+    code --> fail{"FAIL w raporcie Kod?<br/>(review-format.md)"}
     fail -- "tak: poprawka Cezara" --> code
     fail -- "nie" --> merge{"kod: „merguj” od Marka (P5)<br/>doc-only: stała zgoda Marka"}
     merge -- "tak" --> m["Merge"]
@@ -35,12 +35,12 @@ flowchart TD
 
 | # | Krok | Kto | Wejście | Wyjście |
 |---|---|---|---|---|
-| 1 | Speka i plan testów | Cezar (speka; commit obu plików); plan: niezależna sesja innym modelem, z rejestru D, bez czytania speki — Kod może ją uruchomić jako kontrolę i przekazać wynik, Cezar commituje go bez zmiany treści TC (P4, P21; zmiana 2026-10-31) | speka: `.ai/decisions.md` + brief (P14); plan: wyłącznie `.ai/decisions.md`, bez speki i briefów (P4) | speka + plan testów w PR doc-only |
+| 1 | Speka i plan testów | Cezar (speka; commit obu plików); plan: niezależna sesja innym modelem, wyłącznie z rejestru D, bez czytania speki — uruchamia ją Kod, Cezar commituje jej wynik bez zmiany treści TC (P4, P21, P23 (5); zmiana 2026-10-31) | speka: `.ai/decisions.md` + brief (P14); plan: wyłącznie `.ai/decisions.md`, bez speki i briefów (P4) | speka + plan testów w PR doc-only |
 | 2 | spec-check | Kod (osobna sesja; raport do Cezara) | pliki z repo przy SHA heada (`git show`) | raport: PASS, 0 FAIL bez flag |
 | 3 | Bramka gotowości | osobna sesja tylko do odczytu, uruchomiona przez Kod; raport do Cezara | speka, plan, rejestr, brief, `architecture.md` | PASS / CONCERNS / FAIL (P13) |
 | 4 | „implementujemy” | Marek, przez Koordynatora | werdykt bramki PASS | zgoda na kod (P3) |
 | 5 | Implementacja (kod) i review | kod: Cezar albo jego agent kodujący (P2); review: osobna sesja uruchomiona przez Kod, w 3 grupach (P15), raport do Cezara; poprawki commituje Cezar | speka, TC | PR z kodem i testami (autor: Cezar) |
-| 6 | Merge | Cezar (zmiana 2026-10-31, P23 (6)): PR doc-only — po review Kod bez FAIL, w ramach stałej zgody Marka; PR z kodem — dopiero po „merguj” Marka (P5) | PR po review (krok 5), bez FAIL w raporcie Kod | merge do `develop_OM_CRM` w forku (P6) |
+| 6 | Merge | Cezar (zmiana 2026-10-31, P23 (6)): PR doc-only — po review Kod bez FAIL, w ramach stałej zgody Marka; PR z kodem — Cezar, wyłącznie po „merguj” Marka (P5) | PR po review (krok 5), bez FAIL w raporcie Kod (`review-format.md`, „Werdykt review”) | merge do `develop_OM_CRM` w forku (P6) |
 | 7 | Weryfikacja na TC | Weryfikator (QA) | TC zadania + środowisko testowe (instancja testowa open-mercato.pl, P7) ze zmergowanym kodem | werdykt per TC: spełnione / niespełnione, z dowodem |
 | 8 | Zamknięcie zadania (zrobione) | Koordynator | merge (krok 6) i werdykt Weryfikatora „spełnione” (krok 7) | zadanie zamknięte, story „zrobione” (P22) |
 
@@ -48,7 +48,7 @@ Kolejność kroków 6–8 (zmiana 2026-10-31, spójnie z P22): merge → werdykt
 
 Warunki kolejności (P18, zmiana 2026-10-31; źródło: Marek 2026-10-31 (via Koordynator)):
 
-1. Merge kodu do `develop_OM_CRM` nadal tylko po „merguj” od Marka (P5). Wdrożenie na produkcję dopiero po PASS Weryfikatora dla wszystkich story z danej paczki. PR doc-only merguje Cezar po review Kod bez FAIL, w ramach stałej zgody Marka (P23 (6), zmiana 2026-10-31).
+1. Merge kodu do `develop_OM_CRM` nadal tylko po „merguj” od Marka (P5). Wdrożenie na produkcję dopiero po PASS Weryfikatora dla wszystkich story z danej paczki. PR doc-only merguje Cezar po review Kod bez FAIL, w ramach stałej zgody Marka; PR z kodem merguje Cezar po „merguj”; wdrożenie na produkcję tylko za zgodą Marka — wykonuje je Dawid (Dokploy) albo Mirek, nie Cezar (P23 (6), zmiana 2026-10-31).
 2. Przy FAIL poprawka albo revert idzie kolejnym PR i nic z tej zmiany nie trafia na produkcję.
 
 ## Weryfikator (QA)
